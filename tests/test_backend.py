@@ -30,6 +30,7 @@ from backend.models import AuditEvent, Base, User, Organization
 from backend.database import engine, SessionLocal, now_iso
 from backend.auth import get_password_hash
 from backend.app import app, get_db
+from backend.xlsx_io import read_workbook
 
 # ── Create all tables in test DB ──────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
@@ -623,6 +624,15 @@ def test_attachment_invalid_pdf_signature(client, auth_headers):
     assert res.status_code == 400
 
 
+def test_attachment_unknown_extension_rejected(client, auth_headers):
+    res = client.post(
+        "/api/declarations/1/attachments?filename=payload.exe",
+        headers=auth_headers,
+        content=b"MZ",
+    )
+    assert res.status_code == 415
+
+
 def test_attachment_size_rejection(client, auth_headers):
     decl_id = _make_draft(client, auth_headers)
     oversized = b"%PDF-1.4 " + b"x" * (12 * 1024 * 1024 + 1)
@@ -632,6 +642,25 @@ def test_attachment_size_rejection(client, auth_headers):
         headers={**auth_headers, "content-type": "application/pdf"},
     )
     assert res.status_code == 413
+
+
+def test_xlsx_rejects_external_relationship_and_zip_bomb_shape():
+    external = io.BytesIO()
+    with zipfile.ZipFile(external, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("xl/workbook.xml", "<workbook/>")
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            '<Relationships><Relationship TargetMode="External" Target="https://example.test"/></Relationships>',
+        )
+    with pytest.raises(ValueError, match="external relationship"):
+        read_workbook(external.getvalue())
+
+    bomb = io.BytesIO()
+    with zipfile.ZipFile(bomb, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", "x" * (9 * 1024 * 1024))
+    with pytest.raises(ValueError):
+        read_workbook(bomb.getvalue())
 
 
 # ══════════════════════════════════════════════════════════════════════════════

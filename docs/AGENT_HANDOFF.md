@@ -213,3 +213,25 @@ Issued work orders:
 
 T3 — Files, Imports and Reports is now eligible for R2 BUILD approval. T4/T5
 remain gated by their preceding work orders; T6 remains externally blocked.
+
+---
+
+## Tranche: T3 Files, Imports and Reports (WO-KBCV-T3-20260711)
+
+- **Status**: IN_PROGRESS
+- **Phase**: BUILD
+- **Risk Level**: R2
+
+### Work started
+
+- Added fail-closed XLSX archive/XML limits: size, entry count, compression
+  ratio, encrypted/path traversal entries, DTD/entity, external relationships,
+  shared strings and cells.
+- Attachment validation now rejects unsupported extensions before storage.
+- Added regression fixtures for external relationship and compressed-bomb shapes.
+
+### Open Gate 3 work
+
+- Import preview, mapping/template version and idempotency evidence.
+- Attachment quarantine/scanner adapter and production storage boundary.
+- Golden-file report mapping review and large-export job boundary.

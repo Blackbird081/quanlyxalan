@@ -98,14 +98,18 @@ MAGIC_BYTES: dict[str, bytes] = {
     ".docx": b"PK\x03\x04",
     ".webp": b"RIFF",
 }
+ALLOWED_ATTACHMENT_EXTENSIONS = frozenset(MAGIC_BYTES)
 MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024  # 12 MB
 
 
 def validate_attachment_content(extension: str, content: bytes) -> None:
+    extension = extension.lower()
+    if extension not in ALLOWED_ATTACHMENT_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Phần mở rộng file không được hỗ trợ.")
     if len(content) > MAX_ATTACHMENT_BYTES:
         raise HTTPException(status_code=413, detail="File vượt quá giới hạn 12 MB.")
-    expected = MAGIC_BYTES.get(extension.lower())
-    if expected and not content.startswith(expected):
+    expected = MAGIC_BYTES[extension]
+    if not content.startswith(expected):
         raise HTTPException(
             status_code=400,
             detail=f"File không đúng định dạng {extension} (magic bytes không khớp).",

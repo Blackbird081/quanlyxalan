@@ -11,6 +11,46 @@ from xml.etree import ElementTree as ET
 
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 REL_NS = {"r": "http://schemas.openxmlformats.org/package/2006/relationships"}
+MAX_XLSX_ARCHIVE_ENTRIES = 256
+MAX_XLSX_COMPRESSED_BYTES = 12 * 1024 * 1024
+MAX_XLSX_UNCOMPRESSED_BYTES = 48 * 1024 * 1024
+MAX_XLSX_COMPRESSION_RATIO = 100
+MAX_XLSX_XML_PART_BYTES = 8 * 1024 * 1024
+MAX_XLSX_SHARED_STRINGS = 50_000
+MAX_XLSX_CELLS = 100_000
+
+
+def _safe_xml(content: bytes, label: str) -> ET.Element:
+    if len(content) > MAX_XLSX_XML_PART_BYTES:
+        raise ValueError(f"Phần XML {label} vượt quá giới hạn kích thước.")
+    if b"<!DOCTYPE" in content.upper() or b"<!ENTITY" in content.upper():
+        raise ValueError(f"Phần XML {label} không được chứa DTD hoặc external entity.")
+    try:
+        return ET.fromstring(content)
+    except ET.ParseError as exc:
+        raise ValueError(f"XML {label} không hợp lệ.") from exc
+
+
+def _validate_archive(archive: zipfile.ZipFile) -> None:
+    entries = archive.infolist()
+    if not entries or len(entries) > MAX_XLSX_ARCHIVE_ENTRIES:
+        raise ValueError("Workbook có số lượng entry ZIP không hợp lệ.")
+    compressed = sum(info.compress_size for info in entries)
+    uncompressed = sum(info.file_size for info in entries)
+    if compressed > MAX_XLSX_COMPRESSED_BYTES or uncompressed > MAX_XLSX_UNCOMPRESSED_BYTES:
+        raise ValueError("Workbook vượt quá giới hạn kích thước.")
+    for info in entries:
+        name = info.filename.replace("\\", "/")
+        if name.startswith("/") or ".." in name.split("/") or info.flag_bits & 0x1:
+            raise ValueError("Workbook có ZIP entry không an toàn hoặc được mã hóa.")
+        if info.compress_size and info.file_size / info.compress_size > MAX_XLSX_COMPRESSION_RATIO:
+            raise ValueError("Workbook có tỷ lệ nén không an toàn.")
+        if not info.compress_size and info.file_size > MAX_XLSX_XML_PART_BYTES:
+            raise ValueError("Workbook có ZIP entry không nén vượt giới hạn.")
+        if name.endswith(".rels"):
+            rels = archive.read(info)
+            if b'TargetMode="External"' in rels or b"TargetMode='External'" in rels:
+                raise ValueError("Workbook không được chứa external relationship.")
 
 
 def _col_index(ref: str) -> int:
@@ -22,31 +62,51 @@ def _col_index(ref: str) -> int:
 
 
 def read_workbook(content: bytes) -> dict[str, dict[str, Any]]:
-    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+    if not content.startswith(b"PK\x03\x04"):
+        raise ValueError("File không phải XLSX ZIP hợp lệ.")
+    try:
+        archive_context = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("File XLSX không hợp lệ.") from exc
+    with archive_context as archive:
+        _validate_archive(archive)
+        names = set(archive.namelist())
+        required = {"[Content_Types].xml", "xl/workbook.xml", "xl/_rels/workbook.xml.rels"}
+        if not required.issubset(names):
+            raise ValueError("Workbook thiếu cấu trúc XLSX bắt buộc.")
         shared: list[str] = []
         if "xl/sharedStrings.xml" in archive.namelist():
-            root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+            root = _safe_xml(archive.read("xl/sharedStrings.xml"), "sharedStrings")
             for item in root.findall("m:si", NS):
                 shared.append("".join(node.text or "" for node in item.iter() if node.tag.endswith("}t")))
+                if len(shared) > MAX_XLSX_SHARED_STRINGS:
+                    raise ValueError("Workbook có quá nhiều shared strings.")
 
-        workbook = ET.fromstring(archive.read("xl/workbook.xml"))
-        rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        workbook = _safe_xml(archive.read("xl/workbook.xml"), "workbook")
+        rels = _safe_xml(archive.read("xl/_rels/workbook.xml.rels"), "workbook relationships")
         rel_map = {node.attrib["Id"]: node.attrib["Target"] for node in rels}
         sheets: dict[str, dict[str, Any]] = {}
         for sheet in workbook.find("m:sheets", NS) or []:
             rel_id = sheet.attrib["{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"]
             target = rel_map[rel_id].lstrip("/")
             path = target if target.startswith("xl/") else f"xl/{target}"
-            root = ET.fromstring(archive.read(path))
+            if path not in names:
+                raise ValueError("Workbook tham chiếu worksheet không tồn tại.")
+            root = _safe_xml(archive.read(path), path)
             cells: dict[str, Any] = {}
             for cell in root.findall(".//m:c", NS):
+                if len(cells) >= MAX_XLSX_CELLS:
+                    raise ValueError("Worksheet có quá nhiều ô dữ liệu.")
                 ref = cell.attrib.get("r", "")
                 kind = cell.attrib.get("t")
                 value_node = cell.find("m:v", NS)
                 inline = cell.find("m:is", NS)
                 raw = value_node.text if value_node is not None else None
                 if kind == "s" and raw is not None:
-                    value: Any = shared[int(raw)]
+                    index = int(raw)
+                    if index < 0 or index >= len(shared):
+                        raise ValueError("Workbook có shared string index không hợp lệ.")
+                    value: Any = shared[index]
                 elif kind == "inlineStr" and inline is not None:
                     value = "".join(node.text or "" for node in inline.iter() if node.tag.endswith("}t"))
                 elif kind == "b":
