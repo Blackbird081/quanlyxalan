@@ -189,6 +189,10 @@ class Attachment(Base):
     stored_name = Column(String, nullable=False, unique=True)
     content_type = Column(String, nullable=False)
     size_bytes = Column(Integer, nullable=False)
+    checksum_sha256 = Column(String, nullable=False, default="")
+    scan_status = Column(String, nullable=False, default="QUARANTINED")
+    storage_backend = Column(String, nullable=False, default="LOCAL_QUARANTINE")
+    scanned_at = Column(String)
     created_at = Column(String, nullable=False, default=now_iso)
     declaration = relationship("Declaration", back_populates="attachments")
 

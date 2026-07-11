@@ -614,6 +614,9 @@ def test_attachment_valid_pdf(client, auth_headers):
     )
     assert res.status_code == 200
     assert res.json()["original_name"] == "test.pdf"
+    assert res.json()["scan_status"] == "QUARANTINED"
+    assert res.json()["storage_backend"] == "LOCAL_QUARANTINE"
+    assert res.json()["checksum_sha256"]
 
 
 def test_attachment_invalid_pdf_signature(client, auth_headers):

@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from .auth import create_access_token, get_current_user, get_password_hash, verify_password
 from .integrations import maritime_authority_adapter, registry_adapter
 from .rbac import require_roles, verify_organization_ownership
+from .storage import LocalQuarantineStorage, ScannerNotConfigured
 from .database import DB_PATH, SessionLocal, audit, cargo, correlation_id, now_iso
 from .models import (
     Attachment, AuditEvent, Base, CrewMember, Declaration,
@@ -41,6 +42,8 @@ IMPORT_MAPPING_VERSION = "KBCV-IMPORT-1.0"
 ROOT = Path(__file__).resolve().parents[1]
 ATTACHMENT_DIR = ROOT / "data" / "attachments"
 ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
+attachment_storage = LocalQuarantineStorage(ATTACHMENT_DIR / "quarantine")
+attachment_scanner = ScannerNotConfigured()
 
 # ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Khai-bao-Cang-vu API", version="1.0.0")
@@ -1134,16 +1137,19 @@ async def upload_attachment(
     validate_attachment_content(ext, content)
 
     safe_name = f"{declaration_id}_{uuid.uuid4().hex}{ext}"
-    dest = ATTACHMENT_DIR / safe_name
-    dest.write_bytes(content)
+    stored_name = attachment_storage.put_quarantined(safe_name, content)
+    scan_status = attachment_scanner.scan(stored_name)
 
     content_type = request.headers.get("content-type", "application/octet-stream")
     att = Attachment(
         declaration_id=declaration_id,
         original_name=filename[:255],
-        stored_name=safe_name,
+        stored_name=stored_name,
         content_type=content_type,
         size_bytes=len(content),
+        checksum_sha256=hashlib.sha256(content).hexdigest(),
+        scan_status=scan_status,
+        storage_backend=attachment_storage.backend_name,
         created_at=now_iso(),
     )
     db.add(att)
