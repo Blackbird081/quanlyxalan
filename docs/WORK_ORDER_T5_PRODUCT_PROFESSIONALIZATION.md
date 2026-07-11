@@ -3,7 +3,7 @@
 ## Control block
 
 - Work order: `WO-KBCV-T5-20260711`
-- Status: PLANNED — starts only after Gate 4
+- Status: IN PROGRESS — local/pilot scope started after T4 LOCAL_GATE_PASS
 - Depends on: T4 CLOSED
 - Risk: R1, elevated to R2 if authorization/workflow semantics change
 - Priority: P2
@@ -61,3 +61,14 @@ and explicit scope approval.
 Include research protocol/results, before/after task metrics, accessibility and
 performance reports, responsive matrix, ADR decision, residual issues and final
 commit/Doctor evidence.
+
+## Local checkpoint — 2026-07-11
+
+- ADR-003 retains modular Vanilla JavaScript for the pilot; no framework
+  migration is authorized or required.
+- Added a keyboard skip link, route focus target, visible focus styling,
+  screen-reader status announcements and an explicit dashboard busy state.
+- Static frontend assertions cover the new semantic hooks.
+- Local automated evidence: `63 passed`; `git diff --check` PASS.
+- Open before Gate 5: representative-user protocol/results, browser-assisted
+  WCAG audit, responsive matrix and measured performance budget.

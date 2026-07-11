@@ -189,6 +189,9 @@ def test_static_frontend(client):
     res = client.get("/")
     assert res.status_code == 200
     assert "text/html" in res.headers.get("content-type", "")
+    assert 'class="skip-link"' in res.text
+    assert 'id="main-content" tabindex="-1" aria-busy="false"' in res.text
+    assert 'id="toast-region" class="toast-region" role="status"' in res.text
 
 
 # ══════════════════════════════════════════════════════════════════════════════

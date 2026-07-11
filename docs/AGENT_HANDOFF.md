@@ -287,3 +287,26 @@ until hosting/domain/staging owners are assigned.
 
 T5 product professionalization may begin in local scope. T6 remains manual
 adapter-ready; external activation remains blocked.
+
+---
+
+## Tranche: T5 Product Professionalization
+
+- **Status**: IN PROGRESS — local accessibility/architecture baseline
+- **Phase**: BUILD
+- **Risk Level**: R1 (escalate to R2 for role or workflow semantic changes)
+
+### Local checkpoint
+
+- Recorded `docs/ADR-003-FRONTEND-ARCHITECTURE.md`: retain modular Vanilla JS
+  for the pilot; a framework migration needs a separately approved plan.
+- Added keyboard skip navigation, route focus management, visible focus,
+  screen-reader status regions and dashboard `aria-busy` feedback.
+- Static frontend assertions cover these accessibility hooks.
+- Tests: `63 passed, 0 failed`; `git diff --check`: PASS.
+
+### Open Gate 5 evidence
+
+Representative-user task study, browser-assisted accessibility audit,
+responsive viewport matrix and reference-dataset performance measurements are
+not yet available. Gate 5 is not closed.

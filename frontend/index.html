@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Bỏ qua điều hướng, đến nội dung chính</a>
   <div class="app-shell">
     <aside class="sidebar" aria-label="Điều hướng chính">
       <a class="brand" href="#dashboard" aria-label="Về tổng quan TIEN-TAN THUAN PORT">
@@ -40,7 +41,7 @@
     <div class="main-column">
       <header class="topbar">
         <button id="menu-toggle" class="icon-button mobile-only" aria-label="Mở menu">☰</button>
-        <div><span class="eyebrow">CỔNG THÔNG TIN KHÁCH HÀNG</span><strong id="page-context">Tổng quan khai báo</strong></div>
+        <div><span class="eyebrow">CỔNG THÔNG TIN KHÁCH HÀNG</span><strong id="page-context" role="status" aria-live="polite">Tổng quan khai báo</strong></div>
         <div class="topbar-actions">
           <span id="user-display" style="font-size: 0.85rem; color: var(--text-muted); margin-right: 12px;"></span>
           <button id="logout-button" class="ghost-button" style="display: none; margin-right: 12px;">Đăng xuất</button>
@@ -48,7 +49,7 @@
         </div>
       </header>
 
-      <main id="main-content">
+      <main id="main-content" tabindex="-1" aria-busy="false">
         <section class="page active" data-page="dashboard">
           <div class="page-heading"><div><p class="eyebrow">TÌNH HÌNH HÔM NAY</p><h1>Bàn điều phối khai báo</h1><p>Trạng thái hồ sơ phương tiện và các lượt tàu dự kiến.</p></div><button class="primary-button" data-action="new-declaration">+ Khai báo lượt mới</button></div>
           <section class="dashboard-search panel"><label class="search"><span>⌕</span><input id="dashboard-vessel-search" placeholder="Lọc nhanh theo số hiệu tàu hoặc số sà lan"></label><span class="muted">Nhập ít nhất 2 ký tự</span></section>
@@ -131,7 +132,7 @@
     </form>
   </dialog>
 
-  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="/app.js" defer></script>
 </body>
 </html>

@@ -155,3 +155,10 @@ html[data-theme="light"] .theme-btn .moon-icon {
 .stat-card:hover, .search-result-card:hover {
   transform: translateY(-2px);
 }
+
+/* T5 accessibility baseline: keyboard path and explicit asynchronous state. */
+.skip-link { position: fixed; top: 10px; left: 10px; z-index: 1000; padding: 10px 14px; transform: translateY(-160%); border-radius: 8px; background: var(--cvf-accent); color: #fff; font-weight: 700; text-decoration: none; }
+.skip-link:focus { transform: translateY(0); }
+:focus-visible { outline: 3px solid var(--cvf-accent); outline-offset: 3px; }
+main[aria-busy="true"] { cursor: progress; }
+main[aria-busy="true"] .page.active { opacity: .72; }

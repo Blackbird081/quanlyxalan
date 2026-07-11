@@ -61,6 +61,7 @@ function route() {
   $$('nav a').forEach(link => link.classList.toggle('active', link.dataset.route === name));
   $('#page-context').textContent = pageName(name);
   $('.sidebar').classList.remove('open');
+  requestAnimationFrame(() => $('#main-content').focus({ preventScroll: true }));
   if (name === 'dashboard') loadDashboard();
   if (name === 'vessels') loadVessels();
   if (name === 'declarations') loadDeclarations();
@@ -69,6 +70,7 @@ function route() {
 }
 
 async function loadDashboard(query = '') {
+  $('#main-content').setAttribute('aria-busy', 'true');
   try {
     const data = await api(`/api/dashboard${query ? `?q=${encodeURIComponent(query)}` : ''}`);
     const cards = [
@@ -97,6 +99,7 @@ async function loadDashboard(query = '') {
     $('#recent-table').innerHTML = declarationTable(data.recent);
     renderDashboardMatches(data.matches || []);
   } catch (error) { toast(error.message, true); }
+  finally { $('#main-content').setAttribute('aria-busy', 'false'); }
 }
 
 function renderDashboardMatches(items) {
