@@ -212,6 +212,8 @@ def test_static_frontend(client):
     assert "function setSubmitting(" in app_js
     assert "function bindLoginForm()" in app_js
     assert "bindLoginForm();" in app_js
+    assert "Tiến trình duyệt" in app_js
+    assert "CV = Cảng vụ viên" in app_js
     assert "node.setAttribute('role', error ? 'alert' : 'status')" in app_js
 
 
