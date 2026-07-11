@@ -2,7 +2,7 @@
 
 ## Tranche: T0 Baseline Recovery (WO-KBCV-T0-20260711)
 
-- **Status**: IN_PROGRESS — Gate 0 PASSED (awaiting human review + commit authorization)
+- **Status**: CLOSED — Gate 0 PASSED and committed
 - **Date**: 2026-07-11
 - **Phase**: BUILD
 - **Risk Level**: R2
@@ -24,6 +24,15 @@
 32 passed, 0 failed — 4.64s
 Python 3.13.12 | pytest 8.2.0
 ```
+
+Closure commit: `6c8917d` (`feat: restore FastAPI baseline and API contract`)
+
+Final reviewer evidence:
+
+- Tests: 32 passed, 0 failed.
+- `git diff --check`: PASS.
+- CVF Workspace Doctor: PASS 17/17.
+- Runtime database and attachments: not committed.
 
 Test categories covered:
 - health + static frontend
@@ -69,7 +78,7 @@ Test categories covered:
 
 ### Next governed move
 
-**T1 — Identity, RBAC and tenant isolation** (R2, human approval required):
+**T1 — Identity, RBAC and tenant isolation** (R2, human BUILD approval required):
 1. Define role matrix: CUSTOMER, CV, QLC, BP, ADMIN
 2. Bind user to organization; scope all customer queries
 3. Remove JWT default secret; add fail-fast for non-local environments
@@ -77,7 +86,10 @@ Test categories covered:
 5. CORS allowlist per environment
 6. Rate limit login, password policy, audit login events
 
-### Human review items before T0 CLOSE
+Work order issued: `docs/WORK_ORDER_T1_IDENTITY_RBAC_TENANT_ISOLATION.md`
+(`WO-KBCV-T1-20260711`, READY FOR ASSIGNMENT).
+
+### Human review closure record
 
 1. ✅ Tests: `32 passed, 0 failed`
 2. ✅ Gate 0: health, frontend, critical workflow PASS (verified by test suite)
@@ -85,6 +97,6 @@ Test categories covered:
 4. ✅ Test database isolated from `data/cang_vu.db`
 5. ✅ No hard-coded production secret added
 6. ✅ `data/` directory untouched
-7. ⏳ `git diff --check`: 1 pre-existing whitespace issue in `frontend/app.js` (not T0 work)
-8. ⏳ Human owner authorize commit? (See Work Order delivery report requirement)
-9. ⏳ CVF doctor re-run at handoff (run: `check_cvf_workspace_agent_enforcement.ps1 -ProjectPath <project>`)
+7. ✅ `git diff --check`: PASS after reviewer cleanup
+8. ✅ Human owner authorized commit
+9. ✅ CVF doctor re-run at handoff: PASS 17/17
