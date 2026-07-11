@@ -81,6 +81,7 @@ async function loadDashboard(query = '') {
       ['CẢNH BÁO CHỨNG CHỈ', data.stats.certificateWarnings, 'Hết hạn hoặc còn dưới 30 ngày'],
     ];
     $('#stats').innerHTML = cards.map(card => `<article class="stat-card"><p>${card[0]}</p><strong>${card[1]}</strong><small>${card[2]}</small></article>`).join('');
+    renderAttentionQueue(data.attention);
     if (state.currentUser?.role === 'ADMIN') {
       const admin = await api('/api/admin/operations-summary');
       const adminCards = [
@@ -100,6 +101,19 @@ async function loadDashboard(query = '') {
     renderDashboardMatches(data.matches || []);
   } catch (error) { toast(error.message, true); }
   finally { $('#main-content').setAttribute('aria-busy', 'false'); }
+}
+
+function renderAttentionQueue(queue) {
+  const panel = $('#attention-queue');
+  if (!queue?.count) { panel.hidden = true; return; }
+  panel.hidden = false;
+  $('#attention-title').textContent = `${queue.label} (${queue.count})`;
+  $('#attention-content').innerHTML = queue.items.map(item => `<article><div><strong>${esc(item.reference_no)}</strong><small>${esc(item.vessel_name)} · ${workflowLabel(item.workflow_status)}</small></div><span>${item.age_hours === null ? 'Chưa rõ thời gian' : `${item.age_hours} giờ`}</span></article>`).join('');
+  $('#attention-open-list').onclick = () => {
+    $('#workflow-filter').value = queue.items[0]?.workflow_status || '';
+    location.hash = 'declarations';
+    applyDeclarationFilters();
+  };
 }
 
 function renderDashboardMatches(items) {

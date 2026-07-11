@@ -306,7 +306,9 @@ adapter-ready; external activation remains blocked.
 - Added compatible opt-in pagination for declarations: scope-safe filters,
   bound 1–100 page sizes, allowlisted ordering and URL-preserved filter/page
   state in the UI.
-- Tests: `64 passed, 0 failed`; `git diff --check`: PASS.
+- Added a server-calculated, role-scoped attention queue to the dashboard;
+  it displays only statuses visible to that role and never grants an action.
+- Tests: `65 passed, 0 failed`; `git diff --check`: PASS.
 
 ### Open Gate 5 evidence
 

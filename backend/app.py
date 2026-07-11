@@ -592,6 +592,41 @@ def _get_or_create_org(db: Session, name: Optional[str]) -> Optional[Organizatio
     return org
 
 
+def _attention_queue(db: Session, user: User) -> dict[str, Any]:
+    """Return only the actionable/observable queue for the authenticated role."""
+    role_rules = {
+        "CUSTOMER": (["DRAFT", "CHANGES_REQUESTED"], "Phiếu cần khách hàng hoàn tất hoặc bổ sung"),
+        "CV": (["PENDING_REVIEW"], "Phiếu chờ chuyên viên kiểm tra"),
+        "QLC": (["PENDING_QLC"], "Phiếu chờ quản lý chất lượng phê duyệt"),
+        "BP": (["PENDING_BP"], "Phiếu chờ bộ phận phát hành phê duyệt"),
+        "ADMIN": (["PENDING_REVIEW", "PENDING_QLC", "PENDING_BP"], "Theo dõi các phiếu đang chờ xử lý"),
+    }
+    statuses, label = role_rules.get(user.role, ([], ""))
+    if not statuses:
+        return {"label": label, "count": 0, "items": []}
+    query = db.query(Declaration).filter(Declaration.workflow_status.in_(statuses))
+    if user.role == "CUSTOMER":
+        query = query.filter(Declaration.organization_id == user.organization_id)
+    declarations = query.order_by(Declaration.updated_at.asc(), Declaration.id.asc()).limit(5).all()
+    now = datetime.now().astimezone()
+    items = []
+    for declaration in declarations:
+        try:
+            updated = datetime.fromisoformat(declaration.updated_at)
+            age_hours = max(0, int((now - updated).total_seconds() // 3600))
+        except (TypeError, ValueError):
+            age_hours = None
+        items.append({
+            "id": declaration.id,
+            "reference_no": declaration.reference_no,
+            "vessel_name": declaration.vessel_name,
+            "workflow_status": declaration.workflow_status,
+            "updated_at": declaration.updated_at,
+            "age_hours": age_hours,
+        })
+    return {"label": label, "count": query.count(), "items": items}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
@@ -669,6 +704,7 @@ def get_dashboard(
         },
         "recent": recent,
         "matches": matches,
+        "attention": _attention_queue(db, user),
     }
 
 

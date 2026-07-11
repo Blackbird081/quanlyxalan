@@ -49,6 +49,9 @@ This system implements four roles with distinct scopes of operations.
 | GET | `/api/dashboard?q=` | Any | query `q` (optional) | `{stats, recent, matches}` |
 
 *   **Tenant Constraint**: If `CUSTOMER`, stats and matches are strictly filtered to the user's `organization_id`. Others see global stats.
+*   **Attention Queue**: `attention` is a role-scoped dashboard hint, containing
+    only visible statuses and up to five oldest items. It does not grant an
+    action; workflow authorization remains enforced by the API.
 
 ### VESSELS
 

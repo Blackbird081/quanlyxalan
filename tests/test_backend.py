@@ -185,6 +185,17 @@ def test_admin_operations_summary(client, auth_headers, customer_headers):
     assert client.get("/api/admin/operations-summary", headers=customer_headers).status_code == 403
 
 
+def test_dashboard_attention_queue_is_role_scoped(client, customer_headers, cv_headers):
+    customer = client.get("/api/dashboard", headers=customer_headers)
+    assert customer.status_code == 200
+    assert customer.json()["attention"]["label"]
+    assert all(item["workflow_status"] in {"DRAFT", "CHANGES_REQUESTED"} for item in customer.json()["attention"]["items"])
+
+    reviewer = client.get("/api/dashboard", headers=cv_headers)
+    assert reviewer.status_code == 200
+    assert all(item["workflow_status"] == "PENDING_REVIEW" for item in reviewer.json()["attention"]["items"])
+
+
 def test_static_frontend(client):
     res = client.get("/")
     assert res.status_code == 200
