@@ -178,6 +178,13 @@ def test_readiness(client):
     assert res.json()["status"] == "ready"
 
 
+def test_admin_operations_summary(client, auth_headers, customer_headers):
+    admin = client.get("/api/admin/operations-summary", headers=auth_headers)
+    assert admin.status_code == 200
+    assert {"operations", "fleet", "imports", "storage", "security"}.issubset(admin.json())
+    assert client.get("/api/admin/operations-summary", headers=customer_headers).status_code == 403
+
+
 def test_static_frontend(client):
     res = client.get("/")
     assert res.status_code == 200
@@ -745,6 +752,7 @@ def test_all_frontend_routes_registered():
         "/api/auth/login",
         "/api/health",
         "/api/ready",
+        "/api/admin/operations-summary",
         "/api/catalogs",
         "/api/dashboard",
         "/api/organizations",

@@ -548,6 +548,39 @@ def get_organizations(db: Session = Depends(get_db), user: User = Depends(requir
     ]
 
 
+@app.get("/api/admin/operations-summary")
+def admin_operations_summary(
+    db: Session = Depends(get_db), user: User = Depends(require_roles("ADMIN")),
+):
+    today = date.today()
+    year_start = date(today.year, 1, 1).isoformat()
+    declaration_query = db.query(Declaration).filter(Declaration.declaration_date >= year_start)
+    declarations = declaration_query.all()
+    approved = [item for item in declarations if item.workflow_status in {"APPROVED", "ISSUED"}]
+    pending = [item for item in declarations if item.workflow_status.startswith("PENDING_")]
+    tons = teu = 0.0
+    for item in approved:
+        for cargo_item in (json.loads(item.unload_json or "{}"), json.loads(item.load_json or "{}")):
+            tons += float(cargo_item.get("tons") or 0)
+            teu += float(cargo_item.get("teu") or 0)
+
+    expiring = sum(
+        1 for vessel in db.query(Vessel).all()
+        if certificate_status(vessel.certificate_expiry_date) in {"EXPIRING", "EXPIRED"}
+    )
+    backup_dir = ROOT / "data" / "backups"
+    backups = list(backup_dir.glob("*.db")) if backup_dir.exists() else []
+    latest_backup = max(backups, key=lambda item: item.stat().st_mtime).name if backups else None
+    return {
+        "period": {"from": year_start, "to": today.isoformat()},
+        "operations": {"declarations": len(declarations), "approved": len(approved), "pending": len(pending), "tons": tons, "teu": teu},
+        "fleet": {"vessels": db.query(Vessel).count(), "certificateWarnings": expiring},
+        "imports": {"jobs": db.query(ImportJob).count(), "rejectedRows": db.query(func.coalesce(func.sum(ImportJob.rejected_count), 0)).scalar()},
+        "storage": {"attachments": db.query(Attachment).count(), "backups": len(backups), "latestBackup": latest_backup},
+        "security": {"failedLogins": db.query(AuditEvent).filter(AuditEvent.action.like("LOGIN_FAILURE%")).count(), "disabledUsers": db.query(User).filter(User.is_active == 0).count()},
+    }
+
+
 def _get_or_create_org(db: Session, name: Optional[str]) -> Optional[Organization]:
     if not name:
         return None

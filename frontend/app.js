@@ -79,6 +79,21 @@ async function loadDashboard(query = '') {
       ['CẢNH BÁO CHỨNG CHỈ', data.stats.certificateWarnings, 'Hết hạn hoặc còn dưới 30 ngày'],
     ];
     $('#stats').innerHTML = cards.map(card => `<article class="stat-card"><p>${card[0]}</p><strong>${card[1]}</strong><small>${card[2]}</small></article>`).join('');
+    if (state.currentUser?.role === 'ADMIN') {
+      const admin = await api('/api/admin/operations-summary');
+      const adminCards = [
+        ['PHIẾU ĐÃ DUYỆT', admin.operations.approved, `${admin.operations.tons.toLocaleString('vi-VN')} tấn · ${admin.operations.teu.toLocaleString('vi-VN')} TEU`],
+        ['CHỜ XỬ LÝ', admin.operations.pending, 'Theo các bước CV · QLC · BP'],
+        ['CẢNH BÁO CHỨNG CHỈ', admin.fleet.certificateWarnings, `${admin.fleet.vessels} phương tiện`],
+        ['IMPORT', admin.imports.jobs, `${admin.imports.rejectedRows} dòng bị từ chối`],
+        ['BACKUP', admin.storage.backups, admin.storage.latestBackup || 'Chưa có backup'],
+        ['AN NINH', admin.security.failedLogins, `${admin.security.disabledUsers} tài khoản bị khóa`],
+      ];
+      $('#admin-operations').hidden = false;
+      $('#admin-operations-content').innerHTML = adminCards.map(card => `<article class="stat-card"><p>${card[0]}</p><strong>${card[1]}</strong><small>${esc(card[2])}</small></article>`).join('');
+    } else {
+      $('#admin-operations').hidden = true;
+    }
     $('#recent-table').innerHTML = declarationTable(data.recent);
     renderDashboardMatches(data.matches || []);
   } catch (error) { toast(error.message, true); }
