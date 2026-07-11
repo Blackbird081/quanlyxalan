@@ -3,7 +3,7 @@
 ## Control block
 
 - Work order: `WO-KBCV-T6-20260711`
-- Status: BLOCKED ON EXTERNAL AUTHORITY — do not start BUILD
+- Status: ADAPTER SCAFFOLD ALLOWED — activation remains externally blocked
 - Depends on: T5 CLOSED plus official external prerequisites
 - Risk: R2 minimum; R3 if production transmission or sensitive-data expansion
 - Priority: P2
@@ -22,6 +22,10 @@ All items require named owners and written approval:
 - Test identities/data permitted in the sandbox.
 
 Without these prerequisites, retain `PREPARED` preview-only behavior.
+
+Manual-first adapter scaffolding may be built before these prerequisites. It
+must make no network calls and must not block core workflows. See
+`docs/EXTERNAL_ADAPTER_SPEC.md`.
 
 ## Objective
 

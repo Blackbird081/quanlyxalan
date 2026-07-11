@@ -332,8 +332,10 @@ def test_vessel_verify_registry(client, auth_headers):
     vid = res.json()["id"]
     res2 = client.post(f"/api/vessels/{vid}/verify-registry", headers=auth_headers)
     assert res2.status_code == 200
-    assert res2.json()["registry_verification_status"] == "VERIFIED"
+    assert res2.json()["registry_verification_status"] == "VERIFIED_LOCAL"
     assert res2.json()["registry_verification_source"] == "local"
+    assert res2.json()["adapter"]["mode"] == "MANUAL"
+    assert res2.json()["adapter"]["networkCallsAllowed"] is False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -747,6 +749,8 @@ def test_integration_status(client, auth_headers):
     data = res.json()
     assert "connector" in data
     assert "jobs" in data
+    assert data["adapter"]["mode"] == "MANUAL"
+    assert data["adapter"]["networkCallsAllowed"] is False
     assert "readyToSend" in data["connector"]
 
 

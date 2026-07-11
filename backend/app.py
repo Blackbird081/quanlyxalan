@@ -25,6 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import create_access_token, get_current_user, get_password_hash, verify_password
+from .integrations import maritime_authority_adapter, registry_adapter
 from .rbac import require_roles, verify_organization_ownership
 from .database import DB_PATH, SessionLocal, audit, cargo, correlation_id, now_iso
 from .models import (
@@ -707,13 +708,16 @@ def verify_vessel_registry(
     # Tenant isolation check
     verify_organization_ownership(user, vessel.organization_id)
 
-    vessel.registry_verification_status = "VERIFIED"
+    adapter_status = registry_adapter().status()
+    vessel.registry_verification_status = "VERIFIED_LOCAL"
     vessel.registry_verified_at = now_iso()
     vessel.registry_verification_source = "local"
     vessel.updated_at = now_iso()
     db.commit()
     db.refresh(vessel)
-    return _vessel_dict(vessel)
+    result = _vessel_dict(vessel)
+    result["adapter"] = adapter_status
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1424,6 +1428,7 @@ def get_integration_status(
     connector_dict["readyToSend"] = connector.status == "READY"
     return {
         "connector": connector_dict,
+        "adapter": maritime_authority_adapter().status(),
         "jobs": [
             {c.name: getattr(j, c.name) for c in j.__table__.columns}
             for j in jobs
