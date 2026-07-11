@@ -207,6 +207,7 @@ def test_static_frontend(client):
     assert 'id="certificate-reminder"' in res.text
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
+    assert 'class="panel action-panel"' not in res.text
     app_js = client.get("/app.js").text
     assert "function setSubmitting(" in app_js
     assert "function bindLoginForm()" in app_js
