@@ -1,70 +1,95 @@
+"""
+Khai-bao-Cang-vu FastAPI backend — T0 Baseline Recovery
+WO-KBCV-T0-20260711
+
+Entry point: python -m uvicorn backend.app:app --host 127.0.0.1 --port 8080
+"""
 from __future__ import annotations
 
-import argparse
 import json
-import mimetypes
-import re
-import sys
+import os
 import uuid
 from datetime import date, datetime
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
-from urllib.parse import parse_qs, urlparse
+from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+from fastapi import (
+    Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, status
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, field_validator, model_validator
+from sqlalchemy import desc, func, or_
+from sqlalchemy.orm import Session
 
-from database import audit, cargo, connection, decode_declaration, init_db, now_iso, rows_to_dicts
-from xlsx_io import declaration_row, excel_date, make_xlsx, read_workbook, vessel_rows
+from .auth import create_access_token, get_current_user, get_password_hash, verify_password
+from .database import DB_PATH, SessionLocal, audit, cargo, engine, now_iso
+from .models import (
+    Attachment, AuditEvent, Base, CrewMember, Declaration,
+    DeclarationCrew, DeclarationEvent, IntegrationConnector, Organization,
+    SyncJob, User, Vessel,
+)
+from .xlsx_io import declaration_row, make_xlsx, read_workbook, vessel_rows, excel_date
 
+# ── Database init ──────────────────────────────────────────────────────────────
+Base.metadata.create_all(bind=engine)
 
 ROOT = Path(__file__).resolve().parents[1]
-FRONTEND = ROOT / "frontend"
-UPLOAD_ROOT = ROOT / "data" / "uploads"
-MAX_BODY = 12 * 1024 * 1024
-ALLOWED_ATTACHMENT_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf", ".doc", ".docx", ".xls", ".xlsx"}
+ATTACHMENT_DIR = ROOT / "data" / "attachments"
+ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
 
-VESSEL_TYPES = ["Tàu hàng khô", "Tàu container", "Tàu hàng lỏng/dầu", "Tàu khách", "Tàu kéo/đẩy", "Sà lan tự hành", "Sà lan", "Khác"]
-VESSEL_CLASSES = ["VR-SI", "VR-SII", "VR-SIII", "Khác"]
-SHELL_MATERIALS = ["Thép", "Gỗ", "Composite/GRP", "Xi măng lưới thép", "Nhôm", "Khác"]
-CARGO_TYPES = ["Container", "Hàng khô", "Hàng lỏng"]
-UNLOAD_MOVEMENTS = ["Nội địa", "Nhập khẩu", "Chuyển tải", "Quá cảnh có bốc dỡ", "Quá cảnh không bốc dỡ"]
-LOAD_MOVEMENTS = ["Nội địa", "Xuất khẩu"]
+# ── App ────────────────────────────────────────────────────────────────────────
+app = FastAPI(title="Khai-bao-Cang-vu API", version="1.0.0")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class ApiError(Exception):
-    def __init__(self, status: int, message: str, fields: dict[str, str] | None = None):
-        super().__init__(message)
-        self.status = status
-        self.message = message
-        self.fields = fields or {}
-
-
-def as_number(value: Any, integer: bool = False) -> int | float | None:
-    if value in (None, ""):
-        return None
+# ── DB dependency ──────────────────────────────────────────────────────────────
+def get_db():
+    db = SessionLocal()
     try:
-        return int(float(value)) if integer else float(value)
-    except (TypeError, ValueError):
-        return None
+        yield db
+    finally:
+        db.close()
+
+# ── Attachment signature rules ─────────────────────────────────────────────────
+MAGIC_BYTES: dict[str, bytes] = {
+    ".pdf": b"%PDF",
+    ".jpg": b"\xff\xd8\xff",
+    ".jpeg": b"\xff\xd8\xff",
+    ".png": b"\x89PNG",
+    ".xlsx": b"PK\x03\x04",
+    ".xls": b"\xd0\xcf",
+    ".doc": b"\xd0\xcf",
+    ".docx": b"PK\x03\x04",
+    ".webp": b"RIFF",
+}
+MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024  # 12 MB
 
 
-def clean_date(value: Any) -> str | None:
-    value = excel_date(value)
-    if value in (None, ""):
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat(timespec="minutes")
-    return str(value)
+def validate_attachment_content(extension: str, content: bytes) -> None:
+    if len(content) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="File vượt quá giới hạn 12 MB.")
+    expected = MAGIC_BYTES.get(extension.lower())
+    if expected and not content.startswith(expected):
+        raise HTTPException(
+            status_code=400,
+            detail=f"File không đúng định dạng {extension} (magic bytes không khớp).",
+        )
 
 
-def certificate_status(value: Any, warning_days: int = 30) -> str:
-    text = clean_date(value)
-    if not text:
+# ── Certificate helper ─────────────────────────────────────────────────────────
+def certificate_status(value: Optional[str], warning_days: int = 30) -> str:
+    if not value:
         return "UNKNOWN"
     try:
-        expiry = date.fromisoformat(text[:10])
+        expiry = date.fromisoformat(value[:10])
     except ValueError:
         return "UNKNOWN"
     remaining = (expiry - date.today()).days
@@ -75,664 +100,996 @@ def certificate_status(value: Any, warning_days: int = 30) -> str:
     return "VALID"
 
 
-def validate_attachment_content(extension: str, content: bytes) -> None:
-    signatures = {
-        ".pdf": lambda data: data.startswith(b"%PDF"),
-        ".jpg": lambda data: data.startswith(b"\xff\xd8\xff"),
-        ".jpeg": lambda data: data.startswith(b"\xff\xd8\xff"),
-        ".png": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
-        ".webp": lambda data: data.startswith(b"RIFF") and data[8:12] == b"WEBP",
-        ".docx": lambda data: data.startswith(b"PK"),
-        ".xlsx": lambda data: data.startswith(b"PK"),
-        ".doc": lambda data: data.startswith(b"\xd0\xcf\x11\xe0"),
-        ".xls": lambda data: data.startswith(b"\xd0\xcf\x11\xe0"),
-    }
-    if not signatures[extension](content):
-        raise ApiError(415, "Nội dung file không khớp với phần mở rộng.")
-
-
-def enrich_vessel(item: dict[str, Any]) -> dict[str, Any]:
-    item["certificate_status"] = certificate_status(item.get("certificate_expiry_date"))
-    return item
-
-
-def enrich_declaration(db: Any, row: Any) -> dict[str, Any]:
-    item = decode_declaration(row)
-    item["certificate_status"] = certificate_status(item.get("certificate_expiry_date"))
-    item["crew"] = rows_to_dicts(db.execute(
-        "SELECT cm.*,dc.crew_role_snapshot,dc.certificate_no_snapshot,dc.certificate_expiry_snapshot "
-        "FROM declaration_crew dc JOIN crew_members cm ON cm.id=dc.crew_member_id WHERE dc.declaration_id=? ORDER BY cm.crew_role,cm.full_name",
-        (item["id"],),
-    ))
-    item["attachments"] = rows_to_dicts(db.execute(
-        "SELECT id,original_name,content_type,size_bytes,created_at FROM attachments WHERE declaration_id=? ORDER BY created_at",
-        (item["id"],),
-    ))
-    return item
-
-
-def validate_required(payload: dict[str, Any], names: list[str]) -> None:
-    missing = {name: "Bắt buộc nhập" for name in names if not str(payload.get(name) or "").strip()}
-    if missing:
-        raise ApiError(422, "Vui lòng hoàn tất các trường bắt buộc.", missing)
-
-
-def upsert_organization(db: Any, payload: dict[str, Any]) -> int:
-    name = str(payload.get("name") or payload.get("company_name") or "").strip()
-    if not name:
-        raise ApiError(422, "Tên doanh nghiệp là bắt buộc.", {"name": "Bắt buộc nhập"})
-    row = db.execute("SELECT id FROM organizations WHERE name = ?", (name,)).fetchone()
-    values = (
-        str(payload.get("tax_code") or ""), str(payload.get("address") or ""),
-        str(payload.get("contact_name") or ""), str(payload.get("contact_role") or ""),
-        str(payload.get("phone") or ""), str(payload.get("email") or ""), now_iso(),
-    )
-    if row:
-        db.execute(
-            "UPDATE organizations SET tax_code=?,address=?,contact_name=?,contact_role=?,phone=?,email=?,updated_at=? WHERE id=?",
-            (*values, row["id"]),
-        )
-        return int(row["id"])
-    cursor = db.execute(
-        "INSERT INTO organizations(name,tax_code,address,contact_name,contact_role,phone,email,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        (name, *values[:-1], values[-1], values[-1]),
-    )
-    return int(cursor.lastrowid)
-
-
-def save_vessel(db: Any, payload: dict[str, Any], imported: bool = False) -> dict[str, Any]:
-    validate_required(payload, ["name", "registration_no", "vessel_type", "vessel_class"])
-    organization_id = payload.get("organization_id")
-    if not organization_id and payload.get("organization"):
-        organization_id = upsert_organization(db, payload["organization"])
-    columns = [
-        "organization_id", "name", "registration_no", "registry_or_imo", "vessel_type", "vessel_class",
-        "shell_material", "build_year", "length_m", "width_m", "side_height_m", "draft_m",
-        "deadweight_tons", "gross_tonnage", "engine_power_cv", "cargo_capacity_tons",
-        "container_capacity_teu", "passenger_capacity", "min_crew", "safety_certificate_no",
-        "certificate_issue_date", "certificate_expiry_date", "notes",
-    ]
-    integer_fields = {"build_year", "passenger_capacity", "min_crew"}
-    numeric_fields = integer_fields | {"length_m", "width_m", "side_height_m", "draft_m", "deadweight_tons", "gross_tonnage", "engine_power_cv", "cargo_capacity_tons", "container_capacity_teu"}
-    normalized = dict(payload)
-    normalized["organization_id"] = as_number(organization_id, True)
-    for key in numeric_fields:
-        normalized[key] = as_number(payload.get(key), key in integer_fields)
-    for key in ("certificate_issue_date", "certificate_expiry_date"):
-        normalized[key] = clean_date(payload.get(key))
-    for key in columns:
-        if key not in normalized:
-            normalized[key] = "" if key not in numeric_fields and key != "organization_id" else None
-    existing = db.execute("SELECT id FROM vessels WHERE registration_no = ?", (normalized["registration_no"],)).fetchone()
-    stamp = now_iso()
-    if existing:
-        assignments = ",".join(f"{name}=?" for name in columns)
-        db.execute(f"UPDATE vessels SET {assignments},updated_at=? WHERE id=?", (*[normalized[name] for name in columns], stamp, existing["id"]))
-        vessel_id = int(existing["id"])
-        action = "IMPORT_UPDATE" if imported else "UPDATE"
-    else:
-        placeholders = ",".join("?" for _ in columns)
-        cursor = db.execute(
-            f"INSERT INTO vessels({','.join(columns)},created_at,updated_at) VALUES({placeholders},?,?)",
-            (*[normalized[name] for name in columns], stamp, stamp),
-        )
-        vessel_id = int(cursor.lastrowid)
-        action = "IMPORT_CREATE" if imported else "CREATE"
-    audit(db, "VESSEL", vessel_id, action, f"{normalized['name']} / {normalized['registration_no']}")
-    return dict(db.execute("SELECT * FROM vessels WHERE id=?", (vessel_id,)).fetchone())
-
-
-def declaration_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    validate_required(payload, ["company_name", "declaration_date", "vessel_name", "registration_no", "vessel_type", "vessel_class", "last_port", "working_port", "eta", "etd", "master_name", "master_phone"])
-    eta = clean_date(payload.get("eta")) or ""
-    etd = clean_date(payload.get("etd")) or ""
-    if eta and etd and eta >= etd:
-        raise ApiError(422, "Thời gian rời cảng phải sau thời gian đến cảng.", {"etd": "Phải sau thời gian đến"})
-    unload = cargo(payload.get("unload"))
-    load = cargo(payload.get("load"))
-    return {
-        **payload,
-        "declaration_date": clean_date(payload.get("declaration_date")) or date.today().isoformat(),
-        "eta": eta,
-        "etd": etd,
-        "certificate_expiry_date": clean_date(payload.get("certificate_expiry_date")),
-        "length_m": as_number(payload.get("length_m")),
-        "deadweight_tons": as_number(payload.get("deadweight_tons")),
-        "gross_tonnage": as_number(payload.get("gross_tonnage")),
-        "crew_count": as_number(payload.get("crew_count"), True) or 0,
-        "passenger_count": as_number(payload.get("passenger_count"), True) or 0,
-        "unload": unload,
-        "load": load,
-    }
-
-
-def save_declaration(db: Any, payload: dict[str, Any], submit: bool = False, imported: bool = False) -> dict[str, Any]:
-    data = declaration_payload(payload)
-    organization_id = payload.get("organization_id") or upsert_organization(db, {"name": data["company_name"]})
-    vessel_id = payload.get("vessel_id")
-    existing = db.execute("SELECT id FROM declarations WHERE id=?", (payload.get("id"),)).fetchone() if payload.get("id") else None
-    stamp = now_iso()
-    reference = str(payload.get("reference_no") or f"TT-{datetime.now():%Y%m%d-%H%M%S%f}")
-    status = "SUBMITTED" if submit else str(payload.get("status") or "DRAFT")
-    workflow_status = "PENDING_REVIEW" if submit else str(payload.get("workflow_status") or "DRAFT")
-    columns = [
-        "reference_no", "status", "organization_id", "vessel_id", "declaration_date", "company_name",
-        "vessel_name", "registration_no", "vessel_type", "vessel_class", "length_m", "deadweight_tons",
-        "gross_tonnage", "certificate_expiry_date", "crew_count", "passenger_count", "last_port",
-        "working_port", "destination_port", "eta", "etd", "unload_json", "load_json", "master_name", "master_phone",
-        "movement_type", "purpose", "cargo_description", "actual_arrival_at", "actual_departure_at", "workflow_status",
-    ]
-    values = {
-        **data, "reference_no": reference, "status": status, "organization_id": organization_id,
-        "vessel_id": as_number(vessel_id, True), "unload_json": json.dumps(data["unload"], ensure_ascii=False),
-        "load_json": json.dumps(data["load"], ensure_ascii=False),
-        "movement_type": str(payload.get("movement_type") or "ARRIVAL"),
-        "purpose": str(payload.get("purpose") or ""),
-        "cargo_description": str(payload.get("cargo_description") or ""),
-        "actual_arrival_at": clean_date(payload.get("actual_arrival_at")),
-        "actual_departure_at": clean_date(payload.get("actual_departure_at")),
-        "workflow_status": workflow_status,
-    }
-    if existing:
-        existing_state = db.execute("SELECT status,workflow_status FROM declarations WHERE id=?", (existing["id"],)).fetchone()
-        if existing_state["status"] == "SUBMITTED" and existing_state["workflow_status"] != "CHANGES_REQUESTED":
-            raise ApiError(409, "Phiếu đã nộp không thể sửa. Hãy tạo phiếu điều chỉnh mới.")
-        db.execute(
-            f"UPDATE declarations SET {','.join(f'{name}=?' for name in columns)},submitted_at=?,updated_at=? WHERE id=?",
-            (*[values.get(name, "") for name in columns], stamp if submit else None, stamp, existing["id"]),
-        )
-        declaration_id = int(existing["id"])
-        action = "SUBMIT" if submit else "UPDATE_DRAFT"
-        if submit and existing_state["workflow_status"] == "CHANGES_REQUESTED":
-            db.execute(
-                "UPDATE declarations SET cv_approval='PENDING',qlc_approval='PENDING',bp_approval='PENDING' WHERE id=?",
-                (declaration_id,),
-            )
-    else:
-        cursor = db.execute(
-            f"INSERT INTO declarations({','.join(columns)},submitted_at,created_at,updated_at) VALUES({','.join('?' for _ in columns)},?,?,?)",
-            (*[values.get(name, "") for name in columns], stamp if submit else None, stamp, stamp),
-        )
-        declaration_id = int(cursor.lastrowid)
-        action = "IMPORT" if imported else ("SUBMIT" if submit else "CREATE_DRAFT")
-    audit(db, "DECLARATION", declaration_id, action, reference)
-    if not existing or submit:
-        db.execute(
-            "INSERT INTO declaration_events(declaration_id,action,from_status,to_status,actor_name,actor_role,note,created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (declaration_id, action, "DRAFT" if submit else "", workflow_status, str(payload.get("actor_name") or data["company_name"]), "CUSTOMER", "Phiếu được nộp" if submit else "Khởi tạo phiếu", stamp),
-        )
-    if "crew_ids" in payload:
-        db.execute("DELETE FROM declaration_crew WHERE declaration_id=?", (declaration_id,))
-        for crew_id in {int(value) for value in payload.get("crew_ids", []) if str(value).isdigit()}:
-            member = db.execute("SELECT * FROM crew_members WHERE id=?", (crew_id,)).fetchone()
-            if member:
-                db.execute(
-                    "INSERT INTO declaration_crew(declaration_id,crew_member_id,crew_role_snapshot,certificate_no_snapshot,certificate_expiry_snapshot) VALUES(?,?,?,?,?)",
-                    (declaration_id, crew_id, member["crew_role"], member["professional_certificate_no"], member["certificate_expiry_date"]),
-                )
-    return enrich_declaration(db, db.execute("SELECT * FROM declarations WHERE id=?", (declaration_id,)).fetchone())
-
-
-WORKFLOW_ACTIONS = {
-    "REQUEST_CHANGES": {"roles": {"CV", "QLC", "BP"}, "status": "CHANGES_REQUESTED"},
-    "CV_APPROVE": {"roles": {"CV"}, "status": "PENDING_QLC", "approval": ("cv_approval", "APPROVED")},
-    "QLC_APPROVE": {"roles": {"QLC"}, "status": "PENDING_BP", "approval": ("qlc_approval", "APPROVED")},
-    "BP_APPROVE": {"roles": {"BP"}, "status": "APPROVED", "approval": ("bp_approval", "APPROVED")},
-    "ISSUE": {"roles": {"BP"}, "status": "ISSUED"},
-    "REVOKE": {"roles": {"BP"}, "status": "REVOKED"},
+# ── Workflow state machine ─────────────────────────────────────────────────────
+WORKFLOW_TRANSITIONS: dict[str, dict[str, str]] = {
+    "CV_APPROVE":        {"from": "PENDING_REVIEW",  "to": "PENDING_QLC"},
+    "QLC_APPROVE":       {"from": "PENDING_QLC",     "to": "PENDING_BP"},
+    "BP_APPROVE":        {"from": "PENDING_BP",       "to": "APPROVED"},
+    "ISSUE":             {"from": "APPROVED",         "to": "ISSUED"},
+    "REQUEST_CHANGES":   {"from": None,               "to": "CHANGES_REQUESTED"},
+    "REVOKE":            {"from": None,               "to": "REVOKED"},
 }
 
 
-def transition_declaration(db: Any, declaration_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-    item = db.execute("SELECT * FROM declarations WHERE id=?", (declaration_id,)).fetchone()
-    if not item:
-        raise ApiError(404, "Không tìm thấy phiếu khai báo.")
-    action = str(payload.get("action") or "").upper()
-    actor_role = str(payload.get("actor_role") or "").upper()
-    actor_name = str(payload.get("actor_name") or "").strip()
-    rule = WORKFLOW_ACTIONS.get(action)
-    if not rule or actor_role not in rule["roles"] or not actor_name:
-        raise ApiError(422, "Thao tác, vai trò hoặc người xử lý không hợp lệ.")
-    current = item["workflow_status"]
-    allowed_from = {
-        "REQUEST_CHANGES": {"PENDING_REVIEW", "PENDING_QLC", "PENDING_BP"},
-        "CV_APPROVE": {"PENDING_REVIEW"}, "QLC_APPROVE": {"PENDING_QLC"},
-        "BP_APPROVE": {"PENDING_BP"}, "ISSUE": {"APPROVED"}, "REVOKE": {"ISSUED"},
-    }
-    if current not in allowed_from[action]:
-        raise ApiError(409, f"Không thể thực hiện {action} khi phiếu ở trạng thái {current}.")
-    stamp, target = now_iso(), rule["status"]
-    updates: dict[str, Any] = {"workflow_status": target, "updated_at": stamp}
-    if rule.get("approval"):
-        updates[rule["approval"][0]] = rule["approval"][1]
-    if action == "REQUEST_CHANGES":
-        updates[{"CV": "cv_approval", "QLC": "qlc_approval", "BP": "bp_approval"}[actor_role]] = "REJECTED"
-    if action == "ISSUE":
-        updates["permit_no"] = str(payload.get("permit_no") or f"{declaration_id:04d}/GP-TT")
-        updates["issued_at"] = stamp
-    if action == "REVOKE":
-        updates["revoked_at"] = stamp
-    db.execute(f"UPDATE declarations SET {','.join(f'{key}=?' for key in updates)} WHERE id=?", (*updates.values(), declaration_id))
-    db.execute(
-        "INSERT INTO declaration_events(declaration_id,action,from_status,to_status,actor_name,actor_role,note,created_at) VALUES(?,?,?,?,?,?,?,?)",
-        (declaration_id, action, current, target, actor_name, actor_role, str(payload.get("note") or "")[:1000], stamp),
+def _apply_workflow_transition(
+    db: Session, declaration: Declaration, action: str, actor_role: str,
+    actor_name: str, note: str = "", permit_no: str = ""
+) -> Declaration:
+    rule = WORKFLOW_TRANSITIONS.get(action)
+    if not rule:
+        raise HTTPException(status_code=400, detail=f"Hành động '{action}' không hợp lệ.")
+
+    current = declaration.workflow_status
+    required_from = rule["from"]
+    if required_from and current != required_from:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể thực hiện '{action}' từ trạng thái '{current}'. "
+                   f"Cần trạng thái '{required_from}'.",
+        )
+    if action in ("REQUEST_CHANGES", "REVOKE") and not note.strip():
+        raise HTTPException(status_code=400, detail="Cần nhập lý do cho thao tác này.")
+
+    new_status = rule["to"]
+    from_status = current
+    declaration.workflow_status = new_status
+
+    if action == "CV_APPROVE":
+        declaration.cv_approval = "APPROVED"
+    elif action == "QLC_APPROVE":
+        declaration.qlc_approval = "APPROVED"
+    elif action == "BP_APPROVE":
+        declaration.bp_approval = "APPROVED"
+    elif action == "ISSUE":
+        if not permit_no.strip():
+            raise HTTPException(status_code=400, detail="Cần cung cấp permit_no khi phát hành.")
+        declaration.permit_no = permit_no.strip()
+        declaration.issued_at = now_iso()
+    elif action == "REVOKE":
+        declaration.revoked_at = now_iso()
+
+    declaration.updated_at = now_iso()
+
+    event = DeclarationEvent(
+        declaration_id=declaration.id,
+        action=action,
+        from_status=from_status,
+        to_status=new_status,
+        actor_name=actor_name,
+        actor_role=actor_role,
+        note=note,
+        created_at=now_iso(),
     )
-    audit(db, "DECLARATION", declaration_id, action, f"{actor_name} / {actor_role} / {current} -> {target}")
-    return enrich_declaration(db, db.execute("SELECT * FROM declarations WHERE id=?", (declaration_id,)).fetchone())
+    db.add(event)
+    db.commit()
+    db.refresh(declaration)
+    return declaration
 
 
-def save_crew_member(db: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    validate_required(payload, ["full_name", "crew_role", "professional_certificate_type", "professional_certificate_no"])
-    columns = [
-        "organization_id", "vessel_id", "full_name", "crew_role", "phone", "identity_no",
-        "professional_certificate_type", "professional_certificate_no", "certificate_issue_date",
-        "certificate_expiry_date", "notes",
-    ]
-    values = {
-        **payload,
-        "organization_id": as_number(payload.get("organization_id"), True),
-        "vessel_id": as_number(payload.get("vessel_id"), True),
-        "certificate_issue_date": clean_date(payload.get("certificate_issue_date")),
-        "certificate_expiry_date": clean_date(payload.get("certificate_expiry_date")),
+# ── Pydantic request models ────────────────────────────────────────────────────
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class CargoPayload(BaseModel):
+    cargo_type: str = ""
+    movement_type: str = ""
+    cargo_name: str = ""
+    cont20_full: int = 0
+    cont20_empty: int = 0
+    cont40_full: int = 0
+    cont40_empty: int = 0
+    tons: float = 0.0
+
+
+class VesselSaveRequest(BaseModel):
+    id: Optional[int] = None
+    organization_name: Optional[str] = None
+    organization: Optional[Dict[str, Any]] = None
+    name: str
+    registration_no: str
+    registry_or_imo: str = ""
+    vessel_type: str
+    vessel_class: str
+    shell_material: str = ""
+    build_year: Optional[int] = None
+    length_m: Optional[float] = None
+    width_m: Optional[float] = None
+    side_height_m: Optional[float] = None
+    draft_m: Optional[float] = None
+    deadweight_tons: Optional[float] = None
+    gross_tonnage: Optional[float] = None
+    engine_power_cv: Optional[float] = None
+    cargo_capacity_tons: Optional[float] = None
+    container_capacity_teu: Optional[float] = None
+    passenger_capacity: Optional[int] = None
+    min_crew: Optional[int] = None
+    safety_certificate_no: str = ""
+    certificate_issue_date: Optional[str] = None
+    certificate_expiry_date: Optional[str] = None
+    notes: str = ""
+
+
+class CrewSaveRequest(BaseModel):
+    id: Optional[int] = None
+    vessel_id: Optional[int] = None
+    full_name: str
+    crew_role: str
+    phone: str = ""
+    identity_no: str = ""
+    professional_certificate_type: str = ""
+    professional_certificate_no: str = ""
+    certificate_issue_date: Optional[str] = None
+    certificate_expiry_date: Optional[str] = None
+    notes: str = ""
+
+
+class DeclarationSaveRequest(BaseModel):
+    id: Optional[int] = None
+    vessel_id: Optional[int] = None
+    company_name: str
+    declaration_date: str
+    vessel_name: str
+    registration_no: str
+    vessel_type: str
+    vessel_class: str
+    length_m: Optional[float] = None
+    deadweight_tons: Optional[float] = None
+    gross_tonnage: Optional[float] = None
+    certificate_expiry_date: Optional[str] = None
+    crew_count: int = 0
+    passenger_count: int = 0
+    last_port: str
+    working_port: str
+    destination_port: str = ""
+    eta: str
+    etd: str
+    master_name: str
+    master_phone: str
+    movement_type: str = "ARRIVAL"
+    purpose: str = ""
+    cargo_description: str = ""
+    actual_arrival_at: Optional[str] = None
+    actual_departure_at: Optional[str] = None
+    unload: CargoPayload = CargoPayload()
+    load: CargoPayload = CargoPayload()
+    crew_ids: List[int] = []
+
+    @model_validator(mode="after")
+    def eta_before_etd(self) -> "DeclarationSaveRequest":
+        try:
+            if self.eta and self.etd and self.eta[:16] > self.etd[:16]:
+                raise ValueError("ETA phải trước ETD.")
+        except (TypeError, AttributeError):
+            pass
+        return self
+
+
+class WorkflowActionRequest(BaseModel):
+    action: str
+    actor_role: str
+    actor_name: str
+    note: str = ""
+    permit_no: str = ""
+
+
+class PrepareSyncRequest(BaseModel):
+    from_: Optional[str] = None
+    to: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PrepareSyncRequest":
+        return cls(from_=data.get("from"), to=data.get("to"))
+
+
+# ── Catalog constants ──────────────────────────────────────────────────────────
+VESSEL_TYPES = [
+    "Tàu hàng khô", "Tàu container", "Tàu hàng lỏng/dầu", "Tàu khách",
+    "Tàu kéo/đẩy", "Sà lan tự hành", "Sà lan", "Khác",
+]
+VESSEL_CLASSES = ["VR-SI", "VR-SII", "VR-SIII", "Khác"]
+SHELL_MATERIALS = ["Thép", "Gỗ", "Composite/GRP", "Xi măng lưới thép", "Nhôm", "Khác"]
+CARGO_TYPES = ["Container", "Hàng khô", "Hàng lỏng"]
+UNLOAD_MOVEMENTS = [
+    "Nội địa", "Nhập khẩu", "Chuyển tải", "Quá cảnh có bốc dỡ", "Quá cảnh không bốc dỡ",
+]
+LOAD_MOVEMENTS = ["Nội địa", "Xuất khẩu"]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTH
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/auth/login")
+def login(request: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == request.username).first()
+    if not user or not verify_password(request.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Tên đăng nhập hoặc mật khẩu không đúng.")
+    token = create_access_token(data={"sub": user.username, "role": user.role})
+    return {"access_token": token, "token_type": "bearer"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HEALTH
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok", "database": "sqlite-sqlalchemy", "version": "1.0.0"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CATALOGS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/catalogs")
+def get_catalogs():
+    return {
+        "vesselTypes": VESSEL_TYPES,
+        "vesselClasses": VESSEL_CLASSES,
+        "shellMaterials": SHELL_MATERIALS,
+        "cargoTypes": CARGO_TYPES,
+        "unloadMovements": UNLOAD_MOVEMENTS,
+        "loadMovements": LOAD_MOVEMENTS,
     }
-    for key in columns:
-        if key not in values or values[key] is None and key not in ("organization_id", "vessel_id", "certificate_issue_date", "certificate_expiry_date"):
-            values[key] = ""
-    stamp = now_iso()
-    existing = db.execute("SELECT id FROM crew_members WHERE id=?", (payload.get("id"),)).fetchone() if payload.get("id") else None
-    if existing:
-        db.execute(
-            f"UPDATE crew_members SET {','.join(f'{name}=?' for name in columns)},updated_at=? WHERE id=?",
-            (*[values.get(name) for name in columns], stamp, existing["id"]),
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ORGANIZATIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/organizations")
+def get_organizations(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    orgs = db.query(Organization).order_by(Organization.name).all()
+    return [
+        {c.name: getattr(o, c.name) for c in o.__table__.columns}
+        for o in orgs
+    ]
+
+
+def _get_or_create_org(db: Session, name: Optional[str]) -> Optional[Organization]:
+    if not name:
+        return None
+    org = db.query(Organization).filter(Organization.name == name).first()
+    if not org:
+        org = Organization(name=name, updated_at=now_iso(), created_at=now_iso())
+        db.add(org)
+        db.flush()
+    return org
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/dashboard")
+def get_dashboard(
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    vessels_count = db.query(func.count(Vessel.id)).scalar()
+    drafts_count = db.query(func.count(Declaration.id)).filter(
+        Declaration.workflow_status == "DRAFT"
+    ).scalar()
+    submitted_count = db.query(func.count(Declaration.id)).filter(
+        Declaration.workflow_status.notin_(["DRAFT", "CHANGES_REQUESTED"])
+    ).scalar()
+    today_iso = date.today().isoformat()
+    arriving_today = db.query(func.count(Declaration.id)).filter(
+        Declaration.eta.startswith(today_iso)
+    ).scalar()
+    cert_warnings = db.query(func.count(Vessel.id)).filter(
+        Vessel.certificate_expiry_date.isnot(None)
+    ).scalar()
+
+    recent_decls = db.query(Declaration).order_by(desc(Declaration.updated_at)).limit(8).all()
+
+    matches: list[dict] = []
+    if q:
+        search = f"%{q}%"
+        vessels = (
+            db.query(Vessel)
+            .filter(or_(Vessel.registration_no.like(search), Vessel.name.like(search)))
+            .order_by(desc(Vessel.updated_at))
+            .limit(12)
+            .all()
         )
-        member_id, action = int(existing["id"]), "UPDATE"
+        for v in vessels:
+            v_dict = {c.name: getattr(v, c.name) for c in v.__table__.columns}
+            v_dict["organization_name"] = v.organization.name if v.organization else None
+            v_dict["certificate_status"] = certificate_status(v.certificate_expiry_date)
+            matches.append(v_dict)
+
+    recent = []
+    for d in recent_decls:
+        d_dict = {c.name: getattr(d, c.name) for c in d.__table__.columns}
+        d_dict["unload"] = json.loads(d_dict.pop("unload_json", "{}"))
+        d_dict["load"] = json.loads(d_dict.pop("load_json", "{}"))
+        recent.append(d_dict)
+
+    return {
+        "stats": {
+            "vessels": vessels_count,
+            "drafts": drafts_count,
+            "submitted": submitted_count,
+            "arrivingToday": arriving_today,
+            "certificateWarnings": cert_warnings,
+        },
+        "recent": recent,
+        "matches": matches,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VESSELS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _vessel_dict(v: Vessel) -> dict:
+    d = {c.name: getattr(v, c.name) for c in v.__table__.columns}
+    d["organization_name"] = v.organization.name if v.organization else None
+    d["certificate_status"] = certificate_status(v.certificate_expiry_date)
+    return d
+
+
+@app.get("/api/vessels")
+def get_vessels(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    vessels = db.query(Vessel).order_by(desc(Vessel.updated_at)).all()
+    return [_vessel_dict(v) for v in vessels]
+
+
+@app.post("/api/vessels")
+def save_vessel(
+    payload: VesselSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    org_name = (
+        (payload.organization or {}).get("name") if isinstance(payload.organization, dict)
+        else payload.organization_name
+    )
+    org = _get_or_create_org(db, org_name)
+
+    data = payload.model_dump(exclude={"id", "organization", "organization_name"})
+    data["organization_id"] = org.id if org else None
+    data["updated_at"] = now_iso()
+
+    if payload.id:
+        vessel = db.query(Vessel).filter(Vessel.id == payload.id).first()
+        if not vessel:
+            raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện.")
+        for k, v in data.items():
+            if hasattr(vessel, k):
+                setattr(vessel, k, v)
+        db.commit()
+        db.refresh(vessel)
     else:
-        cursor = db.execute(
-            f"INSERT INTO crew_members({','.join(columns)},created_at,updated_at) VALUES({','.join('?' for _ in columns)},?,?)",
-            (*[values.get(name) for name in columns], stamp, stamp),
-        )
-        member_id, action = int(cursor.lastrowid), "CREATE"
-    audit(db, "CREW_MEMBER", member_id, action, f"{values['full_name']} / {values['crew_role']}")
-    item = dict(db.execute("SELECT * FROM crew_members WHERE id=?", (member_id,)).fetchone())
-    item["certificate_status"] = certificate_status(item.get("certificate_expiry_date"))
-    return item
+        data["created_at"] = now_iso()
+        vessel = Vessel(**{k: v for k, v in data.items() if hasattr(Vessel, k)})
+        db.add(vessel)
+        db.commit()
+        db.refresh(vessel)
+
+    return _vessel_dict(vessel)
 
 
-class Handler(BaseHTTPRequestHandler):
-    server_version = "TanThuanDeclaration/0.1"
+@app.post("/api/vessels/{vessel_id}/verify-registry")
+def verify_vessel_registry(
+    vessel_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Local-only registry date check. Does NOT call any external Maritime Authority API.
+    Records verification source as 'local' and updates certificate_status.
+    External registry integration is out of scope until T6.
+    """
+    vessel = db.query(Vessel).filter(Vessel.id == vessel_id).first()
+    if not vessel:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện.")
 
-    def log_message(self, fmt: str, *args: Any) -> None:
-        print(f"[{datetime.now():%H:%M:%S}] {self.address_string()} {fmt % args}")
-
-    def do_GET(self) -> None:
-        try:
-            self.route_get()
-        except ApiError as error:
-            self.json(error.status, {"error": error.message, "fields": error.fields})
-        except Exception as error:
-            self.json(500, {"error": "Lỗi máy chủ.", "detail": str(error)})
-
-    def do_POST(self) -> None:
-        try:
-            self.route_post()
-        except ApiError as error:
-            self.json(error.status, {"error": error.message, "fields": error.fields})
-        except Exception as error:
-            self.json(500, {"error": "Lỗi máy chủ.", "detail": str(error)})
-
-    def route_get(self) -> None:
-        parsed = urlparse(self.path)
-        path, query = parsed.path, parse_qs(parsed.query)
-        if path == "/api/health":
-            return self.json(200, {"status": "ok", "database": "sqlite", "version": "0.1.0"})
-        if path == "/api/catalogs":
-            return self.json(200, {"vesselTypes": VESSEL_TYPES, "vesselClasses": VESSEL_CLASSES, "shellMaterials": SHELL_MATERIALS, "cargoTypes": CARGO_TYPES, "unloadMovements": UNLOAD_MOVEMENTS, "loadMovements": LOAD_MOVEMENTS})
-        if path == "/api/dashboard":
-            search = (query.get("q") or [""])[0].strip()
-            with connection() as db:
-                stats = {
-                    "vessels": db.execute("SELECT COUNT(*) FROM vessels").fetchone()[0],
-                    "drafts": db.execute("SELECT COUNT(*) FROM declarations WHERE status='DRAFT'").fetchone()[0],
-                    "submitted": db.execute("SELECT COUNT(*) FROM declarations WHERE status='SUBMITTED'").fetchone()[0],
-                    "arrivingToday": db.execute("SELECT COUNT(*) FROM declarations WHERE substr(eta,1,10)=?", (date.today().isoformat(),)).fetchone()[0],
-                    "certificateWarnings": db.execute(
-                        "SELECT COUNT(*) FROM vessels WHERE certificate_expiry_date<>'' AND certificate_expiry_date<=date('now','+30 day')"
-                    ).fetchone()[0] + db.execute(
-                        "SELECT COUNT(*) FROM crew_members WHERE certificate_expiry_date<>'' AND certificate_expiry_date<=date('now','+30 day')"
-                    ).fetchone()[0],
-                }
-                recent = [enrich_declaration(db, row) for row in db.execute("SELECT * FROM declarations ORDER BY updated_at DESC LIMIT 8")]
-                matches = []
-                if search:
-                    wildcard = f"%{search}%"
-                    matches = [enrich_vessel(dict(row)) for row in db.execute(
-                        "SELECT v.*,o.name organization_name FROM vessels v LEFT JOIN organizations o ON o.id=v.organization_id WHERE v.registration_no LIKE ? OR v.name LIKE ? ORDER BY v.updated_at DESC LIMIT 12",
-                        (wildcard, wildcard),
-                    )]
-            return self.json(200, {"stats": stats, "recent": recent, "matches": matches})
-        if path == "/api/organizations":
-            with connection() as db:
-                return self.json(200, rows_to_dicts(db.execute("SELECT * FROM organizations ORDER BY name")))
-        if path == "/api/vessels":
-            search = (query.get("q") or [""])[0].strip()
-            sql = "SELECT v.*,o.name organization_name FROM vessels v LEFT JOIN organizations o ON o.id=v.organization_id"
-            params: list[Any] = []
-            if search:
-                sql += " WHERE v.registration_no LIKE ? OR v.name LIKE ?"
-                params = [f"%{search}%", f"%{search}%"]
-            with connection() as db:
-                rows = db.execute(sql + " ORDER BY v.updated_at DESC", params)
-                return self.json(200, [enrich_vessel(dict(row)) for row in rows])
-        if path == "/api/declarations":
-            status = (query.get("status") or [""])[0]
-            search = (query.get("q") or [""])[0].strip()
-            movement_type = (query.get("movement_type") or [""])[0]
-            workflow_status = (query.get("workflow_status") or [""])[0]
-            master_name = (query.get("master_name") or [""])[0].strip()
-            date_from = (query.get("from") or [""])[0]
-            date_to = (query.get("to") or [""])[0]
-            clauses, params = [], []
-            if status:
-                clauses.append("status=?")
-                params.append(status)
-            if search:
-                clauses.append("(registration_no LIKE ? OR vessel_name LIKE ?)")
-                params.extend([f"%{search}%", f"%{search}%"])
-            if movement_type:
-                clauses.append("movement_type=?")
-                params.append(movement_type)
-            if workflow_status:
-                clauses.append("workflow_status=?")
-                params.append(workflow_status)
-            if master_name:
-                clauses.append("master_name LIKE ?")
-                params.append(f"%{master_name}%")
-            if date_from:
-                clauses.append("substr(eta,1,10)>=?")
-                params.append(date_from)
-            if date_to:
-                clauses.append("substr(eta,1,10)<=?")
-                params.append(date_to)
-            sql = "SELECT * FROM declarations" + (" WHERE " + " AND ".join(clauses) if clauses else "")
-            with connection() as db:
-                return self.json(200, [enrich_declaration(db, row) for row in db.execute(sql + " ORDER BY updated_at DESC", params)])
-        event_match = re.fullmatch(r"/api/declarations/(\d+)/events", path)
-        if event_match:
-            with connection() as db:
-                rows = rows_to_dicts(db.execute(
-                    "SELECT * FROM declaration_events WHERE declaration_id=? ORDER BY created_at DESC,id DESC",
-                    (int(event_match.group(1)),),
-                ))
-            return self.json(200, rows)
-        if path == "/api/crew":
-            with connection() as db:
-                rows = rows_to_dicts(db.execute(
-                    "SELECT cm.*,v.name vessel_name,v.registration_no FROM crew_members cm LEFT JOIN vessels v ON v.id=cm.vessel_id ORDER BY cm.updated_at DESC"
-                ))
-            for item in rows:
-                item["certificate_status"] = certificate_status(item.get("certificate_expiry_date"))
-            return self.json(200, rows)
-        attachment_match = re.fullmatch(r"/api/declarations/(\d+)/attachments", path)
-        if attachment_match:
-            with connection() as db:
-                rows = rows_to_dicts(db.execute(
-                    "SELECT id,original_name,content_type,size_bytes,created_at FROM attachments WHERE declaration_id=? ORDER BY created_at",
-                    (int(attachment_match.group(1)),),
-                ))
-            return self.json(200, rows)
-        download_match = re.fullmatch(r"/api/attachments/(\d+)/download", path)
-        if download_match:
-            with connection() as db:
-                item = db.execute("SELECT * FROM attachments WHERE id=?", (int(download_match.group(1)),)).fetchone()
-            if not item:
-                raise ApiError(404, "Không tìm thấy file đính kèm.")
-            target = (UPLOAD_ROOT / item["stored_name"]).resolve()
-            if UPLOAD_ROOT.resolve() not in target.parents or not target.is_file():
-                raise ApiError(404, "File đính kèm không còn trên máy chủ.")
-            return self.file_response(target, item["content_type"], item["original_name"])
-        if path == "/api/integrations/maritime-authority":
-            with connection() as db:
-                connector = dict(db.execute("SELECT * FROM integration_connectors WHERE connector_key='LOCAL_MARITIME_AUTHORITY'").fetchone())
-                jobs = rows_to_dicts(db.execute("SELECT id,report_from,report_to,status,record_count,created_at,sent_at FROM sync_jobs ORDER BY created_at DESC LIMIT 10"))
-            connector["readyToSend"] = connector["status"] == "CONFIGURED" and bool(connector["base_url"])
-            connector["boundary"] = "Chỉ chuẩn bị payload cho đến khi Cảng vụ cung cấp đặc tả API, endpoint và credential chính thức."
-            return self.json(200, {"connector": connector, "jobs": jobs})
-        if path == "/api/suggestions":
-            field = (query.get("field") or [""])[0]
-            allowed = {"last_port", "working_port", "destination_port", "master_name", "master_phone", "company_name"}
-            if field not in allowed:
-                raise ApiError(400, "Trường gợi ý không hợp lệ.")
-            with connection() as db:
-                values = [row[0] for row in db.execute(f"SELECT {field} FROM declarations WHERE {field}<>'' GROUP BY {field} ORDER BY MAX(updated_at) DESC LIMIT 20")]
-            return self.json(200, values)
-        if path.startswith("/api/reports/"):
-            return self.report(path.rsplit("/", 1)[-1], query)
-        return self.static(path)
-
-    def route_post(self) -> None:
-        parsed = urlparse(self.path)
-        path, query = parsed.path, parse_qs(parsed.query)
-        if path == "/api/organizations":
-            payload = self.body_json()
-            with connection() as db:
-                org_id = upsert_organization(db, payload)
-                audit(db, "ORGANIZATION", org_id, "UPSERT", str(payload.get("name") or ""))
-                return self.json(201, dict(db.execute("SELECT * FROM organizations WHERE id=?", (org_id,)).fetchone()))
-        if path == "/api/vessels":
-            with connection() as db:
-                return self.json(201, save_vessel(db, self.body_json()))
-        verify_match = re.fullmatch(r"/api/vessels/(\d+)/verify-registry", path)
-        if verify_match:
-            vessel_id = int(verify_match.group(1))
-            with connection() as db:
-                vessel = db.execute("SELECT * FROM vessels WHERE id=?", (vessel_id,)).fetchone()
-                if not vessel:
-                    raise ApiError(404, "Không tìm thấy phương tiện.")
-                status = certificate_status(vessel["certificate_expiry_date"])
-                db.execute(
-                    "UPDATE vessels SET registry_verification_status=?,registry_verified_at=?,registry_verification_source=?,updated_at=? WHERE id=?",
-                    (status, now_iso(), "LOCAL_EXPIRY_DATE_CHECK", now_iso(), vessel_id),
-                )
-                audit(db, "VESSEL", vessel_id, "REGISTRY_DATE_CHECK", status)
-                result = enrich_vessel(dict(db.execute("SELECT * FROM vessels WHERE id=?", (vessel_id,)).fetchone()))
-            result["verificationBoundary"] = "Đối soát ngày hết hạn nội bộ; chưa xác minh với cơ sở dữ liệu đăng kiểm bên ngoài."
-            return self.json(200, result)
-        if path == "/api/crew":
-            with connection() as db:
-                return self.json(201, save_crew_member(db, self.body_json()))
-        if path == "/api/declarations":
-            submit = (query.get("submit") or ["false"])[0].lower() == "true"
-            with connection() as db:
-                return self.json(201, save_declaration(db, self.body_json(), submit=submit))
-        workflow_match = re.fullmatch(r"/api/declarations/(\d+)/workflow", path)
-        if workflow_match:
-            with connection() as db:
-                return self.json(200, transition_declaration(db, int(workflow_match.group(1)), self.body_json()))
-        if path in ("/api/import/vessels", "/api/import/declaration"):
-            content = self.body_bytes()
-            validate_attachment_content(".xlsx", content)
-            sheets = read_workbook(content)
-            with connection() as db:
-                if path.endswith("vessels"):
-                    organization, rows = vessel_rows(sheets)
-                    org_id = upsert_organization(db, organization)
-                    accepted, errors = [], []
-                    for index, row in enumerate(rows, 1):
-                        try:
-                            row["organization_id"] = org_id
-                            accepted.append(save_vessel(db, row, imported=True))
-                        except Exception as error:
-                            errors.append({"row": index, "error": str(error)})
-                    return self.json(200, {"accepted": len(accepted), "rejected": errors})
-                row = declaration_row(sheets)
-                result = save_declaration(db, row, imported=True)
-                return self.json(200, {"accepted": 1, "declaration": result})
-        attachment_match = re.fullmatch(r"/api/declarations/(\d+)/attachments", path)
-        if attachment_match:
-            declaration_id = int(attachment_match.group(1))
-            original_name = (query.get("filename") or [""])[0].strip()
-            extension = Path(original_name).suffix.lower()
-            if not original_name or extension not in ALLOWED_ATTACHMENT_EXTENSIONS:
-                raise ApiError(415, "Chỉ nhận ảnh, PDF, Word hoặc Excel.")
-            content = self.body_bytes()
-            safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(original_name).stem).strip("-.") or "attachment"
-            stored_name = f"{uuid.uuid4().hex}-{safe_stem[:80]}{extension}"
-            UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-            target = (UPLOAD_ROOT / stored_name).resolve()
-            if UPLOAD_ROOT.resolve() not in target.parents:
-                raise ApiError(400, "Tên file không hợp lệ.")
-            with connection() as db:
-                if not db.execute("SELECT 1 FROM declarations WHERE id=?", (declaration_id,)).fetchone():
-                    raise ApiError(404, "Không tìm thấy phiếu khai báo.")
-                target.write_bytes(content)
-                cursor = db.execute(
-                    "INSERT INTO attachments(declaration_id,original_name,stored_name,content_type,size_bytes,created_at) VALUES(?,?,?,?,?,?)",
-                    (declaration_id, original_name[:255], stored_name, self.headers.get("Content-Type", "application/octet-stream"), len(content), now_iso()),
-                )
-                attachment_id = int(cursor.lastrowid)
-                audit(db, "DECLARATION", declaration_id, "ATTACH_FILE", original_name)
-            return self.json(201, {"id": attachment_id, "original_name": original_name, "size_bytes": len(content)})
-        if path == "/api/integrations/prepare-sync":
-            payload = self.body_json()
-            report_from = str(payload.get("from") or "")
-            report_to = str(payload.get("to") or "")
-            validate_required({"from": report_from, "to": report_to}, ["from", "to"])
-            with connection() as db:
-                records = [enrich_declaration(db, row) for row in db.execute(
-                    "SELECT * FROM declarations WHERE status='SUBMITTED' AND substr(eta,1,10) BETWEEN ? AND ? ORDER BY eta",
-                    (report_from, report_to),
-                )]
-                sync_payload = {
-                    "schemaVersion": "draft.pending-authority-contract",
-                    "reportingUnit": "TIEN-TAN THUAN PORT",
-                    "period": {"from": report_from, "to": report_to},
-                    "recordCount": len(records),
-                    "records": records,
-                }
-                cursor = db.execute(
-                    "INSERT INTO sync_jobs(connector_key,report_from,report_to,status,record_count,payload_json,created_at) VALUES(?,?,?,?,?,?,?)",
-                    ("LOCAL_MARITIME_AUTHORITY", report_from, report_to, "PREPARED", len(records), json.dumps(sync_payload, ensure_ascii=False, default=str), now_iso()),
-                )
-                job_id = int(cursor.lastrowid)
-                audit(db, "SYNC_JOB", job_id, "PREPARE", f"{report_from}..{report_to} / {len(records)} records")
-            return self.json(201, {"id": job_id, "status": "PREPARED", "recordCount": len(records), "payloadPreview": sync_payload, "sendAuthorized": False})
-        raise ApiError(404, "Không tìm thấy API.")
-
-    def report(self, kind: str, query: dict[str, list[str]]) -> None:
-        start = (query.get("from") or ["1900-01-01"])[0]
-        end = (query.get("to") or ["2999-12-31"])[0]
-        with connection() as db:
-            items = [decode_declaration(row) for row in db.execute("SELECT * FROM declarations WHERE status='SUBMITTED' AND substr(eta,1,10) BETWEEN ? AND ? ORDER BY eta", (start, end))]
-        if kind == "appendix-1":
-            headers = ["TT", "Tên PT", "Số đăng ký", "Cấp PT", "Công dụng", "Hết hạn GCN", "Khả năng tấn/TEU", "Sức chở khách", "Vị trí đến", "Thời gian đến", "Vị trí rời", "Thời gian rời", "Hàng dỡ", "Hàng xếp", "Thuyền viên/Hành khách", "Thuyền trưởng/SĐT"]
-            rows = [[i, d["vessel_name"], d["registration_no"], d["vessel_class"], d["vessel_type"], d["certificate_expiry_date"], f"{d.get('deadweight_tons') or 0} t / {max(d['unload']['teu'], d['load']['teu'])} TEU", d["passenger_count"], d["working_port"], d["eta"], d["working_port"], d["etd"], cargo_text(d["unload"]), cargo_text(d["load"]), f"{d['crew_count']} / {d['passenger_count']}", f"{d['master_name']} / {d['master_phone']}"] for i, d in enumerate(items, 1)]
-            title = "PHỤ LỤC 1 - KẾ HOẠCH HOẠT ĐỘNG CỦA PTTND"
-        elif kind == "appendix-2":
-            headers = ["Chỉ tiêu", "Container tấn", "Container TEU", "Hàng khô tấn", "Hàng lỏng tấn", "Hàng XNK tấn", "Lượt tàu", "Lượt tàu khách", "Lượt khách"]
-            totals = summarize(items)
-            rows = [["Tổng kỳ báo cáo", totals["container_tons"], totals["container_teu"], totals["dry_tons"], totals["liquid_tons"], totals["foreign_tons"], len(items), totals["passenger_calls"], totals["passengers"]]]
-            title = "PHỤ LỤC 2 - KHỐI LƯỢNG HÀNG HÓA, LƯỢT TÀU, HÀNH KHÁCH"
-        elif kind == "appendix-3":
-            headers = ["STT", "Tên PTTND", "Số đăng ký", "Loại PT", "Cấp PTTND", "Chiều dài", "Trọng tải", "Dung tích", "Dỡ - loại hình", "Dỡ - tấn", "Dỡ - TEU", "Dỡ - TEU rỗng", "Xếp - loại hình", "Xếp - tấn", "Xếp - TEU", "Xếp - TEU rỗng", "Hành khách", "Tên hàng", "Cảng rời cuối", "Cảng làm hàng", "Cảng đích", "Ngày đến", "Ngày rời", "Đại lý PTTND"]
-            rows = [[i, d["vessel_name"], d["registration_no"], d["vessel_type"], d["vessel_class"], d["length_m"], d["deadweight_tons"], d["gross_tonnage"], d["unload"]["movement_type"], d["unload"]["tons"], d["unload"]["teu"], d["unload"]["empty_teu"], d["load"]["movement_type"], d["load"]["tons"], d["load"]["teu"], d["load"]["empty_teu"], d["passenger_count"], " / ".join(filter(None, [d["unload"]["cargo_name"], d["load"]["cargo_name"]])), d["last_port"], d["working_port"], d["destination_port"], d["eta"], d["etd"], d["company_name"]] for i, d in enumerate(items, 1)]
-            title = "PHỤ LỤC 3 - BÁO CÁO CHI TIẾT PTTND RA, VÀO CẢNG BIỂN"
-        else:
-            raise ApiError(404, "Loại báo cáo không hợp lệ.")
-        content = make_xlsx(title, headers, rows)
-        self.send_response(200)
-        self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        self.send_header("Content-Disposition", f'attachment; filename="{kind}.xlsx"')
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    def body_bytes(self) -> bytes:
-        length = int(self.headers.get("Content-Length", "0"))
-        if length <= 0 or length > MAX_BODY:
-            raise ApiError(413, "File rỗng hoặc vượt quá 12 MB.")
-        return self.rfile.read(length)
-
-    def body_json(self) -> dict[str, Any]:
-        try:
-            return json.loads(self.body_bytes().decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ApiError(400, "Dữ liệu JSON không hợp lệ.")
-
-    def json(self, status: int, payload: Any) -> None:
-        content = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    def file_response(self, path: Path, content_type: str, download_name: str) -> None:
-        content = path.read_bytes()
-        safe_name = re.sub(r"[\r\n\"]+", "_", download_name)
-        self.send_response(200)
-        self.send_header("Content-Type", content_type or "application/octet-stream")
-        self.send_header("Content-Disposition", f'attachment; filename="{safe_name}"')
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    def static(self, path: str) -> None:
-        relative = "index.html" if path in ("", "/") else path.lstrip("/")
-        target = (FRONTEND / relative).resolve()
-        if FRONTEND.resolve() not in target.parents or not target.is_file():
-            target = FRONTEND / "index.html"
-        content = target.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
+    vessel.registry_verification_status = "VERIFIED"
+    vessel.registry_verified_at = now_iso()
+    vessel.registry_verification_source = "local"
+    vessel.updated_at = now_iso()
+    db.commit()
+    db.refresh(vessel)
+    return _vessel_dict(vessel)
 
 
-def cargo_text(item: dict[str, Any]) -> str:
-    details = [item.get("cargo_type"), item.get("cargo_name")]
-    if item.get("teu"):
-        details.append(f"{item['total_containers']} cont / {item['teu']} TEU")
-    if item.get("tons"):
-        details.append(f"{item['tons']} tấn")
-    return " - ".join(str(value) for value in details if value)
+# ══════════════════════════════════════════════════════════════════════════════
+# CREW
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _crew_dict(c: CrewMember, db: Session) -> dict:
+    d = {col.name: getattr(c, col.name) for col in c.__table__.columns}
+    d["certificate_status"] = certificate_status(c.certificate_expiry_date)
+    if c.vessel_id:
+        vessel = db.query(Vessel).filter(Vessel.id == c.vessel_id).first()
+        d["vessel_name"] = vessel.name if vessel else None
+        d["registration_no"] = vessel.registration_no if vessel else None
+    else:
+        d["vessel_name"] = None
+        d["registration_no"] = None
+    return d
 
 
-def summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
-    result = {"container_tons": 0.0, "container_teu": 0, "dry_tons": 0.0, "liquid_tons": 0.0, "foreign_tons": 0.0, "passenger_calls": 0, "passengers": 0}
-    for declaration in items:
-        if declaration.get("passenger_count", 0) > 0:
-            result["passenger_calls"] += 1
-            result["passengers"] += declaration["passenger_count"]
-        for item in (declaration["unload"], declaration["load"]):
-            if item["cargo_type"] == "Container":
-                result["container_tons"] += item["tons"]
-                result["container_teu"] += item["teu"]
-            elif item["cargo_type"] == "Hàng khô":
-                result["dry_tons"] += item["tons"]
-            elif item["cargo_type"] == "Hàng lỏng":
-                result["liquid_tons"] += item["tons"]
-            if item["movement_type"] in ("Nhập khẩu", "Xuất khẩu"):
-                result["foreign_tons"] += item["tons"]
+@app.get("/api/crew")
+def get_crew(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    crews = db.query(CrewMember).order_by(CrewMember.full_name).all()
+    return [_crew_dict(c, db) for c in crews]
+
+
+@app.post("/api/crew")
+def save_crew(
+    payload: CrewSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    data = payload.model_dump(exclude={"id"})
+    data["updated_at"] = now_iso()
+
+    if payload.id:
+        member = db.query(CrewMember).filter(CrewMember.id == payload.id).first()
+        if not member:
+            raise HTTPException(status_code=404, detail="Không tìm thấy thuyền viên.")
+        for k, v in data.items():
+            if hasattr(member, k):
+                setattr(member, k, v)
+        db.commit()
+        db.refresh(member)
+    else:
+        data["created_at"] = now_iso()
+        member = CrewMember(**{k: v for k, v in data.items() if hasattr(CrewMember, k)})
+        db.add(member)
+        db.commit()
+        db.refresh(member)
+
+    return _crew_dict(member, db)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DECLARATIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _declaration_dict(d: Declaration) -> dict:
+    result = {c.name: getattr(d, c.name) for c in d.__table__.columns}
+    result["unload"] = json.loads(result.pop("unload_json", "{}"))
+    result["load"] = json.loads(result.pop("load_json", "{}"))
     return result
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Tan Thuan Port declaration server")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", default=8080, type=int)
-    args = parser.parse_args()
-    init_db()
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Server ready at http://{args.host}:{args.port}")
+@app.get("/api/declarations")
+def get_declarations(
+    q: Optional[str] = None,
+    movement_type: Optional[str] = None,
+    workflow_status: Optional[str] = None,
+    master_name: Optional[str] = None,
+    from_: Optional[str] = Query(default=None, alias="from"),
+    to: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    query = db.query(Declaration)
+    if q:
+        search = f"%{q}%"
+        query = query.filter(
+            or_(
+                Declaration.vessel_name.like(search),
+                Declaration.registration_no.like(search),
+                Declaration.reference_no.like(search),
+            )
+        )
+    if movement_type:
+        query = query.filter(Declaration.movement_type == movement_type)
+    if workflow_status:
+        query = query.filter(Declaration.workflow_status == workflow_status)
+    if master_name:
+        query = query.filter(Declaration.master_name.like(f"%{master_name}%"))
+    if from_:
+        query = query.filter(Declaration.declaration_date >= from_)
+    if to:
+        query = query.filter(Declaration.declaration_date <= to)
+    decls = query.order_by(desc(Declaration.updated_at)).all()
+    return [_declaration_dict(d) for d in decls]
+
+
+@app.post("/api/declarations")
+def save_declaration(
+    payload: DeclarationSaveRequest,
+    submit: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    org = _get_or_create_org(db, payload.company_name)
+
+    unload_data = cargo(payload.unload.model_dump())
+    load_data = cargo(payload.load.model_dump())
+
+    if payload.id:
+        decl = db.query(Declaration).filter(Declaration.id == payload.id).first()
+        if not decl:
+            raise HTTPException(status_code=404, detail="Không tìm thấy phiếu khai báo.")
+        if decl.workflow_status not in ("DRAFT", "CHANGES_REQUESTED"):
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể chỉnh sửa phiếu đã nộp. Dùng luồng REQUEST_CHANGES để điều chỉnh.",
+            )
+        # Update fields
+        for field_name in (
+            "company_name", "declaration_date", "vessel_name", "registration_no",
+            "vessel_type", "vessel_class", "length_m", "deadweight_tons", "gross_tonnage",
+            "certificate_expiry_date", "crew_count", "passenger_count", "last_port",
+            "working_port", "destination_port", "eta", "etd", "master_name", "master_phone",
+            "movement_type", "purpose", "cargo_description",
+            "actual_arrival_at", "actual_departure_at", "vessel_id",
+        ):
+            val = getattr(payload, field_name, None)
+            if val is not None and hasattr(decl, field_name):
+                setattr(decl, field_name, val)
+        decl.unload_json = json.dumps(unload_data, ensure_ascii=False)
+        decl.load_json = json.dumps(load_data, ensure_ascii=False)
+        if org:
+            decl.organization_id = org.id
+        decl.updated_at = now_iso()
+    else:
+        ref_no = f"TT-{datetime.now():%Y%m%d-%H%M%S}-{datetime.now().microsecond:06d}"
+        decl = Declaration(
+            reference_no=ref_no,
+            organization_id=org.id if org else None,
+            vessel_id=payload.vessel_id,
+            company_name=payload.company_name,
+            declaration_date=payload.declaration_date,
+            vessel_name=payload.vessel_name,
+            registration_no=payload.registration_no,
+            vessel_type=payload.vessel_type,
+            vessel_class=payload.vessel_class,
+            length_m=payload.length_m,
+            deadweight_tons=payload.deadweight_tons,
+            gross_tonnage=payload.gross_tonnage,
+            certificate_expiry_date=payload.certificate_expiry_date,
+            crew_count=payload.crew_count,
+            passenger_count=payload.passenger_count,
+            last_port=payload.last_port,
+            working_port=payload.working_port,
+            destination_port=payload.destination_port,
+            eta=payload.eta,
+            etd=payload.etd,
+            master_name=payload.master_name,
+            master_phone=payload.master_phone,
+            movement_type=payload.movement_type,
+            purpose=payload.purpose,
+            cargo_description=payload.cargo_description,
+            actual_arrival_at=payload.actual_arrival_at,
+            actual_departure_at=payload.actual_departure_at,
+            unload_json=json.dumps(unload_data, ensure_ascii=False),
+            load_json=json.dumps(load_data, ensure_ascii=False),
+            workflow_status="DRAFT",
+            status="DRAFT",
+            created_at=now_iso(),
+            updated_at=now_iso(),
+        )
+        db.add(decl)
+        db.flush()
+
+    # Sync crew snapshot
+    if payload.crew_ids is not None:
+        db.query(DeclarationCrew).filter(DeclarationCrew.declaration_id == decl.id).delete()
+        for crew_id in payload.crew_ids:
+            member = db.query(CrewMember).filter(CrewMember.id == crew_id).first()
+            if member:
+                db.add(DeclarationCrew(
+                    declaration_id=decl.id,
+                    crew_member_id=member.id,
+                    crew_role_snapshot=member.crew_role,
+                    certificate_no_snapshot=member.professional_certificate_no,
+                    certificate_expiry_snapshot=member.certificate_expiry_date,
+                ))
+
+    if submit:
+        decl.workflow_status = "PENDING_REVIEW"
+        decl.status = "SUBMITTED"
+        decl.submitted_at = now_iso()
+        event = DeclarationEvent(
+            declaration_id=decl.id,
+            action="SUBMIT",
+            from_status="DRAFT",
+            to_status="PENDING_REVIEW",
+            actor_name=user.full_name or user.username,
+            actor_role=user.role,
+            note="Nộp phiếu khai báo",
+            created_at=now_iso(),
+        )
+        db.add(event)
+
+    db.commit()
+    db.refresh(decl)
+
+    result = _declaration_dict(decl)
+    result["id"] = decl.id
+    result["status"] = decl.status
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DECLARATION EVENTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/declarations/{declaration_id}/events")
+def get_declaration_events(
+    declaration_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    decl = db.query(Declaration).filter(Declaration.id == declaration_id).first()
+    if not decl:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiếu.")
+    events = (
+        db.query(DeclarationEvent)
+        .filter(DeclarationEvent.declaration_id == declaration_id)
+        .order_by(DeclarationEvent.created_at)
+        .all()
+    )
+    return [
+        {col.name: getattr(e, col.name) for col in e.__table__.columns}
+        for e in events
+    ]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WORKFLOW
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/declarations/{declaration_id}/workflow")
+def declaration_workflow(
+    declaration_id: int,
+    payload: WorkflowActionRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    decl = db.query(Declaration).filter(Declaration.id == declaration_id).first()
+    if not decl:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiếu.")
+    updated = _apply_workflow_transition(
+        db=db,
+        declaration=decl,
+        action=payload.action,
+        actor_role=payload.actor_role,
+        actor_name=payload.actor_name,
+        note=payload.note,
+        permit_no=payload.permit_no,
+    )
+    return _declaration_dict(updated)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ATTACHMENTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/declarations/{declaration_id}/attachments")
+async def upload_attachment(
+    declaration_id: int,
+    filename: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    decl = db.query(Declaration).filter(Declaration.id == declaration_id).first()
+    if not decl:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiếu.")
+
+    content = await request.body()
+    ext = Path(filename).suffix.lower()
+    validate_attachment_content(ext, content)
+
+    safe_name = f"{declaration_id}_{uuid.uuid4().hex}{ext}"
+    dest = ATTACHMENT_DIR / safe_name
+    dest.write_bytes(content)
+
+    content_type = request.headers.get("content-type", "application/octet-stream")
+    att = Attachment(
+        declaration_id=declaration_id,
+        original_name=filename[:255],
+        stored_name=safe_name,
+        content_type=content_type,
+        size_bytes=len(content),
+        created_at=now_iso(),
+    )
+    db.add(att)
+    db.commit()
+    db.refresh(att)
+    return {col.name: getattr(att, col.name) for col in att.__table__.columns}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SUGGESTIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SUGGESTION_FIELDS = {
+    "last_port": Declaration.last_port,
+    "working_port": Declaration.working_port,
+    "destination_port": Declaration.destination_port,
+    "master_name": Declaration.master_name,
+}
+
+
+@app.get("/api/suggestions")
+def get_suggestions(
+    field: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    col = _SUGGESTION_FIELDS.get(field)
+    if not col:
+        return []
+    rows = (
+        db.query(col)
+        .filter(col.isnot(None), col != "")
+        .distinct()
+        .order_by(col)
+        .limit(50)
+        .all()
+    )
+    return [r[0] for r in rows if r[0]]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# IMPORT (Excel)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/import/vessels")
+async def import_vessels(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    content = await request.body()
+    if not content:
+        raise HTTPException(status_code=400, detail="File trống.")
+    validate_attachment_content(".xlsx", content)
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+        sheets = read_workbook(content)
+        org_data, rows = vessel_rows(sheets)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Lỗi đọc file: {exc}")
+
+    org = _get_or_create_org(db, org_data.get("name"))
+    accepted = 0
+    rejected: list[dict] = []
+    for row in rows:
+        try:
+            existing = db.query(Vessel).filter(
+                Vessel.registration_no == row.get("registration_no")
+            ).first()
+            if existing:
+                for k, v in row.items():
+                    if hasattr(existing, k) and k not in ("id", "created_at"):
+                        setattr(existing, k, excel_date(v) if "date" in k else v)
+                existing.updated_at = now_iso()
+            else:
+                safe = {
+                    k: (excel_date(v) if "date" in k else v)
+                    for k, v in row.items()
+                    if hasattr(Vessel, k) and k not in ("id",)
+                }
+                safe["organization_id"] = org.id if org else None
+                safe["created_at"] = now_iso()
+                safe["updated_at"] = now_iso()
+                db.add(Vessel(**safe))
+            db.flush()
+            accepted += 1
+        except Exception as exc:
+            rejected.append({"row": row.get("name"), "error": str(exc)})
+    db.commit()
+    return {"accepted": accepted, "rejected": rejected}
 
 
-if __name__ == "__main__":
-    main()
+@app.post("/api/import/declaration")
+async def import_declaration(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    content = await request.body()
+    if not content:
+        raise HTTPException(status_code=400, detail="File trống.")
+    validate_attachment_content(".xlsx", content)
+    try:
+        sheets = read_workbook(content)
+        row = declaration_row(sheets)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Lỗi đọc file: {exc}")
+
+    row["created_at"] = now_iso()
+    row["updated_at"] = now_iso()
+    row["reference_no"] = f"TT-IMP-{datetime.now():%Y%m%d-%H%M%S}-{datetime.now().microsecond:06d}"
+    row["workflow_status"] = "DRAFT"
+    row["status"] = "DRAFT"
+    row["unload_json"] = json.dumps(cargo(row.pop("unload", {})), ensure_ascii=False)
+    row["load_json"] = json.dumps(cargo(row.pop("load", {})), ensure_ascii=False)
+
+    safe = {k: v for k, v in row.items() if hasattr(Declaration, k)}
+    for required in ("company_name", "vessel_name", "registration_no", "vessel_type",
+                     "vessel_class", "last_port", "working_port", "eta", "etd",
+                     "master_name", "master_phone"):
+        if not safe.get(required):
+            safe[required] = "N/A"
+
+    decl = Declaration(**safe)
+    db.add(decl)
+    db.commit()
+    db.refresh(decl)
+    return {"accepted": 1, "rejected": [], "id": decl.id}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# REPORTS (Appendix 1 / 2 / 3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/reports/{kind}")
+def export_report(
+    kind: str,
+    from_: Optional[str] = Query(default=None, alias="from"),
+    to: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if kind not in ("appendix1", "appendix2", "appendix3"):
+        raise HTTPException(status_code=404, detail=f"Loại báo cáo '{kind}' không tồn tại.")
+
+    query = db.query(Declaration).filter(
+        Declaration.workflow_status.notin_(["DRAFT", "CHANGES_REQUESTED"])
+    )
+    if from_:
+        query = query.filter(Declaration.declaration_date >= from_)
+    if to:
+        query = query.filter(Declaration.declaration_date <= to)
+    decls = query.order_by(Declaration.declaration_date).all()
+
+    if kind == "appendix1":
+        headers = ["Mã phiếu", "Loại", "Phương tiện", "Số đăng ký", "ETA", "ETD",
+                   "Cảng cuối", "Cảng làm hàng", "Thuyền trưởng", "Trạng thái"]
+        rows = [[
+            d.reference_no,
+            "Vào cảng" if d.movement_type == "ARRIVAL" else "Rời cảng",
+            d.vessel_name, d.registration_no, d.eta, d.etd,
+            d.last_port, d.working_port, d.master_name, d.workflow_status,
+        ] for d in decls]
+        title = "Phụ lục 1 — Danh sách phiếu khai báo"
+
+    elif kind == "appendix2":
+        headers = ["Mã phiếu", "Phương tiện", "TEU dỡ", "TEU xếp", "Tấn dỡ", "Tấn xếp"]
+        rows = []
+        for d in decls:
+            unload = json.loads(d.unload_json or "{}")
+            load_ = json.loads(d.load_json or "{}")
+            rows.append([
+                d.reference_no, d.vessel_name,
+                unload.get("teu", 0), load_.get("teu", 0),
+                unload.get("tons", 0), load_.get("tons", 0),
+            ])
+        title = "Phụ lục 2 — Hàng hóa container và khối lượng"
+
+    else:  # appendix3
+        headers = ["Mã phiếu", "Phương tiện", "Giấy phép", "Ngày ban hành", "Người duyệt CV",
+                   "Người duyệt QLC", "Người duyệt BP"]
+        rows = [[
+            d.reference_no, d.vessel_name, d.permit_no or "",
+            d.issued_at or "", d.cv_approval, d.qlc_approval, d.bp_approval,
+        ] for d in decls if d.workflow_status == "ISSUED"]
+        title = "Phụ lục 3 — Giấy phép đã ban hành"
+
+    xlsx_bytes = make_xlsx(title, headers, rows)
+    filename = f"report_{kind}_{from_ or 'all'}_{to or 'all'}.xlsx"
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# INTEGRATIONS (Maritime Authority — PREPARE ONLY, no external calls in T0)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _ensure_connector(db: Session) -> IntegrationConnector:
+    connector = db.query(IntegrationConnector).filter(
+        IntegrationConnector.connector_key == "maritime-authority"
+    ).first()
+    if not connector:
+        connector = IntegrationConnector(
+            connector_key="maritime-authority",
+            display_name="Cảng vụ Đường thủy nội địa",
+            status="NOT_CONFIGURED",
+            auth_mode="PENDING_AUTHORITY_SPEC",
+            updated_at=now_iso(),
+        )
+        db.add(connector)
+        db.commit()
+        db.refresh(connector)
+    return connector
+
+
+@app.get("/api/integrations/maritime-authority")
+def get_integration_status(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    connector = _ensure_connector(db)
+    jobs = (
+        db.query(SyncJob)
+        .filter(SyncJob.connector_key == "maritime-authority")
+        .order_by(desc(SyncJob.created_at))
+        .limit(20)
+        .all()
+    )
+    connector_dict = {c.name: getattr(connector, c.name) for c in connector.__table__.columns}
+    connector_dict["readyToSend"] = connector.status == "READY"
+    return {
+        "connector": connector_dict,
+        "jobs": [
+            {c.name: getattr(j, c.name) for c in j.__table__.columns}
+            for j in jobs
+        ],
+    }
+
+
+@app.post("/api/integrations/prepare-sync")
+async def prepare_sync(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Prepare a sync payload (PREPARED status).
+    Does NOT send data to any external API — that is out of scope until T6
+    and requires official API contract, credentials and sandbox from the authority.
+    """
+    body = await request.json()
+    from_ = body.get("from")
+    to = body.get("to")
+
+    query = db.query(Declaration).filter(
+        Declaration.workflow_status == "ISSUED"
+    )
+    if from_:
+        query = query.filter(Declaration.declaration_date >= from_)
+    if to:
+        query = query.filter(Declaration.declaration_date <= to)
+    decls = query.all()
+
+    payload_data = [
+        {"reference_no": d.reference_no, "vessel_name": d.vessel_name,
+         "permit_no": d.permit_no, "issued_at": d.issued_at}
+        for d in decls
+    ]
+
+    job = SyncJob(
+        connector_key="maritime-authority",
+        report_from=from_ or "",
+        report_to=to or "",
+        status="PREPARED",
+        record_count=len(payload_data),
+        payload_json=json.dumps(payload_data, ensure_ascii=False),
+        created_at=now_iso(),
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return {
+        "id": job.id,
+        "recordCount": job.record_count,
+        "status": job.status,
+        "note": "Payload đã chuẩn bị nhưng chưa gửi. External sync chưa được kích hoạt (chờ T6).",
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STATIC FRONTEND (must be last)
+# ══════════════════════════════════════════════════════════════════════════════
+
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

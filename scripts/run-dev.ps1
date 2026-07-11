@@ -5,13 +5,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$server = Join-Path $projectRoot "backend\app.py"
 
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-    throw "Python 3.11 or newer is required."
+    throw "Python 3.13 or newer is required."
 }
 
-Write-Host "Tan Thuan Port declaration app" -ForegroundColor Cyan
-Write-Host "Open: http://$HostAddress`:$Port"
-python $server --host $HostAddress --port $Port
+Set-Location $projectRoot
 
+Write-Host "Tan Thuan Port declaration app (FastAPI)" -ForegroundColor Cyan
+Write-Host "Open: http://$HostAddress`:$Port"
+Write-Host "Press Ctrl+C to stop." -ForegroundColor Yellow
+
+python -m uvicorn backend.app:app --host $HostAddress --port $Port --reload

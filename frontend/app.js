@@ -10,10 +10,18 @@ const number = value => Number(value || 0);
 const fmtDate = value => value ? new Intl.DateTimeFormat('vi-VN', {dateStyle:'short', timeStyle: value.includes('T') ? 'short' : undefined}).format(new Date(value)) : '—';
 
 async function api(path, options = {}) {
+  const token = localStorage.getItem('token');
+  if (token) {
+    options.headers = { ...options.headers, 'Authorization': `Bearer ${token}` };
+  }
   const response = await fetch(path, options);
+  if (response.status === 401 && path !== '/api/auth/login') {
+    $('#login-dialog').showModal();
+    throw new Error('Vui lòng đăng nhập.');
+  }
   const type = response.headers.get('content-type') || '';
   const body = type.includes('json') ? await response.json() : await response.blob();
-  if (!response.ok) throw new Error(body.error || 'Yêu cầu không thành công.');
+  if (!response.ok) throw new Error(body.detail || body.error || 'Yêu cầu không thành công.');
   return body;
 }
 
@@ -437,6 +445,25 @@ async function init() {
   $('#crew-form').addEventListener('submit', saveCrew);
   $('#declaration-form').addEventListener('submit', saveDeclaration);
   $('#workflow-form').addEventListener('submit', saveWorkflow);
+
+  const loginForm = $('#login-form');
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const res = await api('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(values(loginForm))
+        });
+        localStorage.setItem('token', res.access_token);
+        $('#login-dialog').close();
+        toast('Đăng nhập thành công');
+        init(); // reload all data
+      } catch (error) { toast(error.message, true); }
+    });
+  }
+
   $('#add-crew').onclick = () => openCrew();
   $$('[data-close-dialog]').forEach(button => button.onclick = () => document.getElementById(button.dataset.closeDialog).close());
   let declarationTimer;

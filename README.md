@@ -1,7 +1,28 @@
 # Port Declaration System
 
-Web application for TIEN-TAN THUAN PORT customer declarations, vessel and crew
+Web application for TAN THUAN PORT customer declarations, vessel and crew
 certificate tracking, attachments, and periodic Maritime Administration reporting.
+
+## Requirements
+
+- Python 3.13 or newer
+- pip (standard)
+
+## Install
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+```
+
+## Run tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+All tests must pass before deploying or committing.
 
 ## Run locally
 
@@ -9,13 +30,24 @@ certificate tracking, attachments, and periodic Maritime Administration reportin
 powershell -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1
 ```
 
+Or manually:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.app:app --host 127.0.0.1 --port 8080 --reload
+```
+
 Open `http://127.0.0.1:8080`.
 
-The application uses Python 3.11+ standard-library modules only. The SQLite
-database is created at `data/cang_vu.db` and is intentionally ignored by Git.
+The application uses FastAPI + SQLAlchemy with SQLite at `data/cang_vu.db` (local dev).
+The `data/` directory is intentionally ignored by Git.
+
+## Architecture
+
+See `docs/ARCHITECTURE.md` (if present) and `docs/ADR-001-FASTAPI-MIGRATION.md`.
 
 ## Production boundary
 
-Use a persistent volume for `data/`, HTTPS through the company reverse proxy,
-and company authentication before accepting real customer data. See
-`docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md`.
+Use a persistent volume for `data/`, HTTPS through a reverse proxy, and
+environment-supplied secrets (no hardcoded credentials). See `docs/DEPLOYMENT.md`
+and the EA remediation roadmap at `docs/EA_EVALUATION_ROADMAP.md` for the
+full path to production readiness (T0–T6).

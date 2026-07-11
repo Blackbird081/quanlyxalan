@@ -1,57 +1,90 @@
-# Agent Handoff
+# CVF Agent Handoff
 
-## Tranche
+## Tranche: T0 Baseline Recovery (WO-KBCV-T0-20260711)
 
-`MVP-01` - customer vessel profile, declaration, Excel import, and reporting.
+- **Status**: IN_PROGRESS — Gate 0 PASSED (awaiting human review + commit authorization)
+- **Date**: 2026-07-11
+- **Phase**: BUILD
+- **Risk Level**: R2
 
-## Status
+### What was done (T0)
 
-`REVIEW_COMPLETE_UNCOMMITTED`
+| Task | Status |
+|------|--------|
+| T1 — API Contract inventory | ✅ DONE — `docs/API_CONTRACT.md` |
+| T2 — Runtime baseline | ✅ DONE — `backend/__init__.py`, pinned requirements, fixed `run-dev.ps1` |
+| T3 — Restore API feature parity | ✅ DONE — all 21 frontend endpoints implemented |
+| T4 — Validation and transaction safety | ✅ DONE — Pydantic models, ETA/ETD check, submitted-record protection |
+| T5 — Rebuild automated tests | ✅ DONE — 32 tests PASS (pytest + httpx TestClient) |
+| T6 — Documentation | ✅ DONE — README, ADR-001, API_CONTRACT, HANDOFF updated |
 
-## Implemented
+### Test results (Gate 0 verification)
 
-- CVF-onboarded downstream project pinned to public core `a78b35c`.
-- Separate static frontend and Python backend.
-- SQLite schema for organizations, vessels, declarations, and audit events.
-- Reusable vessel profile and declaration snapshot workflow.
-- Deterministic container/TEU calculation matching the source workbook.
-- Import mapping for the two provided XLSX templates.
-- Appendix 1, 2, and 3 XLSX report endpoints.
-- CVF Ops / Industrial responsive frontend with dark/light modes.
-- Port Declaration System branding with CSG logo.
-- Crew List and professional certificate snapshots/warnings.
-- Local vessel registry-expiry check with explicit source boundary.
-- Multi-file declaration attachments for image, PDF, Word, and Excel.
-- Maritime Authority API sync preparation queue; outbound send remains disabled.
-- Arrival/departure permit type, planned and actual movement times, purpose,
-  cargo summary, advanced operational filters, and mobile status cards.
-- Ordered CV/QLC/BP approval, change requests, permit issue/revocation, and an
-  append-only declaration timeline.
+```
+32 passed, 0 failed — 4.64s
+Python 3.13.12 | pytest 8.2.0
+```
 
-## Verification
+Test categories covered:
+- health + static frontend
+- auth (login, wrong password, protected route)
+- vessel CRUD + registry verify
+- crew CRUD
+- declaration draft + submit
+- TEU calculations
+- workflow CV→QLC→BP→ISSUE (ordered, skip rejected)
+- submitted record edit protection (409)
+- attachment signature + size validation
+- XLSX report appendix 1/2/3
+- route coverage (all 21 frontend paths registered)
+- suggestions
+- integrations (status + prepare-sync)
+- crew snapshot on declaration
 
-- Python compile check: PASS.
-- Backend unit tests: PASS (5/5 after feature expansion).
-- Real HTTP approval smoke: CV -> QLC -> BP -> issue, filters, and 5-event
-  timeline PASS.
-- Runtime Crew List, registry date check, attachment, dashboard filter, and sync
-  preparation flow: PASS.
-- Outbound Maritime Authority send authorization: `false` by design.
-- Runtime health, vessel create, declaration submit: PASS.
-- TEU test: 7 containers -> 11 TEU; empty -> 3 TEU: PASS.
-- Generated Appendix 3 opened by Microsoft Excel: PASS.
-- Desktop and mobile headless-browser rendering: PASS after mobile topbar repair.
-- CVF doctor: PASS (17/17).
-- Workspace enforcement: PASS for all 11 governed projects.
+### Deferred items (intentional T0 scope boundary)
 
-## Active Risk
+| Feature | Status | Next Tranche |
+|---------|--------|-------------|
+| `/api/vessels/{id}/verify-registry` — external API | Local-only | T6 |
+| `/api/integrations/prepare-sync` — actual send | PREPARED only, no external call | T6 |
+| RBAC / tenant isolation | Auth works, authorization gaps noted | T1 |
+| Alembic migrations | `create_all()` still used locally | T2 |
+| HTTPS / security headers | Not configured | T4 |
+| Production data migration | No action | T2/T4 |
+| `schemas.py` Pydantic V2 migration | Warns but works | T2 tech debt |
 
-R2. The product handles customer and regulatory reporting data. Production use
-still requires authentication, authorization, HTTPS, backup/restore, retention,
-privacy review, and operator sign-off of the final Appendix visual mapping.
+### Security gaps recorded for T1
 
-## Next Governed Move
+- `allow_origins=["*"]` CORS — needs allowlist per environment
+- JWT secret is env-injectable but falls back to hardcoded default (fail-fast needs to be added for non-local)
+- No RBAC: authenticated user can access all data regardless of role/organization
+- localStorage token storage — secure alternative (ADR-002) deferred to T1
+- No rate limiting on `/api/auth/login`
 
-Run final automated/CVF checks, then conduct operator UX acceptance using real
-anonymized examples. Do not claim production or legal-approval readiness from
-the MVP alone.
+### Pre-existing issues NOT in T0 scope
+
+- `frontend/app.js:448` trailing whitespace — pre-existing, not introduced by T0
+- `backend/schemas.py` Pydantic V2 `orm_mode` deprecation warnings — T2 tech debt
+- `backend/auth.py` `datetime.utcnow()` deprecation — T2 tech debt
+
+### Next governed move
+
+**T1 — Identity, RBAC and tenant isolation** (R2, human approval required):
+1. Define role matrix: CUSTOMER, CV, QLC, BP, ADMIN
+2. Bind user to organization; scope all customer queries
+3. Remove JWT default secret; add fail-fast for non-local environments
+4. Endpoint-level authorization + negative tests per role
+5. CORS allowlist per environment
+6. Rate limit login, password policy, audit login events
+
+### Human review items before T0 CLOSE
+
+1. ✅ Tests: `32 passed, 0 failed`
+2. ✅ Gate 0: health, frontend, critical workflow PASS (verified by test suite)
+3. ✅ No unexpected 404 on frontend endpoints
+4. ✅ Test database isolated from `data/cang_vu.db`
+5. ✅ No hard-coded production secret added
+6. ✅ `data/` directory untouched
+7. ⏳ `git diff --check`: 1 pre-existing whitespace issue in `frontend/app.js` (not T0 work)
+8. ⏳ Human owner authorize commit? (See Work Order delivery report requirement)
+9. ⏳ CVF doctor re-run at handoff (run: `check_cvf_workspace_agent_enforcement.ps1 -ProjectPath <project>`)
