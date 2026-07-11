@@ -1299,8 +1299,27 @@ def export_report(
     if kind not in ("appendix1", "appendix2", "appendix3"):
         raise HTTPException(status_code=404, detail=f"Loại báo cáo '{kind}' không tồn tại.")
 
+    if to:
+        try:
+            report_end = date.fromisoformat(to)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Ngày kết thúc báo cáo không hợp lệ.") from exc
+    else:
+        report_end = date.today()
+        to = report_end.isoformat()
+    if from_:
+        try:
+            report_start = date.fromisoformat(from_)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Ngày bắt đầu báo cáo không hợp lệ.") from exc
+    else:
+        report_start = date(report_end.year, 1, 1)
+        from_ = report_start.isoformat()
+    if report_start > report_end:
+        raise HTTPException(status_code=422, detail="Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.")
+
     query = db.query(Declaration).filter(
-        Declaration.workflow_status.notin_(["DRAFT", "CHANGES_REQUESTED"])
+        Declaration.workflow_status.in_(["APPROVED", "ISSUED"])
     )
     if user.role == "CUSTOMER":
         query = query.filter(Declaration.organization_id == user.organization_id)
@@ -1317,32 +1336,45 @@ def export_report(
         rows = [[
             d.reference_no,
             "Vào cảng" if d.movement_type == "ARRIVAL" else "Rời cảng",
-            d.vessel_name, d.registration_no, d.eta, d.etd,
+            d.vessel_name, d.registration_no,
+            d.actual_arrival_at or d.eta, d.actual_departure_at or d.etd,
             d.last_port, d.working_port, d.master_name, d.workflow_status,
         ] for d in decls]
-        title = "Phụ lục 1 — Danh sách phiếu khai báo"
+        title = "Phụ lục 1 — Cảng Tân Thuận"
 
     elif kind == "appendix2":
-        headers = ["Mã phiếu", "Phương tiện", "TEU dỡ", "TEU xếp", "Tấn dỡ", "Tấn xếp"]
-        rows = []
+        headers = ["Nhóm hàng", "Tấn kỳ báo cáo", "TEU kỳ báo cáo", "TEU rỗng", "Lượt phiếu"]
+        totals: dict[str, dict[str, float]] = {}
         for d in decls:
-            unload = json.loads(d.unload_json or "{}")
-            load_ = json.loads(d.load_json or "{}")
-            rows.append([
-                d.reference_no, d.vessel_name,
-                unload.get("teu", 0), load_.get("teu", 0),
-                unload.get("tons", 0), load_.get("tons", 0),
-            ])
-        title = "Phụ lục 2 — Hàng hóa container và khối lượng"
+            for cargo_item in (json.loads(d.unload_json or "{}"), json.loads(d.load_json or "{}")):
+                group = cargo_item.get("cargo_type") or "Khác"
+                bucket = totals.setdefault(group, {"tons": 0, "teu": 0, "empty_teu": 0, "calls": 0})
+                bucket["tons"] += float(cargo_item.get("tons") or 0)
+                bucket["teu"] += float(cargo_item.get("teu") or 0)
+                bucket["empty_teu"] += float(cargo_item.get("empty_teu") or 0)
+                bucket["calls"] += 1
+        rows = [[group, value["tons"], value["teu"], value["empty_teu"], value["calls"]] for group, value in sorted(totals.items())]
+        rows.append(["Tổng", sum(v["tons"] for v in totals.values()), sum(v["teu"] for v in totals.values()), sum(v["empty_teu"] for v in totals.values()), len(decls)])
+        title = "Phụ lục 2 — Cảng Tân Thuận"
 
     else:  # appendix3
-        headers = ["Mã phiếu", "Phương tiện", "Giấy phép", "Ngày ban hành", "Người duyệt CV",
-                   "Người duyệt QLC", "Người duyệt BP"]
-        rows = [[
-            d.reference_no, d.vessel_name, d.permit_no or "",
-            d.issued_at or "", d.cv_approval, d.qlc_approval, d.bp_approval,
-        ] for d in decls if d.workflow_status == "ISSUED"]
-        title = "Phụ lục 3 — Giấy phép đã ban hành"
+        headers = ["Mã phiếu", "Tên PTTND", "Số đăng ký", "Loại", "Cấp", "Chiều dài", "DWT", "GT",
+                   "Hướng hàng", "Loại hình", "Tên hàng", "Tấn", "TEU", "TEU rỗng", "Cảng rời", "Cảng làm hàng",
+                   "Cảng đích", "Ngày đến", "Ngày rời", "Đại lý", "sum_total"]
+        rows = []
+        for d in decls:
+            cargo_rows = [("Dỡ", json.loads(d.unload_json or "{}")), ("Xếp", json.loads(d.load_json or "{}"))]
+            for direction, item in cargo_rows:
+                if not any((item.get("cargo_type"), item.get("cargo_name"), item.get("tons"), item.get("teu"))):
+                    continue
+                tons, teu = float(item.get("tons") or 0), float(item.get("teu") or 0)
+                rows.append([d.reference_no, d.vessel_name, d.registration_no, d.vessel_type, d.vessel_class,
+                             d.length_m or 0, d.deadweight_tons or 0, d.gross_tonnage or 0, direction,
+                             item.get("movement_type") or "", item.get("cargo_name") or "", tons, teu,
+                             float(item.get("empty_teu") or 0), d.last_port, d.working_port, d.destination_port,
+                             d.actual_arrival_at or d.eta, d.actual_departure_at or d.etd,
+                             d.company_name, f"{tons} tấn / {teu} TEU"])
+        title = "Phụ lục 3 — Cảng Sài Gòn-Cảng Tân Thuận"
 
     xlsx_bytes = make_xlsx(title, headers, rows)
     filename = f"report_{kind}_{from_ or 'all'}_{to or 'all'}.xlsx"

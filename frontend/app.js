@@ -543,7 +543,7 @@ async function init() {
   $('#import-declaration').onchange = event => importFile(event.target, '/api/import/declaration');
   $$('[data-report]').forEach(button => button.onclick = () => exportReport(button.dataset.report));
   $('#prepare-sync').onclick = prepareSync;
-  const today = new Date(); $('#report-to').value = today.toISOString().slice(0,10); $('#report-from').value = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
+  const today = new Date(); $('#report-to').value = today.toISOString().slice(0,10); $('#report-from').value = `${today.getFullYear()}-01-01`;
   try {
     [state.catalogs, state.vessels, state.organizations, state.crew] = await Promise.all([api('/api/catalogs'), api('/api/vessels'), api('/api/organizations'), api('/api/crew')]);
     $('#api-state').className = 'state-badge ok'; $('#api-state').textContent = 'Đã kết nối';

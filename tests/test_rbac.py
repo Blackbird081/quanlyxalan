@@ -310,7 +310,7 @@ def test_customer_scope_covers_lists_suggestions_crew_and_reports(client):
     assert report_a.status_code == 200
     with zipfile.ZipFile(BytesIO(report_a.content)) as archive:
         worksheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
-    assert "REF-A-SUB-1" in worksheet
+    assert "REF-A-SUB-1" not in worksheet  # pending review is not report-eligible
     assert "REF-B-SUB-1" not in worksheet
 
 
