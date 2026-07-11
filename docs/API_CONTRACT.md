@@ -73,6 +73,17 @@ This system implements four roles with distinct scopes of operations.
 
 *   **Tenant Constraint**: If `CUSTOMER`, resources are strictly filtered to the user's `organization_id`. Write operations verify the target vessel and crew belong to the user's organization.
 
+### NOTIFICATION PREFERENCES
+
+| Method | Path | Allowed Roles | Request | Response |
+|--------|------|---------------|---------|----------|
+| GET | `/api/notification-preferences` | Authenticated | — | `{in_app_certificate_reminders}` |
+| PUT | `/api/notification-preferences` | Authenticated | `{in_app_certificate_reminders: boolean}` | same |
+
+The only active delivery is in-app certificate reminder visibility. Changes are
+recorded in the audit trail. Email and Teams are intentionally not represented
+as active choices until their connectors and delivery controls are approved.
+
 ### DECLARATIONS & WORKFLOW
 
 | Method | Path | Allowed Roles | Request | Response |

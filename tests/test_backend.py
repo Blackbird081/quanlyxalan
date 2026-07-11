@@ -203,6 +203,8 @@ def test_static_frontend(client):
     assert 'class="skip-link"' in res.text
     assert 'id="main-content" tabindex="-1" aria-busy="false"' in res.text
     assert 'id="toast-region" class="toast-region" role="status"' in res.text
+    assert 'id="in-app-certificate-reminders"' in res.text
+    assert 'id="certificate-reminder"' in res.text
     app_js = client.get("/app.js").text
     assert "function setSubmitting(" in app_js
     assert "node.setAttribute('role', error ? 'alert' : 'status')" in app_js
@@ -231,6 +233,27 @@ def test_login_success(client):
     res = client.post("/api/auth/login", json={"username": "testuser", "password": "testpass"})
     assert res.status_code == 200
     assert "access_token" in res.json()
+
+
+def test_notification_preferences_are_user_controlled_and_audited(client, customer_headers):
+    before = client.get("/api/notification-preferences", headers=customer_headers)
+    assert before.status_code == 200
+    assert before.json()["in_app_certificate_reminders"] is True
+
+    updated = client.put(
+        "/api/notification-preferences",
+        headers=customer_headers,
+        json={"in_app_certificate_reminders": False},
+    )
+    assert updated.status_code == 200
+    assert updated.json() == {"in_app_certificate_reminders": False}
+    assert client.get("/api/notification-preferences", headers=customer_headers).json() == updated.json()
+
+    db = SessionLocal()
+    try:
+        assert db.query(AuditEvent).filter(AuditEvent.action == "NOTIFICATION_PREFERENCES_UPDATE").count() >= 1
+    finally:
+        db.close()
 
 
 def test_login_wrong_password(client):

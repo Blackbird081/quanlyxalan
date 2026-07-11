@@ -16,6 +16,7 @@ class User(Base):
     role = Column(String, default="CUSTOMER")  # ADMIN, CV, QLC, BP, CUSTOMER
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     is_active = Column(Integer, nullable=False, default=1)  # Using Integer (0 or 1) as SQLite boolean
+    notification_preferences_json = Column(Text, nullable=False, default='{"in_app_certificate_reminders": true}')
     created_at = Column(String, default=now_iso)
 
     organization = relationship("Organization", back_populates="users", lazy="select")

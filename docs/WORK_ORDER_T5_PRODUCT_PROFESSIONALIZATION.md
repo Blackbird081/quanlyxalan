@@ -82,5 +82,8 @@ commit/Doctor evidence.
 - Local automated evidence: `65 passed`; `git diff --check` PASS.
 - `docs/T5_GATE5_EVIDENCE_PROTOCOL.md` defines the pending representative-user,
   WCAG/responsive and performance evidence without asserting unperformed UAT.
+- Added an auditable per-user in-app certificate-reminder preference, an
+  actual dashboard reminder when enabled, and Alembic migration rehearsal.
+  Email/Teams remain intentionally inactive without approved connectors.
 - Open before Gate 5: representative-user protocol/results, browser-assisted
   WCAG audit, responsive matrix and measured performance budget.

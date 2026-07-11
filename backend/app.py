@@ -403,6 +403,10 @@ class PrepareSyncRequest(BaseModel):
         return cls(from_=data.get("from"), to=data.get("to"))
 
 
+class NotificationPreferenceRequest(BaseModel):
+    in_app_certificate_reminders: bool = True
+
+
 # ── Catalog constants ──────────────────────────────────────────────────────────
 VESSEL_TYPES = [
     "Tàu hàng khô", "Tàu container", "Tàu hàng lỏng/dầu", "Tàu khách",
@@ -490,7 +494,8 @@ def get_me(user: User = Depends(get_current_user)):
         "full_name": user.full_name,
         "role": user.role,
         "organization_id": user.organization_id,
-        "organization_name": user.organization.name if user.organization else None
+        "organization_name": user.organization.name if user.organization else None,
+        "notification_preferences": _notification_preferences(user),
     }
 
 
@@ -498,6 +503,41 @@ def get_me(user: User = Depends(get_current_user)):
 def logout(user: User = Depends(get_current_user)):
     # Local client-side stateless token removal is primary, but we return 200 OK.
     return {"status": "ok", "detail": "Đăng xuất thành công."}
+
+
+def _notification_preferences(user: User) -> dict[str, bool]:
+    try:
+        stored = json.loads(user.notification_preferences_json or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        stored = {}
+    return {"in_app_certificate_reminders": bool(stored.get("in_app_certificate_reminders", True))}
+
+
+@app.get("/api/notification-preferences")
+def get_notification_preferences(user: User = Depends(get_current_user)):
+    return _notification_preferences(user)
+
+
+@app.put("/api/notification-preferences")
+def update_notification_preferences(
+    payload: NotificationPreferenceRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    preferences = {"in_app_certificate_reminders": payload.in_app_certificate_reminders}
+    # `user` is supplied by the authentication dependency and can be bound to
+    # a separate request session. Persist through this endpoint's transaction.
+    current_user = db.query(User).filter(User.id == user.id).first()
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Không thể xác thực thông tin đăng nhập")
+    current_user.notification_preferences_json = json.dumps(preferences, separators=(",", ":"))
+    audit(
+        db, "USER", current_user.id, "NOTIFICATION_PREFERENCES_UPDATE",
+        f"in_app_certificate_reminders={payload.in_app_certificate_reminders}", actor_user_id=user.id,
+        organization_id=current_user.organization_id,
+    )
+    db.commit()
+    return preferences
 
 
 # ══════════════════════════════════════════════════════════════════════════════

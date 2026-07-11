@@ -1,6 +1,6 @@
 const state = {
   catalogs: {}, vessels: [], declarations: [], organizations: [], crew: [],
-  declarationFilter: {}, declarationPage: 1, declarationPaging: null, editingVessel: null, editingDeclaration: null, editingCrew: null, workflowDeclaration: null,
+  declarationFilter: {}, declarationPage: 1, declarationPaging: null, dashboardCertificateWarnings: 0, editingVessel: null, editingDeclaration: null, editingCrew: null, workflowDeclaration: null,
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -97,6 +97,8 @@ async function loadDashboard(query = '') {
       ['CẢNH BÁO CHỨNG CHỈ', data.stats.certificateWarnings, 'Hết hạn hoặc còn dưới 30 ngày'],
     ];
     $('#stats').innerHTML = cards.map(card => `<article class="stat-card"><p>${card[0]}</p><strong>${card[1]}</strong><small>${card[2]}</small></article>`).join('');
+    state.dashboardCertificateWarnings = data.stats.certificateWarnings;
+    renderNotificationPreferences(state.dashboardCertificateWarnings);
     renderAttentionQueue(data.attention);
     if (state.currentUser?.role === 'ADMIN') {
       const admin = await api('/api/admin/operations-summary');
@@ -130,6 +132,32 @@ function renderAttentionQueue(queue) {
     location.hash = 'declarations';
     applyDeclarationFilters();
   };
+}
+
+function renderNotificationPreferences(certificateWarnings = 0) {
+  const control = $('#in-app-certificate-reminders');
+  control.checked = state.currentUser?.notification_preferences?.in_app_certificate_reminders !== false;
+  const reminder = $('#certificate-reminder');
+  const showReminder = control.checked && certificateWarnings > 0;
+  reminder.hidden = !showReminder;
+  reminder.textContent = showReminder ? `Có ${certificateWarnings} phương tiện có chứng chỉ hết hạn hoặc sắp hết hạn trong 30 ngày.` : '';
+}
+
+async function saveNotificationPreferences(event) {
+  const control = event.currentTarget;
+  control.disabled = true;
+  try {
+    const preferences = await api('/api/notification-preferences', {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({in_app_certificate_reminders: control.checked}),
+    });
+    state.currentUser.notification_preferences = preferences;
+    renderNotificationPreferences(state.dashboardCertificateWarnings);
+    toast(preferences.in_app_certificate_reminders ? 'Đã bật nhắc hạn chứng chỉ trong ứng dụng.' : 'Đã tắt nhắc hạn chứng chỉ trong ứng dụng.');
+  } catch (error) {
+    control.checked = !control.checked;
+    toast(error.message, true);
+  } finally { control.disabled = false; }
 }
 
 function renderDashboardMatches(items) {
@@ -602,6 +630,7 @@ async function init() {
   $('#crew-form').addEventListener('submit', saveCrew);
   $('#declaration-form').addEventListener('submit', saveDeclaration);
   $('#workflow-form').addEventListener('submit', saveWorkflow);
+  $('#in-app-certificate-reminders').addEventListener('change', saveNotificationPreferences);
 
   const loginForm = $('#login-form');
   if (loginForm) {

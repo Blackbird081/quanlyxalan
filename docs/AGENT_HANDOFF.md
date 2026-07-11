@@ -313,6 +313,8 @@ adapter-ready; external activation remains blocked.
 - Added `docs/T5_GATE5_EVIDENCE_PROTOCOL.md` for controlled UAT,
   accessibility, responsive and performance evidence collection.
 - CVF public core reconciled at `141031c`; Workspace Doctor: PASS 17/17.
+- Added audited, user-controlled in-app certificate-reminder preferences;
+  fresh SQLite Alembic upgrade through `f05f0f000005` rehearsal: PASS.
 - Tests: `65 passed, 0 failed`; `git diff --check`: PASS.
 
 ### Open Gate 5 evidence
