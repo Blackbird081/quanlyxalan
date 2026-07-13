@@ -125,7 +125,7 @@ function values(form) {
 }
 
 function pageName(route) {
-  return ({dashboard:'Tổng quan khai báo', declarations:'Phiếu khai báo', vessels:'Hồ sơ phương tiện', crew:'Danh sách thuyền viên', import:'Import dữ liệu Excel', reports:'Báo cáo Cảng vụ'})[route] || 'Tổng quan khai báo';
+  return ({dashboard:'Tổng quan khai báo', declarations:'Phiếu khai báo', vessels:'Hồ sơ phương tiện', crew:'Danh sách thuyền viên', import:'Nhập dữ liệu Excel', reports:'Báo cáo Cảng vụ'})[route] || 'Tổng quan khai báo';
 }
 
 function roleLabel(role) {
@@ -168,8 +168,8 @@ async function loadDashboard(query = '') {
         ['PHIẾU ĐÃ DUYỆT', admin.operations.approved, `${admin.operations.tons.toLocaleString('vi-VN')} tấn · ${admin.operations.teu.toLocaleString('vi-VN')} TEU`],
         ['CHỜ XỬ LÝ', admin.operations.pending, 'Theo các bước CV · QLC · BP'],
         ['CẢNH BÁO CHỨNG CHỈ', admin.fleet.certificateWarnings, `${admin.fleet.vessels} phương tiện`],
-        ['IMPORT', admin.imports.jobs, `${admin.imports.rejectedRows} dòng bị từ chối`],
-        ['BACKUP', admin.storage.backups, admin.storage.latestBackup || 'Chưa có backup'],
+        ['NHẬP DỮ LIỆU', admin.imports.jobs, `${admin.imports.rejectedRows} dòng bị từ chối`],
+        ['SAO LƯU', admin.storage.backups, admin.storage.latestBackup || 'Chưa có sao lưu'],
         ['AN NINH', admin.security.failedLogins, `${admin.security.disabledUsers} tài khoản bị khóa`],
       ];
       $('#admin-operations').hidden = false;
@@ -182,6 +182,7 @@ async function loadDashboard(query = '') {
     }
     $('#recent-table').innerHTML = declarationTable(data.recent);
     renderDashboardMatches(data.matches || []);
+    applyRoleDashboardLayout(state.currentUser?.role);
   } catch (error) { toast(error.message, true); }
   finally { $('#main-content').setAttribute('aria-busy', 'false'); }
 }
@@ -229,6 +230,14 @@ function renderDashboardMatches(items) {
   const container = $('#dashboard-search-results');
   if (!items.length) { container.innerHTML = ''; return; }
   container.innerHTML = items.map(v => `<article class="search-result-card"><strong>${esc(v.name)}</strong><small>${esc(v.registration_no)} · ${esc(v.vessel_type)}</small><span class="table-badge ${v.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(v.certificate_status)}</span></article>`).join('');
+}
+
+function applyRoleDashboardLayout(role) {
+  const container = document.getElementById('dashboard-container');
+  if (!container) return;
+  // Remove previous role classes then apply current
+  container.className = container.className.replace(/\bdashboard-role-\S+/g, '').trim();
+  if (role) container.classList.add(`dashboard-role-${role.toLowerCase()}`);
 }
 
 function certificateLabel(status) {
@@ -420,17 +429,33 @@ function crewOptionsHtml(vesselId, selectedIds = []) {
   return pool.map(member => `<option value="${member.id}" ${selectedIds.some(id => Number(id) === member.id) ? 'selected' : ''}>${esc(member.full_name)} — ${esc(member.crew_role)} — ${certificateLabel(member.certificate_status)}</option>`).join('');
 }
 
+function crewChecklistHtml(vesselId, selectedIds = []) {
+  if (!vesselId) return '<p class="muted">Chọn phương tiện ở bước 1 để xem danh sách thuyền viên.</p>';
+  const pool = state.crew.filter(member => Number(member.vessel_id) === Number(vesselId));
+  if (!pool.length) return '<p class="muted">Chưa có thuyền viên gán cho phương tiện này — vào <strong>Danh sách thuyền viên</strong> để gán trước khi tạo phiếu.</p>';
+  return `<ul class="crew-checklist" role="group" aria-label="Chọn thuyền viên đi theo phương tiện">${pool.map(member => {
+    const isCaptain = member.crew_role.trim().toLowerCase() === 'thuyền trưởng';
+    const checked = selectedIds.some(id => Number(id) === member.id);
+    return `<li><label class="${isCaptain ? 'crew-captain' : ''}">
+      <input type="checkbox" name="crew_ids" value="${member.id}" ${checked ? 'checked' : ''}>
+      <span class="crew-name">${esc(member.full_name)}</span>
+      ${isCaptain ? '<span class="crew-badge-captain">Thuyền trưởng</span>' : `<span class="crew-role">${esc(member.crew_role)}</span>`}
+      <span class="crew-cert table-badge ${member.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(member.certificate_status)}</span>
+    </label></li>`;
+  }).join('')}</ul>`;
+}
+
 function captainForVessel(vesselId) {
   return state.crew.find(member => Number(member.vessel_id) === Number(vesselId) && member.crew_role.trim().toLowerCase() === 'thuyền trưởng');
 }
 
 function refreshCrewOptions(vesselId) {
-  const select = $('#declaration-crew');
-  if (!select) return;
-  const currentlySelected = [...select.selectedOptions].map(option => Number(option.value));
+  const container = $('#declaration-crew-container');
+  if (!container) return;
+  const currentlySelected = [...container.querySelectorAll('[name="crew_ids"]:checked')].map(el => Number(el.value));
   const captain = captainForVessel(vesselId);
   if (captain && !currentlySelected.includes(captain.id)) currentlySelected.push(captain.id);
-  select.innerHTML = crewOptionsHtml(vesselId, currentlySelected);
+  container.innerHTML = crewChecklistHtml(vesselId, currentlySelected);
   const form = $('#declaration-form');
   form.elements.master_name.value = captain?.full_name || '';
   form.elements.master_phone.value = captain?.phone || '';
@@ -440,9 +465,9 @@ function refreshCrewOptions(vesselId) {
 
 const DECLARATION_STEPS = [
   { label: 'Phương tiện' },
-  { label: 'Thuyền trưởng & thuyền viên' },
   { label: 'Hành trình' },
   { label: 'Hàng hóa' },
+  { label: 'Thuyền trưởng & thuyền viên' },
   { label: 'Đính kèm' },
   { label: 'Xem lại & Gửi' },
 ];
@@ -533,9 +558,9 @@ function captureWizardFormState() {
   const form = $('#declaration-form');
   if (!form) return state.editingDeclaration;
   Object.assign(state.editingDeclaration, values(form));
-  const crewSelect = form.elements.crew_ids;
-  if (crewSelect && state.declarationVesselMode === 'existing') {
-    state.editingDeclaration.crew_ids = [...crewSelect.selectedOptions].map(option => Number(option.value));
+  if (state.declarationVesselMode === 'existing') {
+    const checked = [...form.querySelectorAll('[name="crew_ids"]:checked')];
+    state.editingDeclaration.crew_ids = checked.map(el => Number(el.value));
   }
   return state.editingDeclaration;
 }
@@ -544,11 +569,63 @@ function activeStepFields(step) {
   return $$(`.wizard-step[data-step="${step}"] input, .wizard-step[data-step="${step}"] select, .wizard-step[data-step="${step}"] textarea`, $('#declaration-fields'));
 }
 
-function validateStep(step) {
-  for (const el of activeStepFields(step)) {
-    if (el.disabled || el.type === 'hidden' || el.hidden) continue;
-    if (!el.reportValidity()) return false;
+function showStepErrors(invalidFields) {
+  const container = $('#step-error-summary');
+  if (!container) return;
+  if (!invalidFields.length) { container.hidden = true; return; }
+  container.hidden = false;
+  container.innerHTML = `<strong>Vui lòng điền đầy đủ thông tin bắt buộc:</strong><ul>${invalidFields.map(f => `<li>${esc(f)}</li>`).join('')}</ul>`;
+  requestAnimationFrame(() => container.focus());
+}
+
+function showFieldError(name, message) {
+  const form = $('#declaration-form');
+  if (!form) return;
+  const input = form.elements[name];
+  if (!input) return;
+  input.setAttribute('aria-invalid', 'true');
+  const errorId = `field-err-${name}`;
+  input.setAttribute('aria-describedby', errorId);
+  let errorEl = document.getElementById(errorId);
+  if (!errorEl) {
+    errorEl = document.createElement('span');
+    errorEl.id = errorId;
+    errorEl.className = 'field-error';
+    input.closest('label')?.appendChild(errorEl);
   }
+  errorEl.textContent = message;
+  input.addEventListener('input', () => clearFieldError(name), { once: true });
+}
+
+function clearFieldError(name) {
+  const form = $('#declaration-form');
+  if (!form) return;
+  const input = form.elements[name];
+  if (!input) return;
+  input.removeAttribute('aria-invalid');
+  input.removeAttribute('aria-describedby');
+  const errorEl = document.getElementById(`field-err-${name}`);
+  if (errorEl) errorEl.remove();
+}
+
+function validateStep(step) {
+  const fields = activeStepFields(step);
+  const invalid = [];
+  let firstInvalid = null;
+  for (const el of fields) {
+    if (el.disabled || el.type === 'hidden' || el.hidden) continue;
+    if (!el.checkValidity()) {
+      if (!firstInvalid) firstInvalid = el;
+      const label = el.closest('label')?.childNodes[0]?.textContent?.trim().replace(/^\*\s*/, '') || el.name;
+      invalid.push(label);
+    }
+  }
+  if (invalid.length) {
+    showStepErrors(invalid);
+    if (firstInvalid) requestAnimationFrame(() => firstInvalid.focus());
+    return false;
+  }
+  showStepErrors([]);
   return true;
 }
 
@@ -595,7 +672,7 @@ function reviewSummaryHtml(d) {
   const isNew = state.declarationVesselMode === 'new';
   const captainName = isNew ? state.declarationNewCrew[0]?.full_name : d.master_name;
   const captainPhone = isNew ? state.declarationNewCrew[0]?.phone : d.master_phone;
-  const crewTotal = isNew ? state.declarationNewCrew.length : ($('#declaration-crew')?.selectedOptions.length || (d.crew_ids || []).length);
+  const crewTotal = isNew ? state.declarationNewCrew.length : (document.querySelectorAll('[name="crew_ids"]:checked').length || (d.crew_ids || d.crew || []).length);
   return `<section class="form-section"><h3>F. Xem lại & Gửi</h3><div class="section-grid">
     <div class="attachment-field wide-field"><strong>Phương tiện</strong><p>${esc(d.vessel_name || '')} — ${esc(d.registration_no || '')}${isNew ? ' (hồ sơ mới)' : ''}</p></div>
     <div class="attachment-field wide-field"><strong>Thuyền trưởng</strong><p>${captainName ? `${esc(captainName)}${captainPhone ? ` · ${esc(captainPhone)}` : ''}` : 'Chưa có thông tin'}</p></div>
@@ -614,6 +691,7 @@ function renderDeclarationWizard() {
 
   $('#declaration-fields').innerHTML = `
     ${wizardNavHtml()}
+    <div id="step-error-summary" class="step-error-summary" role="alert" tabindex="-1" hidden></div>
     <input name="master_name" type="hidden" value="${esc(masterName)}">
     <input name="master_phone" type="hidden" value="${esc(masterPhone)}">
     <div class="wizard-step" data-step="1" ${state.wizardStep === 1 ? '' : 'hidden'}>
@@ -641,14 +719,6 @@ function renderDeclarationWizard() {
       </div></section>
     </div>
     <div class="wizard-step" data-step="2" ${state.wizardStep === 2 ? '' : 'hidden'}>
-      <section class="form-section"><h3>E. Thuyền trưởng và thuyền viên</h3><div class="section-grid">
-        <label class="wide-field" ${isNew ? 'hidden' : ''}>Chọn thuyền trưởng / thuyền viên<select name="crew_ids" id="declaration-crew" multiple ${isNew ? 'hidden' : 'size="4"'}>${isNew ? '' : crewOptionsHtml(d.vessel_id, [...(d.crew || []).map(item => item.id), ...(assignedCaptain ? [assignedCaptain.id] : [])])}</select></label>
-        ${isNew
-          ? `<div class="wide-field">${newCrewRowsHtml()}</div>`
-          : `<div class="attachment-field wide-field"><strong>Thuyền trưởng theo phương tiện</strong><p id="assigned-captain">${masterName ? `${esc(masterName)}${masterPhone ? ` · ${esc(masterPhone)}` : ''}` : 'Chưa gán Thuyền trưởng cho phương tiện này.'}</p><small>Thuyền trưởng được lấy tự động từ Danh sách thuyền viên theo ID phương tiện.</small></div>`}
-      </div></section>
-    </div>
-    <div class="wizard-step" data-step="3" ${state.wizardStep === 3 ? '' : 'hidden'}>
       <section class="form-section"><h3>B. Hành trình</h3><div class="section-grid">
         ${field('last_port','Cảng rời cuối cùng',d.last_port,'text','required list="ports-list"')}
         ${field('working_port','Cảng / cầu bến đến làm hàng',d.working_port,'text','required list="ports-list"')}
@@ -660,9 +730,17 @@ function renderDeclarationWizard() {
         <datalist id="ports-list"></datalist>
       </div></section>
     </div>
-    <div class="wizard-step" data-step="4" ${state.wizardStep === 4 ? '' : 'hidden'}>
+    <div class="wizard-step" data-step="3" ${state.wizardStep === 3 ? '' : 'hidden'}>
       ${cargoFields('unload','C. Hàng hóa dỡ tại cảng',d.unload || {},false)}
       ${cargoFields('load','D. Hàng hóa xếp tại cảng',d.load || {},true)}
+    </div>
+    <div class="wizard-step" data-step="4" ${state.wizardStep === 4 ? '' : 'hidden'}>
+      <section class="form-section"><h3>E. Thuyền trưởng và thuyền viên</h3><div class="section-grid">
+        <div id="declaration-crew-container" class="wide-field">
+          ${isNew ? newCrewRowsHtml() : crewChecklistHtml(d.vessel_id, [...(d.crew || []).map(item => item.id), ...(assignedCaptain ? [assignedCaptain.id] : [])])}
+        </div>
+        ${isNew ? '' : `<div class="attachment-field wide-field"><strong>Thuyền trưởng theo phương tiện</strong><p id="assigned-captain">${masterName ? `${esc(masterName)}${masterPhone ? ` · ${esc(masterPhone)}` : ''}` : 'Chưa gán Thuyền trưởng cho phương tiện này.'}</p><small>Thuyền trưởng được lấy tự động từ Danh sách thuyền viên theo ID phương tiện. Bỏ chọn để loại khỏi phiếu lần này.</small></div>`}
+      </div></section>
     </div>
     <div class="wizard-step" data-step="5" ${state.wizardStep === 5 ? '' : 'hidden'}>
       <section class="form-section"><h3>Đính kèm hồ sơ</h3><div class="section-grid">
@@ -725,7 +803,7 @@ function declarationData() {
   // Blank optional number/date inputs arrive as "" via FormData, which the backend's
   // numeric fields reject outright — drop them so the schema's own default applies.
   Object.keys(data).forEach(key => { if (data[key] === '') delete data[key]; });
-  data.crew_ids = [...$('#declaration-form').elements.crew_ids.selectedOptions].map(option => Number(option.value));
+  data.crew_ids = [...$('#declaration-form').querySelectorAll('[name="crew_ids"]:checked')].map(el => Number(el.value));
   delete data.attachments;
   delete data.vessel_mode;
   ['unload','load'].forEach(prefix => {
@@ -800,7 +878,10 @@ async function saveDeclaration(event) {
       form.elements.vessel_id.appendChild(vesselOption);
       form.elements.master_name.value = state.declarationNewCrew[0]?.full_name || '';
       form.elements.master_phone.value = state.declarationNewCrew[0]?.phone || '';
-      form.elements.crew_ids.innerHTML = newCrewIds.map(crewId => `<option value="${crewId}" selected></option>`).join('');
+      const crewContainer = $('#declaration-crew-container');
+      if (crewContainer) {
+        crewContainer.innerHTML = newCrewIds.map(id => `<input type="checkbox" name="crew_ids" value="${id}" checked hidden>`).join('');
+      }
       state.declarationVesselMode = 'existing';
     }
     const result = await api(`/api/declarations?submit=${submit}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(declarationData())});
