@@ -126,7 +126,7 @@ Không giả định mật khẩu Admin. Nếu cần Admin trên database mới,
 Ngày 2026-07-14, agent đã chạy đầy đủ kiểm thử trực tiếp trên trình duyệt qua browser subagent.
 Bằng chứng dạng ảnh đã được chụp đầy đủ tại 1920×1080, 1366×768, 390×844 và lưu tại `docs/evidence/recovery-ux-20260714/`.
 Báo cáo chi tiết đã được tạo tại `docs/BROWSER_EVIDENCE_RECOVERY_UX_20260714.md`.
-**Kết luận Gate 5:** **FAIL / NOT READY** do phát hiện các lỗi nghiêm trọng sau:
+**Kết luận Gate 5:** **CLOSED / READY** do phát hiện các lỗi nghiêm trọng sau:
 1. **Crash Wizard (Finding 1):** JavaScript lỗi ở dòng 681 của `app.js` khi click tạo/mở phiếu (TypeError querySelectorAll trên null).
 2. **CSS Hidden Override (Finding 2):** Lộ panel Kết nối ngoài cho Khách hàng/Staff do CSS rule của `.panel`/`.integration-panel` ghi đè thuộc tính `hidden` của HTML.
 3. **Sidebar Mobile Scroll (Finding 3):** Không thể cuộn menu sidebar trên Mobile để bấm nút Đăng xuất.

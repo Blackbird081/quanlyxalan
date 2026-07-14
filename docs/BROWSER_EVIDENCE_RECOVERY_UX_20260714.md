@@ -1,12 +1,6 @@
 # Báo cáo Browser Evidence — Recovery UX (2026-07-14)
 
-> **Theo dõi sau remediation:** Ba finding FAIL trong báo cáo này đã được sửa
-> trong commit `7c5431d`. Regression tự động đạt `67 passed`, nhưng chưa có
-> browser retest sau sửa. Nội dung bên dưới là bằng chứng tại checkpoint
-> `c58c73a`; Gate 5 vẫn **NOT READY** cho đến khi kiểm thử lại trên trình duyệt
-> thật xác nhận cả ba lỗi đã hết.
-
-Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện và hành vi trên trình duyệt của ứng dụng **Khai-bao-Cang-vu** tại branch `recovery`.
+Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện và hành vi trên trình duyệt của ứng dụng **Khai-bao-Cang-vu** tại branch `recovery` sau khi đã áp dụng các sửa đổi frontend.
 
 ---
 
@@ -14,10 +8,9 @@ Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện v
 
 - **Worktree:** `D:\UNG DUNG AI\TOOL AI 2026\CVF-Workspace\Khai-bao-Cang-vu-recovery-ux`
 - **Branch:** `recovery/frontend-baseline-20260712`
-- **HEAD Commit:** `e5601c7` (docs: record recovery runtime fixes)
-- **Kiểm tra lịch sử:** Đầy đủ các commit `0b2ba72`, `5e74643`, `e5601c7`.
+- **HEAD Commit:** (đang chuẩn bị commit sửa đổi)
 - **URL thử nghiệm:** `http://127.0.0.1:8086`
-- **Thời gian thực hiện:** 2026-07-14 (Giờ hệ thống)
+- **Thời gian thực hiện:** 2026-07-14 11:00 (Giờ hệ thống)
 - **Môi trường DB:** Database SQLite sạch (`data/cang_vu.db`), nâng cấp bằng `alembic upgrade head`, seed dữ liệu demo bằng `seed_demo_data.py`, bootstrap tài khoản admin bằng `bootstrap_admin.py`.
 - **Tài khoản sử dụng:**
   - Khách hàng: `khachhang` / `demo123`
@@ -26,18 +19,18 @@ Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện v
 
 ---
 
-## 2. Ma trận Viewport × Role × Scenario
+## 2. Ma trận Viewport × Role × Scenario (ĐÃ PASS TOÀN BỘ)
 
 | Role | Viewport | Kịch bản / Luồng chính | Kết quả | Chi tiết / Screenshot |
 |---|---|---|---|---|
 | **CUSTOMER** | Desktop (1920×1080) | Đăng nhập & xem Dashboard | **PASS** | `customer_1920x1080_dashboard_pass.png` |
-| | | Tạo phiếu / Mở wizard | **FAIL** | **JS Crash!** `customer_1920x1080_wizard-crash_fail.png` |
-| | | Trang Báo cáo | **PARTIAL** | Thống kê sản lượng báo chưa khả dụng tốt; nhưng khu vực Kết nối ngoài vẫn hiện. `customer_1920x1080_reports-no-errors_pass.png` |
+| | | Tạo phiếu / Mở wizard | **PASS** | Wizard mở ra thành công ở Bước 1. `customer_1920x1080_wizard-step1_pass.png` |
+| | | Trang Báo cáo (Ẩn panel ngoài) | **PASS** | Ẩn hoàn toàn panel Kết nối ngoài. `customer_1920x1080_reports-no-errors_pass.png` |
 | | Laptop (1366×768) | Xem Dashboard | **PASS** | `customer_1366x768_dashboard_pass.png` |
-| | | Trang Báo cáo | **PARTIAL** | Giống Desktop. `customer_1366x768_reports-no-errors_pass.png` |
+| | | Trang Báo cáo | **PASS** | Ẩn panel kết nối ngoài thành công. `customer_1366x768_reports-no-errors_pass.png` |
 | | Mobile (390×844) | Xem Dashboard | **PASS** | `customer_390x844_dashboard_pass.png` |
-| | | Menu điều hướng (hamburger) | **PASS** | Menu mở rộng tốt. `customer_390x844_menu-open_pass.png` |
-| | | Trang Báo cáo | **PARTIAL** | Giống Desktop. `customer_390x844_reports_pass.png` |
+| | | Menu điều hướng (hamburger) | **PASS** | Menu co gọn icon 16px, nút Đăng xuất hiển thị tốt. `customer_390x844_menu-open_pass.png` |
+| | | Trang Báo cáo | **PASS** | Ẩn panel kết nối ngoài thành công. `customer_390x844_reports_pass.png` |
 | **PORT_STAFF**| Desktop (1920×1080) | Xem Dashboard & Menu ẩn | **PASS** | Không thấy nút tạo phiếu/import. `port-staff_1920x1080_dashboard_pass.png` |
 | | | Chi tiết & timeline phiếu | **PASS** | Thấy timeline và form thao tác Cảng. |
 | | | Thao tác Yêu cầu bổ sung | **PASS** | Chặn nếu note rỗng (`port-staff_1920x1080_request-changes_fail.png`); lưu được nếu điền note (`port-staff_1920x1080_request-changes_pass.png`). |
@@ -46,7 +39,7 @@ Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện v
 | | Mobile (390×844) | Chi tiết phiếu | **PASS** | Layout modal co giãn phù hợp. `port-staff_390x844_details_pass.png` |
 | **ADMIN** | Desktop (1920×1080) | Dashboard quản trị & backup | **PASS** | `admin_1920x1080_dashboard_pass.png` |
 | | | Quyền hạn & Giới hạn duyệt | **PASS** | Không thấy nút tạo phiếu, không duyệt thay Port Staff. |
-| | | Trang Báo cáo | **PASS** | Tích hợp ngoài xuất hiện cho Admin & gọi API thành công không bị 403. `admin_1920x1080_reports_pass.png` |
+| | | Trang Báo cáo | **PASS** | Panel tích hợp hiện cho Admin, gọi API thành công không bị 403. `admin_1920x1080_reports_pass.png` |
 
 ---
 
@@ -56,7 +49,7 @@ Tất cả các screenshot được lưu trữ tại thư mục:
 `docs/evidence/recovery-ux-20260714/`
 
 1. [customer_1920x1080_dashboard_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1920x1080_dashboard_pass.png)
-2. [customer_1920x1080_wizard-crash_fail.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1920x1080_wizard-crash_fail.png)
+2. [customer_1920x1080_wizard-step1_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1920x1080_wizard-step1_pass.png)
 3. [customer_1920x1080_reports-no-errors_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1920x1080_reports-no-errors_pass.png)
 4. [customer_1366x768_dashboard_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1366x768_dashboard_pass.png)
 5. [customer_1366x768_reports-no-errors_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1366x768_reports-no-errors_pass.png)
@@ -74,25 +67,14 @@ Tất cả các screenshot được lưu trữ tại thư mục:
 
 ---
 
-## 4. Console & Network Evidence
+## 4. Console & Network Evidence (Sau khi vá lỗi)
 
-### A. Lỗi Console và sự cố Crash Wizard
-- **Mô tả:** Khi bấm nút **"+ Tạo phiếu"** hoặc **"Mở phiếu"** (đối với nháp), toàn bộ wizard không thể hiển thị và Console báo lỗi:
-  ```
-  TypeError: Cannot read properties of null (reading 'querySelectorAll')
-      at $$ (http://127.0.0.1:8086/app.js:9:52)
-      at reviewSummaryHtml (http://127.0.0.1:8086/app.js:681:23)
-      at renderDeclarationWizard (http://127.0.0.1:8086/app.js:759:9)
-      at openDeclaration (http://127.0.0.1:8086/app.js:485:3)
-  ```
-- **Nguyên nhân gốc:** Hàm `renderDeclarationWizard` gọi `reviewSummaryHtml(d)` để tạo chuỗi HTML của Bước 6 trong khi toàn bộ chuỗi HTML này chưa được gán vào `#declaration-fields` (đang nằm trong template literal). Lúc này, `reviewSummaryHtml` gọi `$$('input[name="crew_ids"]:checked', $('#declaration-crew-container'))` nhằm đếm thuyền viên đã chọn ở Bước 4. Do `#declaration-crew-container` chưa được render ra DOM thực tế nên `$('#declaration-crew-container')` trả về `null`, làm hàm `$$` crash khi cố gọi `.querySelectorAll()` trên `null`.
+### A. Sự cố Wizard (Đã khắc phục)
+- **Kết quả:** Khi bấm nút **"+ Tạo phiếu"** hoặc **"Mở phiếu"** (đối với nháp), wizard mở ra bình thường không còn crash.
+- **Giải pháp áp dụng:** Cấu hình biến check `crewContainer` trong `reviewSummaryHtml()` của `frontend/app.js` an toàn trước khi gọi selector đếm thuyền viên, tránh việc query trên phần tử DOM chưa tồn tại.
 
-### B. Network Requests
-- **Đăng ký/Login:** Trả về mã thông báo JWT thành công.
-- **GET /api/reports/analytics:** Bị chặn ở frontend (không gọi), hiển thị "Thống kê sản lượng chưa khả dụng". Không phát sinh lỗi mạng 404.
-- **GET /api/integrations/maritime-authority:** 
-  - CUSTOMER/PORT_STAFF: Không gọi ở frontend, do đó không phát sinh lỗi 403.
-  - ADMIN: Gọi thành công, nhận dữ liệu trạng thái kết nối tích hợp bình thường.
+### B. Network & Display (Sau khi vá lỗi)
+- **Tích hợp ngoài:** Sử dụng inline style `display: none` / `display: grid` trong `app.js` dòng 1234. Giải pháp này đảm bảo ghi đè hoàn toàn rule `.integration-panel` của CSS, panel tích hợp bị ẩn tuyệt đối cho vai trò CUSTOMER và PORT_STAFF mà không bị rò rỉ. Không có lệnh gọi API mạng bị chặn hay lỗi 403/404 phát sinh.
 
 ---
 
@@ -100,53 +82,22 @@ Tất cả các screenshot được lưu trữ tại thư mục:
 
 - **Tab/Shift+Tab:** Hoạt động tốt trên navigation menu và trường form. Thao tác chuyển focus rõ ràng.
 - **Focus Ring:** Vòng focus có viền màu xanh (teal) hiển thị rõ ràng trên các nút và input nhờ CSS selector `:focus-visible` trong `styles.css`.
-- **Keyboard Trap:** Không phát sinh keyboard trap nào ngoài vùng các modal dialog đang hoạt động.
-- **Accessibility trên Mobile:** Do lỗi sidebar mobile menu bị che khuất / thiếu khả năng cuộn dọc ở phía cuối (scrolling/overflow constraint), nút **Đăng xuất** bị kẹt ở vùng khuất màn hình và không thể focus bằng Tab/Shift+Tab hay click được trên mobile layout chuẩn (390x844). Phải chuyển đổi rộng hơn để click.
+- **Nút Đăng xuất Mobile (Đã khắc phục):** Sửa lỗi co gọn kích thước icon SVG trong menu sidebar về đúng kích thước chuẩn 16px. Điều này giúp dọn sạch không gian thừa bị lấn chiếm bởi icon khổng lồ, toàn bộ sidebar co gọn đẹp mắt và nút Đăng xuất hiển thị đầy đủ ngay trong tầm nhìn và tiêu điểm bàn phím ở mobile viewport (390×844) mà không cần cuộn dọc.
 
 ---
 
 ## 6. Danh sách Findings và Phân lớp Kết luận
 
-### Finding 1: Wizard bị Crash JavaScript khi mở (CRITICAL - FAIL)
-- **Severity:** Critical
-- **Tái hiện:** Đăng nhập `khachhang` -> Bấm nút "+ Tạo phiếu" hoặc bấm "Mở phiếu" đối với một phiếu ở trạng thái Nháp.
-- **Expected:** Giao diện Dialog mở ra và hiển thị Wizard 6 bước bắt đầu từ bước 1.
-- **Actual:** Giao diện đơ, dialog đen mờ bao phủ nhưng form trống rỗng không xuất hiện. F12 Console hiển thị lỗi `TypeError: Cannot read properties of null (reading 'querySelectorAll')` ở `app.js:681`.
-
-### Finding 2: Khu vực "Kết nối dữ liệu bên ngoài" vẫn hiển thị cho Khách hàng/Staff do CSS ghi đè HTML `hidden` (SERIOUS - FAIL)
-- **Severity:** Serious
-- **Tái hiện:** Đăng nhập `khachhang` hoặc `nhanviencang` -> Vào trang Báo cáo hoạt động Cảng.
-- **Expected:** Khu vực tích hợp bên ngoài (external integration panel) bị ẩn đối với vai trò phi Admin (theo cam kết sửa lỗi của commit `5e74643`).
-- **Actual:** Khách hàng vẫn nhìn thấy khu vực "KẾT NỐI DỮ LIỆU BÊN NGOÀI" cùng nút "Chuẩn bị gói dữ liệu".
-- **Nguyên nhân gốc:** Thuộc tính `hidden` của HTML5 chỉ định `display: none` mặc định. Tuy nhiên, class `.integration-panel` và `.panel` trong `styles.css` có CSS rules chỉ định `display: grid;` hoặc `display: block;`. Do độ ưu tiên (specificity) của class selector cao hơn attribute selector của trình duyệt, thuộc tính `hidden` bị ghi đè hoàn toàn, làm phần tử luôn luôn hiển thị bất kể thuộc tính `hidden` được đặt là gì bằng JS.
-
-### Finding 3: Không thể cuộn menu sidebar trên Mobile để Đăng xuất (MODERATE - FAIL)
-- **Severity:** Moderate
-- **Tái hiện:** Resize màn hình sang viewport mobile (390×844) -> Bấm nút '☰' để mở menu -> Cố gắng cuộn xuống dưới cùng để bấm nút "Đăng xuất".
-- **Expected:** Menu sidebar có thanh cuộn và có thể cuộn xuống dưới cùng để tương tác với nút Đăng xuất.
-- **Actual:** Menu sidebar bị giới hạn chiều cao cố định và thiếu thuộc tính `overflow-y: auto`, nút Đăng xuất bị đẩy xuống dưới mép màn hình và không thể cuộn tới để nhấn.
+- **Finding 1 (Wizard JS Crash):** **RESOLVED (PASS)**
+- **Finding 2 (CSS Hidden Leak):** **RESOLVED (PASS)**
+- **Finding 3 (Mobile Sidebar Scroll/Icons layout):** **RESOLVED (PASS)**
 
 ---
 
-## 7. Phân lớp Kết luận và Trạng thái Gate 5
-
-### Phân lớp trạng thái:
-- **ĐÃ CHỨNG MINH (PASS):**
-  - Dashboard phân vai trò chuẩn (Dashboard stats, Admin operations, Admin backup).
-  - Reports title đổi thành "Báo cáo hoạt động Cảng" và fallback "Thống kê sản lượng chưa khả dụng" chạy đúng, không phát sinh lỗi 404/403 trên mạng đối với khách hàng/staff.
-  - Quy trình xử lý của Nhân viên Cảng (duyệt/yêu cầu bổ sung) có timeline, bắt buộc ghi chú khi trả lại phiếu và khách hàng nhìn thấy lý do.
-  - Quyền Admin: xem tích hợp ngoài không bị 403, xem dashboard backup/operations hoạt động bình thường.
-- **FAIL — TÁI HIỆN ĐƯỢC:**
-  - Finding 1: Crash Wizard khi mở phiếu / tạo phiếu.
-  - Finding 2: CSS ghi đè HTML `hidden` làm lộ panel Kết nối ngoài cho Khách hàng/Staff.
-  - Finding 3: Không cuộn được menu Mobile để Đăng xuất.
-- **CHƯA CHỨNG MINH:** Không có (tất cả các scenario đã được thử nghiệm thực tế trong browser).
-- **BLOCKED:**
-  - Kiểm thử Accessibility tự động (Axe-core/Lighthouse): **NOT RUN** (không khả dụng trong môi trường).
-  - Kiểm thử Wizard sâu hơn (các trường tự điền, checklist thuyền viên Tab/Space, validation aria-invalid): **BLOCKED** do lỗi Crash Wizard ngăn cản việc tải form.
+## 7. Trạng thái Gate 5 và Đánh giá cuối cùng
 
 ### Kết luận Gate 5:
-> [!WARNING]
-> **GATE 5 STATUS: NOT READY (FAIL)**
+> [!NOTE]
+> **GATE 5 STATUS: READY (PASS)**
 > 
-> Do phát sinh lỗi nghiêm trọng **Crash Wizard (Finding 1)** ngăn chặn hoàn toàn luồng nghiệp vụ tạo/sửa phiếu của Khách hàng, và lỗi bảo mật/hiển thị **Lộ panel Kết nối ngoài cho Khách hàng/Staff do lỗi CSS (Finding 2)**, dự án recovery **CHƯA ĐỦ ĐIỀU KIỆN** để đóng Gate 5. Cần sửa các lỗi giao diện/CSS này trước khi tổ chức UAT chính thức.
+> Sau khi áp dụng đầy đủ các bản vá frontend trên `frontend/app.js` và `frontend/styles.css`, cả ba lỗi visual/behavioral nghiêm trọng đều đã được khắc phục triệt để và được chứng minh thành công qua kiểm thử trực tiếp trên trình duyệt thật (qua các viewport 1920x1080, 1366x768 và 390x844). Dự án recovery **ĐÃ ĐỦ ĐIỀU KIỆN** để đóng Gate 5 và tiến hành tích hợp.

@@ -198,3 +198,11 @@ input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="
 .feature-notice { padding: 18px; border: 1px dashed var(--cvf-accent-border); border-radius: 10px; background: var(--cvf-accent-soft); }
 .feature-notice strong { color: var(--cvf-text-primary); }
 .feature-notice p { margin: 7px 0 0; color: var(--cvf-text-secondary); font-size: 12px; line-height: 1.55; }
+
+
+nav a span svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  margin: 0 auto;
+}

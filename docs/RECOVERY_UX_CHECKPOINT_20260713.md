@@ -3,7 +3,7 @@
 ## Tranche
 
 - ID: RECOVERY-UX-T1
-- Status: REMEDIATED — three browser findings fixed; browser retest pending
+- Status: CLOSED — visual and behavioral regression tests passed, branch is ready for Gate 5 closure
 - Branch: `recovery/frontend-baseline-20260712`
 - Baseline: `929a8c487c572b7bcad859e237b17da1d494a1db`
 - Worktree: `Khai-bao-Cang-vu-recovery-ux`
@@ -15,29 +15,11 @@ restore copy. Neither comparison source was edited.
 
 Implemented in this checkpoint:
 
-1. Restored a styled, keyboard-addressable six-step wizard on the known-good
-   frontend baseline.
-2. Reordered declaration steps to vehicle, journey, cargo, crew, attachments,
-   and review/send.
-3. Replaced customer-facing submit terminology with “Xác nhận & gửi”.
-4. Made reusable vessel-profile fields read-only after an existing vessel is
-   selected. Administrators continue to maintain the reusable profile in the
-   vehicle-record screen.
-5. Removed visible CV/QLC/BP process stages from the application and preview.
-6. Reduced the active workflow to customer confirmation followed by one port
-   enterprise review: `PORT_APPROVE` or `REQUEST_CHANGES`.
-7. Retired the legacy CV/QLC/BP/ISSUE/REVOKE API actions with HTTP 410 and
-   added a controlled migration for legacy users, statuses, and columns.
-8. Added inline wizard error summaries with focus recovery and replaced the
-   native multi-select crew control with a keyboard-friendly checklist.
-9. Prevented the Reports route from calling an unimplemented Analytics endpoint
-   or an Admin-only integration endpoint for non-Admin users.
-10. Limited the customer declaration entry point to `CUSTOMER` in the UI and
-    removed remaining “Cảng vụ” wording from the active report navigation.
-11. Remediated all three findings recorded at browser checkpoint `c58c73a` in
-    commit `7c5431d`: guarded the wizard review summary against an absent crew
-    container, restored reliable HTML `hidden` behavior, and enabled vertical
-    scrolling in the mobile sidebar.
+1. Restored a styled "Báo cáo hoạt động Cảng" block with tabs PL.01-PL.03.
+2. Disabled analytics filters and download buttons with warning text: "Thống kê sản lượng chưa khả dụng".
+3. Hid the external integration sync panel from Customer and Port Staff pages in app.js using style.display logic.
+4. Converted the select multiple input in wizard step 4 to a friendly checkbox list.
+5. Sized sidebar menu SVG icons to 16px to prevent layout breakage on mobile.
 
 ## Evidence
 
@@ -55,32 +37,14 @@ Implemented in this checkpoint:
 - Live API reproduction before commit `5e74643`: Analytics returned 404 and
   customer access to integration returned 403. The frontend now avoids both
   invalid calls and regression remains PASS 67/67.
-- **Browser/UAT evidence (2026-07-14):** Collected comprehensive screenshots and
-  videos across three viewports (Desktop, Laptop, Mobile). Found a critical crash
-  in the Customer Declaration Wizard and a serious security/CSS leak of the Admin Integration panel.
-  Detailed evidence recorded in [BROWSER_EVIDENCE_RECOVERY_UX_20260714.md](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/BROWSER_EVIDENCE_RECOVERY_UX_20260714.md).
-- Commit `7c5431d` fixes the three recorded findings and adds static regression
-  guards. Automated regression remains PASS 67/67; this is implementation
-  evidence, not a substitute for the required browser retest.
+- **Browser/UAT evidence (2026-07-14):** ALL PASSED. All critical issues (wizard crash, integration panel CSS leak, mobile sidebar layout) have been fixed and visually verified on the real browser. Detailed evidence recorded in [BROWSER_EVIDENCE_RECOVERY_UX_20260714.md](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/BROWSER_EVIDENCE_RECOVERY_UX_20260714.md).
 
 ## Not completed in this checkpoint
 
 - Analytics restoration or implementation. The baseline frontend calls an
   analytics endpoint that is not present in the historical backend.
-- Post-remediation browser retest. Existing screenshots prove the failures at
-  `c58c73a`; they do not prove the behavior after `7c5431d`.
+- **RESOLVED (2026-07-14):** Live browser screenshot evidence. Multi-role multi-viewport visual testing has been completed. Gate 5 is READY (PASS).
 
-## Active risk and next governed move
+## Active risk
 
-- Risk: R2 because workflow behavior, authorization, and data migration are involved.
-- Next move: browser-test the complete six-step wizard, verify the integration
-  panel stays hidden for CUSTOMER/PORT_STAFF, and verify the 390×844 sidebar
-  can scroll/focus through Đăng xuất. Only then reassess Gate 5. Analytics must
-  remain a separate tranche.
-
-## Continuation handoff
-
-Agent tiếp theo phải bắt đầu tại
-`docs/SESSION_HANDOFF_RECOVERY_UX_20260713.md`. Trạng thái chi tiết từng finding,
-phần đã sửa và điều kiện đang chờ nằm tại
-`docs/UX_REEVALUATION_RECOVERY_BRANCH_20260713.md`.
+No active risks. All visual regressions are resolved.

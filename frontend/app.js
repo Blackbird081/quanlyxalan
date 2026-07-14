@@ -1233,7 +1233,7 @@ async function init() {
     if (reportsNav) reportsNav.style.display = 'block';
 
     const externalIntegrationPanel = $('#external-integration-panel');
-    if (externalIntegrationPanel) externalIntegrationPanel.hidden = !isAdmin;
+    if (externalIntegrationPanel) externalIntegrationPanel.style.display = isAdmin ? 'grid' : 'none';
 
   } catch (err) {
     state.currentUser = null;
