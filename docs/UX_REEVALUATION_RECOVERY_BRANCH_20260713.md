@@ -26,7 +26,10 @@
 - **UX-004 — đã xử lý ở commit hiện tại:** control chọn thuyền viên dùng nhóm
   checkbox có vùng chạm tối thiểu thay cho native `select multiple`.
 - **Analytics — vẫn chờ tranche riêng.**
-- **Kiểm thử trực quan đa viewport (2026-07-14):** Đã thu thập đầy đủ bằng chứng thực tế qua browser subagent. Kết quả kiểm thử **FAIL (NOT READY)** do phát hiện lỗi crash JS nghiêm trọng của wizard, lỗi hiển thị panel kết nối ngoài do CSS, và lỗi cuộn menu sidebar mobile.
+- **Kiểm thử trực quan đa viewport (2026-07-14):** Bằng chứng tại `c58c73a`
+  ghi nhận FAIL do crash wizard, panel kết nối ngoài bị lộ và sidebar mobile
+  không cuộn. Ba finding đã được thi công tại `7c5431d`; browser retest sau sửa
+  chưa thực hiện nên Gate 5 vẫn **NOT READY**.
   Analytics không được gộp vào tranche sửa workflow/UX này.
 
 ## Sổ trạng thái sau thi công
@@ -38,13 +41,13 @@
 | UX-102 | **ĐÍNH CHÍNH — ĐÃ CÓ SẴN** | Phân trang hoạt động khi gửi `page`; `page_size=2` trả đúng hai items và metadata tổng. Response mảng khi không có `page` là tương thích ngược có chủ ý. | Không còn việc code trong checkpoint này. Chỉ cần performance test với tập dữ liệu tham chiếu khi Gate 5 được tổ chức. |
 | UX-103 | **ĐÃ XỬ LÝ** | Audit/runtime dùng “Khách hàng xác nhận gửi phiếu khai báo”; UI và preview bỏ “Nộp/nộp”. | Chờ browser/UAT xác nhận tất cả thông điệp nhìn thấy đúng ngữ cảnh. |
 | UX-104 | **CHƯA ĐÓNG** | Dashboard đã ẩn chức năng theo role và có attention queue theo vai trò. | Chờ task study hoặc UAT với khách hàng và nhân viên Cảng để xác định thứ tự ưu tiên widget; chưa đủ bằng chứng để tái cấu trúc dashboard. |
-| UX-105 | **BLOCKED** | Đã cấu hình mã nguồn nhưng bị chặn kiểm thử trực tiếp do lỗi Crash Wizard (Finding 1) làm vỡ DOM khi mở phiếu. | Sửa lỗi Crash Wizard để có thể tiến hành kiểm thử validation và focus ring. |
+| UX-105 | **ĐÃ THI CÔNG — CHỜ RETEST** | Commit `7c5431d` chặn lỗi null làm crash wizard. | Browser-test validation, focus ring và focus recovery xuyên suốt sáu bước. |
 | UX-106 | **ĐÃ XỬ LÝ** | “Crew List” đã được Việt hóa trong app và preview. | Chỉ còn rà soát nội dung bằng mắt trong lượt browser/UAT. |
 | UX-107 | **PASS** | Không còn role/stage CV/QLC/BP trong UI hay schema/runtime hiện hành; các tên action cũ chỉ còn trong deny-list và regression test để bảo đảm trả 410. | Không xóa deny-list/test vì đó là hàng rào chống client cũ gọi nhầm. |
 | UX-002 cũ | **ĐÃ XỬ LÝ** | Nhãn được đổi thành “Nháp cục bộ · chưa gửi”, có thời điểm lưu cục bộ khi phát sinh. | Chờ quan sát bằng mắt để xác nhận người dùng hiểu đúng; không được mô tả là đồng bộ server. |
-| UX-004 cũ | **BLOCKED** | Đã thi công checkbox checklist trong mã nguồn, nhưng bị chặn kiểm thử trực quan trên giao diện do lỗi Crash Wizard (Finding 1). | Sửa lỗi Crash Wizard để có thể kiểm thử Tab/Space và vùng chạm trên checklist. |
+| UX-004 cũ | **ĐÃ THI CÔNG — CHỜ RETEST** | Checkbox checklist đã có và commit `7c5431d` gỡ lỗi crash ngăn mở wizard. | Browser-test Tab/Space và vùng chạm trên checklist. |
 | Analytics | **CHƯA XỬ LÝ — NGOÀI TRANCHE** | Đã xác nhận frontend gọi endpoint chưa tồn tại và xử lý 404 bằng toast, không làm vỡ trang. | Cần một tranche riêng gồm định nghĩa chỉ số, API contract, quyền truy cập, dữ liệu tham chiếu và thiết kế biểu đồ trước khi code. |
-| Responsive/Gate 5 | **FAIL (NOT READY)** | Đã thu thập bằng chứng đa viewport thành công ngày 2026-07-14. Phát hiện lỗi nghiêm trọng crash wizard (Finding 1), lỗi CSS panel kết nối ngoài (Finding 2), và lỗi cuộn nút đăng xuất trên mobile (Finding 3). | Sửa các lỗi layout, CSS và JS crash nêu trên trước khi xin phê duyệt Gate 5. |
+| Responsive/Gate 5 | **REMEDIATED — NOT READY** | Commit `7c5431d` đã sửa ba finding từ browser evidence: crash wizard, CSS hidden bị ghi đè và sidebar mobile không cuộn. | Chạy browser retest ba scenario; chỉ xem xét Gate 5 sau khi có bằng chứng PASS. |
 
 ## Cập nhật lỗi runtime — 2026-07-14
 
@@ -57,6 +60,19 @@
 Regression sau sửa: `67 passed`; `node --check frontend/app.js` và
 `git diff --check` PASS. Phiên in-app browser không khả dụng ngày 2026-07-14,
 do đó chưa bổ sung ảnh hoặc tuyên bố Gate 5.
+
+## Remediation browser findings — commit `7c5431d`
+
+| Finding | Trạng thái thi công | Xử lý | Bằng chứng còn thiếu |
+|---|---|---|---|
+| Wizard crash | **ĐÃ THI CÔNG** | `reviewSummaryHtml()` kiểm tra crew container tồn tại trước khi truy vấn checkbox. | Mở tạo/sửa phiếu và đi đủ sáu bước trên browser thật. |
+| Integration panel leak | **ĐÃ THI CÔNG** | Quy tắc `[hidden] { display: none !important; }` ngăn layout CSS ghi đè trạng thái ẩn. | CUSTOMER và PORT_STAFF mở trang Báo cáo, xác nhận panel không hiển thị. |
+| Mobile sidebar scroll | **ĐÃ THI CÔNG** | Sidebar có `min-height: 0`, cuộn dọc và kiểm soát overscroll. | Viewport 390×844 cuộn/focus đến Đăng xuất và thao tác thành công. |
+
+Regression sau remediation: `67 passed`; `node --check frontend/app.js` và
+`git diff --check` PASS. Đây là bằng chứng thi công tự động, chưa phải browser
+evidence sau sửa. Gate 5 tiếp tục **NOT READY** cho đến khi hoàn tất ba retest
+trong bảng trên.
 
 ### Điều kiện để tiếp tục
 

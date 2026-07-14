@@ -15,6 +15,7 @@ worktree `main` hoặc bản restore.
 - Baseline khôi phục: `929a8c487c572b7bcad859e237b17da1d494a1db`
 - Commit workflow/UX nền: `0b2ba72`
 - Commit sửa lỗi runtime mới nhất: `5e74643`
+- Commit remediation browser findings: `7c5431d`
 - Phase: BUILD/REVIEW
 - Risk: R2 vì có workflow, RBAC và migration dữ liệu.
 - Live governance evidence required: YES đối với mọi tuyên bố về CVF governance.
@@ -67,6 +68,14 @@ Commit `5e74643` bổ sung:
 - Đổi nhãn “Báo cáo Cảng vụ” thành “Báo cáo hoạt động Cảng” và bỏ mô tả phê
   duyệt nhiều cấp còn sót.
 
+Commit `7c5431d` bổ sung:
+
+- Chặn crash wizard khi vùng chọn thuyền viên chưa tồn tại trong DOM.
+- Bảo đảm mọi phần tử có thuộc tính `hidden` không bị CSS layout ghi đè; panel
+  tích hợp không còn lộ cho CUSTOMER/PORT_STAFF theo mã nguồn hiện hành.
+- Cho sidebar mobile cuộn dọc để truy cập mục Đăng xuất.
+- Thêm regression guard và giữ toàn bộ test ở mức `67 passed`.
+
 ## Bằng chứng kỹ thuật hiện có
 
 - `python -m pytest -q`: `67 passed`.
@@ -112,7 +121,7 @@ Không giả định mật khẩu Admin. Nếu cần Admin trên database mới,
 
 ## Việc chưa hoàn thành và điều kiện chờ
 
-### 1. Browser/UAT và Gate 5 — ĐÃ THU THẬP BẰNG CHỨNG (FAIL / NOT READY)
+### 1. Browser/UAT và Gate 5 — ĐÃ SỬA FINDING, CHỜ RETEST (NOT READY)
 
 Ngày 2026-07-14, agent đã chạy đầy đủ kiểm thử trực tiếp trên trình duyệt qua browser subagent.
 Bằng chứng dạng ảnh đã được chụp đầy đủ tại 1920×1080, 1366×768, 390×844 và lưu tại `docs/evidence/recovery-ux-20260714/`.
@@ -121,6 +130,11 @@ Báo cáo chi tiết đã được tạo tại `docs/BROWSER_EVIDENCE_RECOVERY_U
 1. **Crash Wizard (Finding 1):** JavaScript lỗi ở dòng 681 của `app.js` khi click tạo/mở phiếu (TypeError querySelectorAll trên null).
 2. **CSS Hidden Override (Finding 2):** Lộ panel Kết nối ngoài cho Khách hàng/Staff do CSS rule của `.panel`/`.integration-panel` ghi đè thuộc tính `hidden` của HTML.
 3. **Sidebar Mobile Scroll (Finding 3):** Không thể cuộn menu sidebar trên Mobile để bấm nút Đăng xuất.
+
+Ba finding trên đã được sửa trong commit `7c5431d`. Chưa có browser evidence
+sau remediation, vì vậy ảnh tại `docs/evidence/recovery-ux-20260714/` chỉ chứng
+minh trạng thái lỗi trước sửa. Cần chạy lại đúng ba scenario trước khi thay đổi
+kết luận Gate 5.
 
 ### 2. Analytics
 
@@ -157,11 +171,11 @@ chưa có chỉ đạo rõ của người dùng.
 ## Trình tự tiếp quản đề nghị
 
 1. Chạy First-Request Protocol trong `AGENTS.md` và Workspace Doctor.
-2. Xác nhận cwd, branch, `git status`, commit `5e74643` có trong lịch sử.
+2. Xác nhận cwd, branch, `git status`, commit `7c5431d` có trong lịch sử.
 3. Đọc bảng trạng thái trong báo cáo UX; không dùng kết luận lỗi UX-101/102 cũ.
 4. Chạy migration và `pytest` trước kiểm thử browser.
-5. Thu thập browser evidence cho các mục đang chờ; không sửa analytics trong
-   cùng tranche.
+5. Retest browser cho wizard sáu bước, panel tích hợp theo role và sidebar
+   mobile 390×844; không sửa analytics trong cùng tranche.
 6. Nếu có sửa code, ghi bằng chứng vào checkpoint/handoff và commit trên branch
    recovery; không merge/push nếu chưa được người dùng yêu cầu.
 

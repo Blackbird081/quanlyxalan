@@ -3,7 +3,7 @@
 ## Tranche
 
 - ID: RECOVERY-UX-T1
-- Status: REVIEWED — browser evidence collected, failed due to critical UI crashes and CSS leaks
+- Status: REMEDIATED — three browser findings fixed; browser retest pending
 - Branch: `recovery/frontend-baseline-20260712`
 - Baseline: `929a8c487c572b7bcad859e237b17da1d494a1db`
 - Worktree: `Khai-bao-Cang-vu-recovery-ux`
@@ -34,6 +34,10 @@ Implemented in this checkpoint:
    or an Admin-only integration endpoint for non-Admin users.
 10. Limited the customer declaration entry point to `CUSTOMER` in the UI and
     removed remaining “Cảng vụ” wording from the active report navigation.
+11. Remediated all three findings recorded at browser checkpoint `c58c73a` in
+    commit `7c5431d`: guarded the wizard review summary against an absent crew
+    container, restored reliable HTML `hidden` behavior, and enabled vertical
+    scrolling in the mobile sidebar.
 
 ## Evidence
 
@@ -55,19 +59,24 @@ Implemented in this checkpoint:
   videos across three viewports (Desktop, Laptop, Mobile). Found a critical crash
   in the Customer Declaration Wizard and a serious security/CSS leak of the Admin Integration panel.
   Detailed evidence recorded in [BROWSER_EVIDENCE_RECOVERY_UX_20260714.md](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/BROWSER_EVIDENCE_RECOVERY_UX_20260714.md).
+- Commit `7c5431d` fixes the three recorded findings and adds static regression
+  guards. Automated regression remains PASS 67/67; this is implementation
+  evidence, not a substitute for the required browser retest.
 
 ## Not completed in this checkpoint
 
 - Analytics restoration or implementation. The baseline frontend calls an
   analytics endpoint that is not present in the historical backend.
-- **RESOLVED (2026-07-14):** Live browser screenshot evidence. Multi-role multi-viewport visual testing has been completed. Gate 5 remains NOT READY (FAIL) due to critical visual findings.
+- Post-remediation browser retest. Existing screenshots prove the failures at
+  `c58c73a`; they do not prove the behavior after `7c5431d`.
 
 ## Active risk and next governed move
 
 - Risk: R2 because workflow behavior, authorization, and data migration are involved.
-- Next move: run this worktree locally, visually inspect desktop/mobile wizard,
-  then either approve RECOVERY-UX-T1 or record layout corrections. Analytics
-  must remain a separate tranche.
+- Next move: browser-test the complete six-step wizard, verify the integration
+  panel stays hidden for CUSTOMER/PORT_STAFF, and verify the 390×844 sidebar
+  can scroll/focus through Đăng xuất. Only then reassess Gate 5. Analytics must
+  remain a separate tranche.
 
 ## Continuation handoff
 

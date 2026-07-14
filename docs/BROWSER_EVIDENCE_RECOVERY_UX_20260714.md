@@ -1,5 +1,11 @@
 # Báo cáo Browser Evidence — Recovery UX (2026-07-14)
 
+> **Theo dõi sau remediation:** Ba finding FAIL trong báo cáo này đã được sửa
+> trong commit `7c5431d`. Regression tự động đạt `67 passed`, nhưng chưa có
+> browser retest sau sửa. Nội dung bên dưới là bằng chứng tại checkpoint
+> `c58c73a`; Gate 5 vẫn **NOT READY** cho đến khi kiểm thử lại trên trình duyệt
+> thật xác nhận cả ba lỗi đã hết.
+
 Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện và hành vi trên trình duyệt của ứng dụng **Khai-bao-Cang-vu** tại branch `recovery`.
 
 ---
