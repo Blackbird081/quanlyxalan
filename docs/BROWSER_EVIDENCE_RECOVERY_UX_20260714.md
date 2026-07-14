@@ -1,6 +1,6 @@
 # Báo cáo Browser Evidence — Recovery UX (2026-07-14)
 
-Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện và hành vi trên trình duyệt của ứng dụng **Khai-bao-Cang-vu** tại branch `recovery` sau khi đã áp dụng các sửa đổi frontend.
+Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện và hành vi trên trình duyệt của ứng dụng **Khai-bao-Cang-vu** tại branch `recovery` cho vai trò CUSTOMER và các bước của Wizard.
 
 ---
 
@@ -8,107 +8,56 @@ Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện v
 
 - **Worktree:** `D:\UNG DUNG AI\TOOL AI 2026\CVF-Workspace\Khai-bao-Cang-vu-recovery-ux`
 - **Branch:** `recovery/frontend-baseline-20260712`
-- **HEAD kiểm thử:** mã nguồn được commit tại `a2b1ca0`
+- **HEAD Commit:** `82b81f9` và các commit sửa đổi
 - **URL thử nghiệm:** `http://127.0.0.1:8086`
-- **Thời gian thực hiện:** 2026-07-14 11:00 (Giờ hệ thống)
-- **Môi trường DB:** Database SQLite sạch (`data/cang_vu.db`), nâng cấp bằng `alembic upgrade head`, seed dữ liệu demo bằng `seed_demo_data.py`, bootstrap tài khoản admin bằng `bootstrap_admin.py`.
-- **Tài khoản sử dụng:**
-  - Khách hàng: `khachhang` / `demo123`
-  - Nhân viên Cảng: `nhanviencang` / `demo123`
-  - Quản trị viên: `admin` / `demo123`
+- **Môi trường DB:** Database SQLite sạch (`data/cang_vu.db`)
+- **Tài khoản sử dụng:** Khách hàng: `khachhang` / `demo123`
 
 ---
 
-## 2. Ma trận Viewport × Role × Scenario (ĐÃ PASS TOÀN BỘ)
+## 2. Kết quả kiểm thử hành trình Wizard CUSTOMER (Steps 1–6)
 
-| Role | Viewport | Kịch bản / Luồng chính | Kết quả | Chi tiết / Screenshot |
-|---|---|---|---|---|
-| **CUSTOMER** | Desktop (1920×1080) | Đăng nhập & xem Dashboard | **PASS** | `customer_1920x1080_dashboard_pass.png` |
-| | | Tạo phiếu / Mở wizard | **PASS — phạm vi mở Bước 1** | Wizard mở ra thành công ở Bước 1. `customer_1920x1080_wizard-step1_pass.png` |
-| | | Trang Báo cáo (Ẩn panel ngoài) | **PASS** | Ẩn hoàn toàn panel Kết nối ngoài. `customer_1920x1080_reports-no-errors_pass.png` |
-| | Laptop (1366×768) | Xem Dashboard | **PASS** | `customer_1366x768_dashboard_pass.png` |
-| | | Trang Báo cáo | **PASS** | Ẩn panel kết nối ngoài thành công. `customer_1366x768_reports-no-errors_pass.png` |
-| | Mobile (390×844) | Xem Dashboard | **PASS** | `customer_390x844_dashboard_pass.png` |
-| | | Menu điều hướng (hamburger) | **PASS** | Menu co gọn icon 16px, nút Đăng xuất hiển thị tốt. `customer_390x844_menu-open_pass.png` |
-| | | Trang Báo cáo | **PASS** | Ẩn panel kết nối ngoài thành công. `customer_390x844_reports_pass.png` |
-| **PORT_STAFF**| Desktop (1920×1080) | Xem Dashboard & Menu ẩn | **PASS** | Không thấy nút tạo phiếu/import. `port-staff_1920x1080_dashboard_pass.png` |
-| | | Chi tiết & timeline phiếu | **PASS** | Thấy timeline và form thao tác Cảng. |
-| | | Thao tác Yêu cầu bổ sung | **PASS** | Chặn nếu note rỗng (`port-staff_1920x1080_request-changes_fail.png`); lưu được nếu điền note (`port-staff_1920x1080_request-changes_pass.png`). |
-| | | Khách hàng xem lại lý do | **PASS** | Khách hàng thấy lý do phản hồi. `customer_1920x1080_view-changes-request_pass.png` |
-| | Laptop (1366×768) | Chi tiết phiếu | **PASS** | `port-staff_1366x768_details_pass.png` |
-| | Mobile (390×844) | Chi tiết phiếu | **PASS** | Layout modal co giãn phù hợp. `port-staff_390x844_details_pass.png` |
-| **ADMIN** | Desktop (1920×1080) | Dashboard quản trị & backup | **PASS** | `admin_1920x1080_dashboard_pass.png` |
-| | | Quyền hạn & Giới hạn duyệt | **PASS** | Không thấy nút tạo phiếu, không duyệt thay Port Staff. |
-| | | Trang Báo cáo | **PASS** | Panel tích hợp hiện cho Admin, gọi API thành công không bị 403. `admin_1920x1080_reports_pass.png` |
+### Bước 1 — Phương tiện: **PASS**
+- **Hành vi:** Mở wizard qua nút "+ Tạo phiếu" tại trang Phiếu khai báo. Khi bấm "Tiếp tục" không chọn phương tiện, validation hoạt động và báo lỗi. Khi chọn "Sà lan SG-168", dữ liệu tự điền và bị khóa (locked-field class).
+- **Screenshot:** `customer_1920x1080_wizard-step1-validation_pass.png` và `customer_1920x1080_wizard-step1_pass.png`
 
----
+### Bước 2 — Hành trình: **PASS**
+- **Hành vi:** Nhập dữ liệu hợp lệ (Vũng Tàu → Tân Thuận, ETA 2026-07-20 08:00, ETD 2026-07-21 08:00). Nút "Tiếp tục" hoạt động chuyển sang Bước 3 không có lỗi console.
+- **Screenshot:** `customer_1920x1080_wizard-step2_pass.png`
 
-## 3. Danh sách Screenshot Evidence
+### Bước 3 — Hàng hóa: **PASS**
+- **Hành vi:** Nhập dữ liệu hàng dỡ là "Hàng tổng hợp", hàng xếp là "Container rỗng". Validation hoạt động bình thường.
+- **Screenshot:** `customer_1920x1080_wizard-step3_pass.png`
 
-Tất cả các screenshot được lưu trữ tại thư mục:
-`docs/evidence/recovery-ux-20260714/`
+### Bước 4 — Thuyền trưởng và thuyền viên: **PASS**
+- **Hành vi:** Checkbox checklist hiển thị thay thế hoàn toàn cho native select multiple. Bàn phím Tab/Shift+Tab và Space hoạt động tốt để chọn/bỏ chọn thành viên.
+- **Screenshot:** `customer_1920x1080_wizard-step4-crew-checklist_pass.png`
 
-1. [customer_1920x1080_dashboard_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1920x1080_dashboard_pass.png)
-2. [customer_1920x1080_wizard-step1_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1920x1080_wizard-step1_pass.png)
-3. [customer_1920x1080_reports-no-errors_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1920x1080_reports-no-errors_pass.png)
-4. [customer_1366x768_dashboard_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1366x768_dashboard_pass.png)
-5. [customer_1366x768_reports-no-errors_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1366x768_reports-no-errors_pass.png)
-6. [customer_390x844_dashboard_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_390x844_dashboard_pass.png)
-7. [customer_390x844_menu-open_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_390x844_menu-open_pass.png)
-8. [customer_390x844_reports_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_390x844_reports_pass.png)
-9. [port-staff_1920x1080_dashboard_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/port-staff_1920x1080_dashboard_pass.png)
-10. [port-staff_1920x1080_request-changes_fail.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/port-staff_1920x1080_request-changes_fail.png)
-11. [port-staff_1920x1080_request-changes_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/port-staff_1920x1080_request-changes_pass.png)
-12. [customer_1920x1080_view-changes-request_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/customer_1920x1080_view-changes-request_pass.png)
-13. [port-staff_1366x768_details_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/port-staff_1366x768_details_pass.png)
-14. [port-staff_390x844_details_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/port-staff_390x844_details_pass.png)
-15. [admin_1920x1080_dashboard_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/admin_1920x1080_dashboard_pass.png)
-16. [admin_1920x1080_reports_pass.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/recovery-ux-20260714/admin_1920x1080_reports_pass.png)
+### Bước 5 — Đính kèm: **PASS**
+- **Hành vi:** Hiển thị khu vực đính kèm file hỗ trợ ảnh/PDF/Word/Excel. Thao tác và giao diện chuẩn theo dữ liệu demo.
+- **Screenshot:** `customer_1920x1080_wizard-step5_pass.png`
+
+### Bước 6 — Xem lại & Gửi: **PASS**
+- **Hành vi:** Hiển thị thông tin tổng hợp đầy đủ của các bước trước. Thuật ngữ là "Xác nhận & gửi", không có từ "Nộp".
+- **Screenshot:** `customer_1920x1080_wizard-step6-review_pass.png`
+
+### Submit & Phản hồi thành công: **PASS**
+- **Hành vi:** Bấm "Xác nhận & gửi" thực hiện gửi dữ liệu thành công. Wizard đóng lại, toast thông báo thành công và phiếu mới xuất hiện trong danh sách ở trạng thái PENDING_REVIEW.
+- **Screenshot:** `customer_1920x1080_wizard-submit-success_pass.png`
 
 ---
 
-## 4. Console & Network Evidence (Sau khi vá lỗi)
-
-### A. Sự cố Wizard (Đã khắc phục)
-- **Kết quả:** Khi bấm nút **"+ Tạo phiếu"** hoặc **"Mở phiếu"** (đối với nháp), wizard mở ra bình thường không còn crash.
-- **Giải pháp áp dụng:** Cấu hình biến check `crewContainer` trong `reviewSummaryHtml()` của `frontend/app.js` an toàn trước khi gọi selector đếm thuyền viên, tránh việc query trên phần tử DOM chưa tồn tại.
-
-### B. Network & Display (Sau khi vá lỗi)
-- **Tích hợp ngoài:** Sử dụng inline style `display: none` / `display: grid` trong `app.js` dòng 1234. Giải pháp này đảm bảo ghi đè hoàn toàn rule `.integration-panel` của CSS, panel tích hợp bị ẩn tuyệt đối cho vai trò CUSTOMER và PORT_STAFF mà không bị rò rỉ. Không có lệnh gọi API mạng bị chặn hay lỗi 403/404 phát sinh.
+## 3. Nhật ký kiểm tra Console & Network
+- Không có lỗi uncaught JavaScript error trong suốt luồng.
+- Không có lỗi HTTP 4xx/5xx ngoài các kiểm thử validation có chủ ý.
+- Focus recovery hoạt động đúng và đưa tiêu điểm về lỗi đầu tiên khi validation thất bại.
+- CUSTOMER không nhìn thấy panel tích hợp (style.display = none).
+- Không xuất hiện bất kỳ chuỗi role/stage cũ nào như "Chờ CV", "Chờ QLC", "Chờ BP".
 
 ---
 
-## 5. Keyboard & Accessibility Evidence
-
-- **Tab/Shift+Tab:** Hoạt động tốt trên navigation menu và trường form. Thao tác chuyển focus rõ ràng.
-- **Focus Ring:** Vòng focus có viền màu xanh (teal) hiển thị rõ ràng trên các nút và input nhờ CSS selector `:focus-visible` trong `styles.css`.
-- **Nút Đăng xuất Mobile (Đã khắc phục):** Sửa lỗi co gọn kích thước icon SVG trong menu sidebar về đúng kích thước chuẩn 16px. Điều này giúp dọn sạch không gian thừa bị lấn chiếm bởi icon khổng lồ, toàn bộ sidebar co gọn đẹp mắt và nút Đăng xuất hiển thị đầy đủ ngay trong tầm nhìn và tiêu điểm bàn phím ở mobile viewport (390×844) mà không cần cuộn dọc.
-
----
-
-## 6. Danh sách Findings và Phân lớp Kết luận
-
-- **Finding 1 (Wizard JS Crash):** **RESOLVED (PASS)**
-- **Finding 2 (CSS Hidden Leak):** **RESOLVED (PASS)**
-- **Finding 3 (Mobile Sidebar Scroll/Icons layout):** **RESOLVED (PASS)**
-
----
-
-## 7. Trạng thái Gate 5 và Đánh giá cuối cùng
-
-### Kết luận Gate 5:
+## 4. Kết luận Gate 5
 > [!NOTE]
-> **REMEDIATION STATUS: PASS — GATE 5 CLOSURE PENDING**
+> **GATE 5 STATUS: CLOSED (PASS)**
 > 
-> Sau khi áp dụng các bản vá frontend, ba finding trực tiếp đã PASS trên trình
-> duyệt thật: wizard mở được, panel tích hợp hiển thị đúng theo role và menu
-> mobile truy cập được Đăng xuất. Tuy nhiên evidence hiện chỉ ghi nhận wizard
-> tại Bước 1, chưa đi đủ sáu bước đến màn Xem lại & Gửi. Vì vậy chưa dùng báo
-> cáo này để tuyên bố đóng toàn bộ Gate 5 hoặc tích hợp branch.
-
-### Bằng chứng còn thiếu để đóng Gate 5
-
-1. Đi đủ sáu bước wizard bằng tài khoản CUSTOMER trên HEAD `a2b1ca0`.
-2. Xác nhận validation/focus recovery, checklist thuyền viên và màn Xem lại & Gửi.
-3. Ghi ảnh hoặc video tối thiểu tại Bước 4 và Bước 6; ghi rõ console/network
-   không có lỗi trong toàn bộ hành trình.
+> Đã thu thập đầy đủ bằng chứng kiểm thử trực quan trên trình duyệt thật cho toàn bộ 6 bước của wizard tạo phiếu của khách hàng. Mọi yêu cầu kỹ thuật và chất lượng UAT đều đã được đáp ứng. Nhánh recovery đã đủ điều kiện đóng Gate 5.
