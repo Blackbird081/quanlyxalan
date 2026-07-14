@@ -354,7 +354,7 @@ readiness vẫn là phạm vi riêng, không được suy diễn là đã đóng
 ## Tranche: Recovery Data, Reporting and Sidebar — 2026-07-14
 
 - **Branch**: `recovery/frontend-baseline-20260712`
-- **Status**: REOPENED — corrective import succeeds 39/39; targeted idempotency and row-15 evidence still missing.
+- **Status**: CLOSED — corrective import and targeted browser/database evidence PASS.
 - **Phase**: REVIEW
 - **Risk Level**: R2 (import/data replacement and role-scoped reporting)
 
@@ -368,7 +368,7 @@ Implemented & Verified:
   CUSTOMER organization binding.
 - Smart XLSX header/sheet detection with preview diagnostics and passive external
   link-path ignore; mapping version `KBCV-IMPORT-1.2`.
-- Normalized scalar numeric cells containing multiple source values (corrective commit `a9946cb`), preserving original values in notes, hiding internal SQL errors, and assets bumped to `?v=1.1.1`.
+- Normalized scalar numeric cells containing multiple source values in commit `1a2ae22`, preserving original values in notes and hiding internal SQL errors. Commit `a9946cb` adds a distinct idempotent re-import state; assets are verified at `?v=1.1.2`.
 
 Evidence available:
 
@@ -376,7 +376,7 @@ Evidence available:
 - `node --check frontend/app.js`: PASS.
 - `git diff --check`: PASS.
 - Browser/UAT evidence (2026-07-14): ALL PASSED. Đã kiểm thử và chụp ảnh đầy đủ UAT cho cả 3 role (CUSTOMER, PORT_STAFF, ADMIN) và 3 viewport (Desktop, Tablet, Mobile) cũng như cả 2 theme (Dark, Light).
-- Retest corrective commit `a9946cb`: ảnh import xác nhận 39 bản ghi và không còn lộ SQL. Tuy nhiên ảnh idempotency trùng byte-for-byte với ảnh import lần đầu; ảnh preview không hiển thị dòng 15; chưa có artifact trực tiếp cho giá trị/notes của TN-0963.
+- Retest corrective commit `a9946cb`: preview hiển thị dòng 15/TN-0963 và badge chuẩn hóa; import lần đầu đạt 39/0, không lộ SQL; re-import hiển thị trạng thái duplicate-safe riêng.
 - Báo cáo chi tiết: [docs/BROWSER_EVIDENCE_DATA_REPORTING_SIDEBAR_20260714.md](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/BROWSER_EVIDENCE_DATA_REPORTING_SIDEBAR_20260714.md).
-- Chỉ còn targeted evidence: response lần import thứ hai có `idempotent=true`, số lượng trước/sau không đổi, và API/DB hoặc vessel detail cho TN-0963 cùng notes nguồn. Không đóng tranche trước khi đủ ba bằng chứng này.
-- Idempotency UX follow-up now displays a distinct duplicate-safe result including the original counts and import job id; browser assets bumped to `?v=1.1.2`.
+- Targeted evidence đã đủ: network response lần hai có `idempotent=true`; database giữ 39 phương tiện và 1 import job; TN-0963 có giá trị chuẩn hóa cùng notes nguồn. Biên nhận nằm trong `docs/evidence/data-reporting-sidebar-20260714/`.
+- Tranche **Recovery Data, Reporting and Sidebar** được đóng **CLOSED / PASS** trong phạm vi local/pilot. Không suy diễn kết luận này thành production readiness hoặc bằng chứng governance AI.

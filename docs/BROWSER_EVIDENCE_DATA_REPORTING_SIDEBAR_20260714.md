@@ -8,7 +8,8 @@ Tài liệu này ghi nhận kết quả kiểm thử giao diện và hành vi tr
 
 - **Worktree:** `D:\UNG DUNG AI\TOOL AI 2026\CVF-Workspace\Khai-bao-Cang-vu-recovery-ux`
 - **Branch:** `recovery/frontend-baseline-20260712`
-- **HEAD Commit:** `a9946cb` — *feat: restore smart imports and reporting UX*
+- **Code under test:** `a9946cb` — *fix: distinguish idempotent Excel imports*
+- **Evidence commit:** `e905c87`
 - **URL thử nghiệm:** `http://127.0.0.1:8086`
 - **Môi trường DB:** SQLite sạch đã seed dữ liệu mẫu qua `scripts/seed_demo_data.py`
 - **Tests tự động:** 71 passed, 0 failed (pytest)
@@ -36,7 +37,7 @@ Tài liệu này ghi nhận kết quả kiểm thử giao diện và hành vi tr
 | **4.3. Operational State (Reports)** | CUSTOMER | 1920×1080 / Dark | Trang báo cáo sau import không còn nhãn "Dữ liệu minh họa". | Nhãn biến mất hoàn toàn. | **PASS** | [customer_1920x1080_reports_after_import.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/customer_1920x1080_reports_after_import.png) | Báo cáo sử dụng dữ liệu thật. |
 | **5.1. Smart Excel Preview** | CUSTOMER | 1920×1080 / Dark | Preview file Excel 39 sà lan, tự nhận diện `Sheet2` và cột tiêu đề. | Hiển thị cấu trúc tự nhận diện & 39 sà lan. | **PASS** | [customer_1920x1080_import_preview_retest_a9946cb.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/customer_1920x1080_import_preview_retest_a9946cb.png) | Không có request tới external workbook. |
 | **5.2. Excel Import Real** | CUSTOMER | 1920×1080 / Dark | Import thành công 39 phương tiện, accepted = 39, rejected = 0. | Ảnh corrective hiển thị “Đã nhận 39 bản ghi”, không còn dòng từ chối hoặc chi tiết SQL. | **PASS** | [customer_1920x1080_import_success_retest_a9946cb.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/customer_1920x1080_import_success_retest_a9946cb.png) | Cần giữ network response nếu muốn chứng minh trực tiếp trường `rejected=0`; UI hiện không hiển thị nhãn này khi danh sách rỗng. |
-| **5.3. Import Idempotency** | CUSTOMER | 1920×1080 / Dark | Re-import không tạo bản ghi trùng và trả `idempotent = true`. | File ảnh idempotency có SHA-256 giống hệt ảnh import lần đầu (`A3AA...BF8C`), không chứng minh request thứ hai, response `idempotent=true` hoặc số lượng trước/sau. | **INCONCLUSIVE — EVIDENCE REQUIRED** | [customer_1920x1080_import_idempotency_retest_a9946cb.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/customer_1920x1080_import_idempotency_retest_a9946cb.png) | Bổ sung network response lần hai và số lượng phương tiện trước/sau; không cần chạy lại các case khác. |
+| **5.3. Import Idempotency** | CUSTOMER | 1920×1080 / Dark | Re-import không tạo bản ghi trùng và trả `idempotent = true`. | UI hiển thị trạng thái riêng “File đã được nhập trước đó”, “Không tạo thêm bản ghi”, kết quả gốc 39/0 và import job `1`; database vẫn có 39 phương tiện và 1 import job. | **PASS** | [customer_1920x1080_import_idempotency_retest_a9946cb.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/customer_1920x1080_import_idempotency_retest_a9946cb.png) | [Network response](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/network_responses_retest_a9946cb.json) và [DB verification](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/database_verification_retest_a9946cb.json). |
 | **6.1. API Prep (Customer)** | CUSTOMER | 1920×1080 / Dark | Thấy thông tin readiness nhưng ẩn nút chuẩn bị và danh sách job. | Ẩn đúng theo phân quyền. | **PASS** | [customer_1920x1080_api_prep.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/customer_1920x1080_api_prep.png) | Các API admin bị block (404/403). |
 | **6.2. API Prep (Staff)** | PORT_STAFF | 1920×1080 / Dark | Tương tự CUSTOMER, thấy thông tin readiness nhưng ẩn nút và job list. | Ẩn đúng theo phân quyền. | **PASS** | [portstaff_1920x1080_api_prep.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/portstaff_1920x1080_api_prep.png) | Blocked (404/403). |
 | **6.3. API Prep (Admin)** | ADMIN | 1920×1080 / Dark | Hiển thị đầy đủ nút "Chuẩn bị gói dữ liệu" và bảng sync jobs. | Hiển thị đúng chuẩn admin. | **PASS** | [admin_1920x1080_api_prep.png](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/admin_1920x1080_api_prep.png) | API GET jobs: 200 OK. |
@@ -51,16 +52,16 @@ Tài liệu này ghi nhận kết quả kiểm thử giao diện và hành vi tr
 - **Mã lỗi phân quyền RBAC:**
   - Khi đăng nhập bằng `khachhang` và `nhanviencang`, các request ngầm tới `/api/admin/backups` và các API quản trị của tích hợp ngoài tự động nhận mã lỗi phân quyền và được hệ thống xử lý êm thấm (không gây crash JS).
 - **Outbound network calls:** Không có bất kỳ kết nối mạng hay request nào gửi ra các API bên ngoài hoặc external workbook từ file Excel `templates/DU_LIEU_SA_LAN_39_CHIEC.xlsx`.
-- **Assets version tại lần UAT này:** App shell và static assets dùng `?v=1.1.0`. Bản sửa sau review đã tăng lên `?v=1.1.1` và phải được xác nhận lại khi retest.
-- **Finding bảo mật/UX từ ảnh:** Console không có uncaught error, nhưng UI đã hiển thị nguyên chi tiết SQLAlchemy/SQL và parameters của dòng import lỗi. Đây là thông tin nội bộ không nên lộ cho người dùng. Bản sửa sau review thay bằng thông báo tổng quát và chỉ ghi chi tiết vào server log.
+- **Assets version:** Retest corrective đã xác nhận app shell tải `styles.css?v=1.1.2` và `app.js?v=1.1.2`.
+- **Finding bảo mật/UX:** Lần UAT đầu đã phát hiện UI lộ chi tiết SQLAlchemy/SQL và parameters. Retest corrective xác nhận chi tiết nội bộ không còn xuất hiện; UI chỉ hiển thị thông báo nghiệp vụ.
 
 ---
 
 ## 4. Kết luận sau Independent Evidence Review
 > [!IMPORTANT]
-> **TRANCHE STATUS: REOPENED — RETEST REQUIRED**
+> **TRANCHE STATUS: CLOSED — PASS**
 > 
-> Ảnh thực tế bác bỏ kết luận 39/39: import đạt 38/39 và làm lộ chi tiết lỗi SQL trong giao diện. Code follow-up dùng mapping `KBCV-IMPORT-1.2`, chuẩn hóa ô số đa giá trị và che chi tiết lỗi nội bộ. Chưa được chuyển lại CLOSED cho đến khi browser retest chứng minh `accepted = 39`, `rejected = 0`, sau đó re-import trả `idempotent = true`, không tạo bản ghi trùng và assets `?v=1.1.1` được tải.
+> Independent review đã bác bỏ lần đóng ban đầu vì import chỉ đạt 38/39 và làm lộ chi tiết SQL. Sau corrective flow, targeted browser retest chứng minh `accepted = 39`, `rejected = []`, lần nhập thứ hai trả `idempotent = true`, database giữ nguyên 39 phương tiện/1 import job, dòng TN-0963 được chuẩn hóa có truy vết, và assets `?v=1.1.2` được tải. Các điều kiện mở lại đã được xử lý đầy đủ.
 
 ---
 
@@ -96,3 +97,8 @@ Vào ngày 2026-07-14, UAT retest cho commit `a9946cb` (fix: distinguish idempot
    - `cargo_capacity_tons` = `2698.79`
    - `notes` ghi nhận chuỗi gốc: `"Giá trị gốc Excel: deadweight_tons=2723.79 / 2912.57; cargo_capacity_tons=2698.79 / 2887.57"`.
    - Số lượng phương tiện trước và sau re-import giữ nguyên là **39** (không tăng thêm, không có bản ghi trùng).
+   - Biên nhận: [database_verification_retest_a9946cb.json](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/evidence/data-reporting-sidebar-20260714/database_verification_retest_a9946cb.json).
+
+### Independent closure decision
+
+Targeted evidence đã khép đủ ba khoảng trống của lần review trước: response re-import, số lượng database trước/sau và bản ghi TN-0963 kèm notes nguồn. Tranche **Recovery Data, Reporting and Sidebar** được xác nhận **CLOSED / PASS** trong phạm vi local/pilot.
