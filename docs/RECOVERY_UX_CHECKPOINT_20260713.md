@@ -3,7 +3,7 @@
 ## Tranche
 
 - ID: RECOVERY-UX-T1
-- Status: CLOSED — visual and behavioral regression tests passed, branch is ready for Gate 5 closure
+- Status: CLOSED — Gate 5 PASS with full six-step wizard browser evidence
 - Branch: `recovery/frontend-baseline-20260712`
 - Baseline: `929a8c487c572b7bcad859e237b17da1d494a1db`
 - Worktree: `Khai-bao-Cang-vu-recovery-ux`
@@ -21,5 +21,14 @@ restore copy. Neither comparison source was edited.
 - Terminology: "Xác nhận & gửi" (no "Nộp").
 - No legacy CV/QLC/BP role/stage references.
 - Security: Customer cannot see integration panel or backups admin endpoints.
+- Application code under test: `a2b1ca0`; full-flow evidence committed at
+  `3574128`.
+
+## Deferred outside this closure
+
+- Analytics API/metrics remain a separate tranche and were not represented as
+  implemented by this Gate 5 closure.
+- Production/staging migration rehearsal, deployment ownership and rollback
+  remain release activities outside the local recovery UX gate.
 
 Detailed evidence recorded in [BROWSER_EVIDENCE_RECOVERY_UX_20260714.md](file:///D:/UNG%20DUNG%20AI/TOOL%20AI%202026/CVF-Workspace/Khai-bao-Cang-vu-recovery-ux/docs/BROWSER_EVIDENCE_RECOVERY_UX_20260714.md).

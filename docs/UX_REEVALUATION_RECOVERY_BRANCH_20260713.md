@@ -1,19 +1,42 @@
-# Đánh giá lại UX trên Branch Recovery — 2026-07-13
+# Đánh giá lại UX — Recovery Checkpoint
 
-## Tóm tắt bối cảnh
-- **Analytics — vẫn chờ tranche riêng.**
-- **Kiểm thử trực quan đa viewport (2026-07-14):** Đã thu thập đầy đủ bằng chứng thực tế qua browser automation/Playwright. Kết quả kiểm thử **PASS** cho toàn bộ 6 bước của wizard tạo phiếu.
+## Trạng thái kiểm soát — 2026-07-14
 
-## Sổ trạng thái sau thi công
+- Branch: `recovery/frontend-baseline-20260712`
+- Application code under test: `a2b1ca0`
+- Full-flow browser evidence: `3574128`
+- Automated regression: `67 passed`; `node --check frontend/app.js` PASS.
+- Gate 5: **CLOSED (PASS)** cho phạm vi Recovery UX.
+- Analytics và production/staging readiness: ngoài phạm vi đóng Gate 5 này.
 
-| Mã | Trạng thái hiện tại | Đã xử lý / kết luận |
-|---|---|---|
-| UX-101 | **ĐÃ XỬ LÝ** | Font chữ đã được thống nhất sang "Inter", sans-serif trên toàn bộ ứng dụng; cỡ chữ tối thiểu 12px; khoảng cách dòng tối thiểu 1.5. |
-| UX-102 | **ĐÍNH CHÍNH — ĐÃ CÓ SẴN** | Phân trang hoạt động khi gửi `page`; `page_size=2` trả đúng hai items và metadata tổng. |
-| UX-103 | **ĐÃ XỬ LÝ** | Audit/runtime dùng “Khách hàng xác nhận gửi phiếu khai báo”; UI và preview bỏ “Nộp/nộp”. |
-| UX-105 | **PASS** | Wizard có error summary, `aria-invalid`, mô tả lỗi và focus về lỗi đầu tiên. Lỗi crash JS đã khắc phục triệt để. |
-| UX-106 | **ĐÃ XỬ LÝ** | “Crew List” đã được Việt hóa trong app và preview. |
-| UX-107 | **PASS** | Không còn role/stage CV/QLC/BP trong UI hay schema/runtime. |
-| UX-002 cũ | **ĐÃ XỬ LÝ** | Nhãn được đổi thành “Nháp cục bộ · chưa gửi”, có thời điểm lưu cục bộ khi phát sinh. |
-| UX-004 cũ | **PASS** | Native `select multiple` đã được thay bằng checkbox checklist thân thiện bàn phím/mobile. |
-| Responsive/Gate 5 | **PASS** | Đã thu thập bằng chứng đa viewport thành công ngày 2026-07-14. Các lỗi layout, CSS và JS crash đã được sửa đổi và kiểm thử thành công trên Desktop, Laptop và Mobile. |
+## Sổ trạng thái hiện hành
+
+| Mã | Trạng thái | Kết luận hiện hành | Phạm vi còn lại |
+|---|---|---|---|
+| CRIT-001 | **PASS** | Runtime chỉ còn `PORT_APPROVE` và `REQUEST_CHANGES`; action CV/QLC/BP cũ trả HTTP 410; migration dùng `PORT_STAFF` và `port_approval`. | Rehearsal trên bản sao staging trước production. |
+| UX-101 | **ĐÍNH CHÍNH — KHÔNG PHẢI LỖI NHƯ BÁO CÁO GỐC** | API tìm theo `vessel_name`; thuyền trưởng có filter `master_name`. UX-101 không phải finding typography. | Product Owner quyết định có cần tìm kiếm không dấu (`Hai` → `Hải`). |
+| UX-102 | **PASS — ĐÃ CÓ SẴN** | Phân trang hoạt động khi gửi `page`; response mảng khi thiếu `page` là tương thích ngược có chủ ý. | Performance test với tập dữ liệu tham chiếu nếu mở tranche riêng. |
+| UX-103 | **PASS** | UI/audit dùng “Xác nhận & gửi”, không dùng “Nộp/nộp” cho khách hàng. | Không còn việc trong Recovery UX. |
+| UX-104 | **CHƯA ĐÓNG — NGOÀI GATE NÀY** | Dashboard đã ẩn chức năng theo role và có attention queue. | Task study để xác định thứ tự widget; không tái cấu trúc theo cảm tính. |
+| UX-105 | **PASS** | Full-flow browser UAT xác nhận validation, error summary, focus recovery và wizard không crash. | Không còn việc trong Recovery UX. |
+| UX-106 | **PASS** | “Crew List” đã Việt hóa; Bước 4 hiển thị đúng nội dung tiếng Việt. | Không còn việc trong Recovery UX. |
+| UX-107 | **PASS** | Không còn stage CV/QLC/BP trong UI/runtime; deny-list và regression test chặn client cũ. | Không xóa deny-list/test. |
+| UX-002 cũ | **PASS** | Nhãn “Nháp cục bộ · chưa gửi” phản ánh đúng trạng thái lưu. | Task study đại diện nếu cần đo mức độ hiểu. |
+| UX-004 cũ | **PASS** | Checkbox checklist thay native `select multiple`; thao tác bàn phím được browser tester xác nhận tại Bước 4. | Không còn việc trong Recovery UX. |
+| Browser Finding 1 | **PASS** | Wizard mở và đi đủ Bước 1→6, submit thành công. | Retest nếu wizard code thay đổi. |
+| Browser Finding 2 | **PASS** | Panel tích hợp ẩn với CUSTOMER/PORT_STAFF, hiện với ADMIN. | Retest nếu logic role/CSS thay đổi. |
+| Browser Finding 3 | **PASS** | Sidebar mobile 390×844 hiển thị Đăng xuất và icon đúng kích thước. | Retest nếu navigation/CSS thay đổi. |
+| Analytics | **CHƯA XỬ LÝ — NGOÀI TRANCHE** | UI báo “Thống kê sản lượng chưa khả dụng”; PL.01–PL.03 hoạt động độc lập. | Work order riêng gồm metrics, API contract, RBAC và acceptance criteria. |
+| Gate 5 | **CLOSED (PASS)** | Đủ evidence Bước 1–6, validation, checklist, review/send, submit, console/network và đa viewport. | Không suy diễn thành production release approval. |
+
+## Truy vết đánh giá
+
+- Báo cáo đánh giá gốc: checkpoint `cfc2d84` trong lịch sử Git.
+- Browser evidence FAIL ban đầu: `c58c73a`.
+- Remediation code: `7c5431d` và `a2b1ca0`.
+- Evidence reconciliation: `82b81f9`.
+- Full six-step UAT evidence: `3574128`.
+
+Các bản lịch sử được giữ trong Git để truy vết nguyên nhân, remediation và thay
+đổi kết luận. Gate 5 CLOSED chỉ áp dụng cho Recovery UX tại code under test;
+không đóng Analytics, staging rehearsal hoặc production release gate.

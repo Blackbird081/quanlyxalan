@@ -8,7 +8,9 @@ Tài liệu này ghi nhận kết quả kiểm thử trực tiếp giao diện v
 
 - **Worktree:** `D:\UNG DUNG AI\TOOL AI 2026\CVF-Workspace\Khai-bao-Cang-vu-recovery-ux`
 - **Branch:** `recovery/frontend-baseline-20260712`
-- **HEAD Commit:** `82b81f9` và các commit sửa đổi
+- **Application code under test:** `a2b1ca0`
+- **Evidence reconciliation base:** `82b81f9`
+- **Full-flow evidence commit:** `3574128`
 - **URL thử nghiệm:** `http://127.0.0.1:8086`
 - **Môi trường DB:** Database SQLite sạch (`data/cang_vu.db`)
 - **Tài khoản sử dụng:** Khách hàng: `khachhang` / `demo123`

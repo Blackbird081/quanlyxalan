@@ -319,6 +319,11 @@ adapter-ready; external activation remains blocked.
 
 ### Open Gate 5 evidence
 
+> Historical T5 checkpoint status. For the isolated Recovery UX branch, this
+> gap was subsequently closed by full-flow evidence commit `3574128`; see the
+> Recovery UX session handoff below. Production release readiness remains
+> separate.
+
 Representative-user task study, browser-assisted accessibility audit,
 responsive viewport matrix and reference-dataset performance measurements are
 not yet available. Gate 5 is not closed. Reopen T5 only when the product owner
@@ -332,12 +337,14 @@ official authority prerequisites recorded in its work order.
 ## Session handoff: Recovery UX branch — 2026-07-13
 
 - **Branch**: `recovery/frontend-baseline-20260712`
-- **Implementation commits**: `0b2ba72`, `5e74643`, `7c5431d`, `a2b1ca0` và `82b81f9`
+- **Implementation/evidence commits**: `0b2ba72`, `5e74643`, `7c5431d`, `a2b1ca0`, `82b81f9`, `3574128`
 - **Status**: CLOSED — all browser findings and full six-step wizard UAT passed.
-- **Gate 5 Status**: READY (PASS)
+- **Gate 5 Status**: CLOSED (PASS)
 - **Canonical session handoff**:
   `docs/SESSION_HANDOFF_RECOVERY_UX_20260713.md`
 - **UX issue ledger**:
   `docs/UX_REEVALUATION_RECOVERY_BRANCH_20260713.md`
 
-Tất cả các bước UAT Wizard 1-6 đã hoàn thành tốt đẹp. Bằng chứng kiểm thử visual được lưu tại `docs/evidence/recovery-ux-20260714/`. Gate 5 chính thức sẵn sàng đóng.
+Tất cả các bước UAT Wizard 1-6 đã hoàn thành. Bằng chứng kiểm thử visual được
+lưu tại `docs/evidence/recovery-ux-20260714/`. Analytics và production/staging
+readiness vẫn là phạm vi riêng, không được suy diễn là đã đóng cùng UX Gate 5.
