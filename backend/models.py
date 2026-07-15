@@ -153,6 +153,7 @@ class CrewMember(Base):
     vessel_id = Column(Integer, ForeignKey("vessels.id"))
     full_name = Column(String, nullable=False)
     crew_role = Column(String, nullable=False)
+    birth_date = Column(String)
     phone = Column(String, nullable=False, default="")
     identity_no = Column(String, nullable=False, default="")
     professional_certificate_type = Column(String, nullable=False)

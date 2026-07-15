@@ -372,6 +372,85 @@ def vessel_rows(sheets: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], list
     return organization, rows
 
 
+CREW_HEADER_ALIASES = {
+    "organization_name": ("TEN DOANH NGHIEP", "DOANH NGHIEP", "CHU PHUONG TIEN"),
+    "full_name": ("HO VA TEN", "HO TEN", "TEN THUYEN VIEN"),
+    "crew_role": ("CHUC DANH", "CHUC VU"),
+    "birth_date": ("NGAY SINH", "NAM SINH"),
+    "phone": ("SO DIEN THOAI", "DIEN THOAI", "SDT"),
+    "identity_no": ("CCCD", "HO CHIEU", "CCCD HO CHIEU"),
+    "professional_certificate_type": ("LOAI CHUNG CHI", "CHUNG CHI CHUYEN MON"),
+    "professional_certificate_no": ("SO CHUNG CHI", "SO CC"),
+    "certificate_issue_date": ("NGAY CAP", "NGAY CAP CHUNG CHI"),
+    "certificate_expiry_date": ("NGAY HET HAN", "HAN CHUNG CHI"),
+    "notes": ("GHI CHU",),
+}
+
+
+def _field_for_crew_header(value: Any) -> str | None:
+    label = _normalized(value)
+    candidates: list[tuple[int, str]] = []
+    for field, aliases in CREW_HEADER_ALIASES.items():
+        for alias in aliases:
+            normalized_alias = _normalized(alias)
+            if label == normalized_alias or normalized_alias in label:
+                candidates.append((len(normalized_alias), field))
+    return max(candidates)[1] if candidates else None
+
+
+def crew_rows(sheets: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Read a flexible crew table for controlled PORT_STAFF imports."""
+    best: tuple[int, str, dict[str, Any], int, dict[str, str]] | None = None
+    for sheet_name, sheet in sheets.items():
+        by_row: dict[int, dict[str, str]] = {}
+        for ref, value in sheet.items():
+            column, row_no = _cell_parts(ref)
+            field = _field_for_crew_header(value)
+            if row_no and field:
+                by_row.setdefault(row_no, {})[field] = column
+        for row_no, mapping in by_row.items():
+            score = len(mapping) + (
+                6 if {"organization_name", "full_name", "crew_role"}.issubset(mapping) else 0
+            )
+            candidate = (score, sheet_name, sheet, row_no, mapping)
+            if best is None or candidate[0] > best[0]:
+                best = candidate
+    if not best or not {"organization_name", "full_name", "crew_role"}.issubset(best[4]):
+        raise ValueError(
+            "Không tìm thấy bảng thuyền viên có các cột Tên doanh nghiệp, Họ và tên và Chức danh."
+        )
+
+    _, sheet_name, sheet, header_row, mapping = best
+    max_row = max((_cell_parts(ref)[1] for ref in sheet), default=header_row)
+    rows: list[dict[str, Any]] = []
+    blank_run = 0
+    date_fields = {"birth_date", "certificate_issue_date", "certificate_expiry_date"}
+    for row_no in range(header_row + 1, max_row + 1):
+        row = {field: sheet.get(f"{column}{row_no}") for field, column in mapping.items()}
+        if not any(value not in (None, "") for value in row.values()):
+            blank_run += 1
+            if blank_run >= 5 and rows:
+                break
+            continue
+        blank_run = 0
+        warnings: list[str] = []
+        for field, value in list(row.items()):
+            if value in (None, ""):
+                continue
+            if field in date_fields:
+                row[field] = excel_date(value)
+                continue
+            normalized, warning = normalize_import_text(value, field=field)
+            row[field] = normalized
+            if warning:
+                warnings.append(f"{field}: {warning}")
+        row["_source_sheet"] = sheet_name
+        row["_source_row"] = row_no
+        row["_mapping_warnings"] = warnings
+        rows.append(row)
+    return rows
+
+
 DECLARATION_CELLS = {
     "company_name": "C6", "declaration_date": "C7", "vessel_name": "C10",
     "registration_no": "C11", "vessel_type": "C12", "vessel_class": "C13",

@@ -538,3 +538,4 @@ def test_alembic_fresh_database_reaches_t2_head(monkeypatch, tmp_path):
     assert "port_approval" in declaration_columns
     assert "cv_approval" not in declaration_columns
     assert "correlation_id" in {column["name"] for column in inspector.get_columns("audit_events")}
+    assert "birth_date" in {column["name"] for column in inspector.get_columns("crew_members")}

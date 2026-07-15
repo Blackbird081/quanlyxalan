@@ -462,3 +462,36 @@ Verification:
 - `node --check frontend/app.js`: PASS.
 - `git diff --check`: PASS.
 - Manual browser/visual review remains with the user and is not claimed here.
+
+---
+
+## Customer flow and crew ownership correction — 2026-07-15
+
+- **Status**: IN REVIEW — automated regression PASS; user visual review pending.
+- **Phase**: REVIEW
+- **Risk Level**: R2 (role boundaries, crew import and schema migration).
+
+Implemented:
+
+- CUSTOMER navigation is limited to Phiếu khai báo and Danh sách thuyền viên;
+  direct declaration creation remains a CUSTOMER-only six-step wizard.
+- PORT_STAFF cannot manually create, edit or assign crew. Permanent vessel
+  assignment was removed from the crew form and import path; crew selection is
+  now made by the CUSTOMER for each declaration.
+- Added optional `crew_members.birth_date` with Alembic revision
+  `h07f0f000007` and replaced the crew table's vehicle column with date of birth.
+- Added smart crew XLSX preview/import for PORT_STAFF and ADMIN. A file is
+  limited to one known customer organization; matching uses CCCD/passport,
+  certificate number, then name plus date of birth. Imports create or update
+  crew records and always clear legacy vessel assignment.
+- Simplified the sidebar identity display to one role pill while retaining the
+  logout action.
+- Local SQLite was backed up before migration and upgraded to
+  `h07f0f000007 (head)`.
+
+Verification:
+
+- `pytest -q`: 84 passed.
+- `node --check frontend/app.js`: PASS.
+- Alembic fresh-database head test includes `crew_members.birth_date`.
+- Manual browser/visual review remains with the user and is not claimed here.

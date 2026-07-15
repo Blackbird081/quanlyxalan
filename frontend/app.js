@@ -143,7 +143,11 @@ function roleLabel(role) {
 }
 
 function route() {
-  const name = location.hash.replace('#', '') || 'dashboard';
+  let name = location.hash.replace('#', '') || 'dashboard';
+  if (state.currentUser?.role === 'CUSTOMER' && !['declarations', 'crew'].includes(name)) {
+    name = 'declarations';
+    if (location.hash !== '#declarations') history.replaceState(null, '', `${location.pathname}${location.search}#declarations`);
+  }
   $$('.page').forEach(page => page.classList.toggle('active', page.dataset.page === name));
   $$('nav a').forEach(link => link.classList.toggle('active', link.dataset.route === name));
   $('#page-context').textContent = pageName(name);
@@ -324,14 +328,13 @@ function renderCrew() {
   const items = state.crew.filter(item => `${item.full_name} ${item.crew_role} ${item.professional_certificate_no}`.toLowerCase().includes(term));
   $('#crew-count').textContent = `${items.length} người`;
   const warnings = state.crew.filter(item => ['EXPIRING','EXPIRED'].includes(item.certificate_status));
-  const unassigned = state.crew.filter(item => !item.vessel_id);
   const messages = [];
-  if (warnings.length) messages.push(`${warnings.length} chứng chỉ đã hết hạn hoặc sẽ hết hạn trong 30 ngày. Cần rà soát trước khi phân công chuyến.`);
-  if (unassigned.length) messages.push(`${unassigned.length} thuyền viên chưa gán phương tiện — sẽ không hiện trong phiếu khai báo của tàu nào cho đến khi được gán.`);
+  if (warnings.length) messages.push(`${warnings.length} chứng chỉ đã hết hạn hoặc sẽ hết hạn trong 30 ngày. Cần rà soát trước khi lập phiếu.`);
   const strip = $('#crew-warning-strip');
   strip.classList.toggle('visible', messages.length > 0);
   strip.textContent = messages.join(' ');
-  $('#crew-table').innerHTML = items.length ? `<table class="data-table responsive-table record-table crew-record-table"><colgroup><col style="width:16%"><col style="width:14%"><col style="width:23%"><col style="width:20%"><col style="width:11%"><col style="width:11%"><col style="width:5%"></colgroup><thead><tr><th>Họ tên</th><th>Chức danh</th><th>Phương tiện</th><th>Chứng chỉ</th><th>Thời hạn</th><th>Trạng thái</th><th aria-label="Thao tác"></th></tr></thead><tbody>${items.map(item => `<tr><td data-label="Họ tên"><strong>${esc(item.full_name)}</strong><br><small>${esc(item.phone || '')}</small></td><td data-label="Chức danh">${esc(item.crew_role)}</td><td data-label="Phương tiện">${esc(item.vessel_name || 'Chưa phân công')}<br><small>${esc(item.registration_no || '')}</small></td><td data-label="Chứng chỉ">${esc(item.professional_certificate_type)}<br><small>${esc(item.professional_certificate_no)}</small></td><td data-label="Thời hạn" class="date-cell">${fmtDate(item.certificate_expiry_date)}</td><td data-label="Trạng thái"><span class="table-badge ${item.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(item.certificate_status)}</span></td><td data-label="Thao tác" class="action-cell"><button class="table-icon-button" data-edit-crew="${item.id}" title="Chỉnh sửa ${esc(item.full_name)}" aria-label="Chỉnh sửa ${esc(item.full_name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có danh sách thuyền viên', 'Thêm thuyền trưởng hoặc thuyền viên cùng chứng chỉ chuyên môn.');
+  const canEdit = ['CUSTOMER', 'ADMIN'].includes(state.currentUser?.role);
+  $('#crew-table').innerHTML = items.length ? `<table class="data-table responsive-table record-table crew-record-table"><thead><tr><th>Họ tên</th><th>Chức danh</th><th>Ngày sinh</th><th>Chứng chỉ</th><th>Thời hạn</th><th>Trạng thái</th>${canEdit ? '<th aria-label="Thao tác"></th>' : ''}</tr></thead><tbody>${items.map(item => `<tr><td data-label="Họ tên"><strong>${esc(item.full_name)}</strong><br><small>${esc(item.phone || '')}</small></td><td data-label="Chức danh">${esc(item.crew_role)}</td><td data-label="Ngày sinh" class="date-cell">${fmtDate(item.birth_date)}</td><td data-label="Chứng chỉ">${esc(item.professional_certificate_type)}<br><small>${esc(item.professional_certificate_no)}</small></td><td data-label="Thời hạn" class="date-cell">${fmtDate(item.certificate_expiry_date)}</td><td data-label="Trạng thái"><span class="table-badge ${item.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(item.certificate_status)}</span></td>${canEdit ? `<td data-label="Thao tác" class="action-cell"><button class="table-icon-button" data-edit-crew="${item.id}" title="Chỉnh sửa ${esc(item.full_name)}" aria-label="Chỉnh sửa ${esc(item.full_name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></td>` : ''}</tr>`).join('')}</tbody></table>` : empty('Chưa có danh sách thuyền viên', 'Thêm thuyền trưởng hoặc thuyền viên cùng chứng chỉ chuyên môn.');
   $$('[data-edit-crew]').forEach(button => button.onclick = () => openCrew(Number(button.dataset.editCrew)));
 }
 
@@ -341,9 +344,9 @@ function openCrew(id = null) {
   $('#crew-fields').innerHTML = `
     ${field('full_name','Họ và tên',item.full_name,'text','required class="span-2"')}
     ${selectField('crew_role','Chức danh',['Thuyền trưởng','Máy trưởng','Thuyền phó','Máy phó','Thủy thủ','Thợ máy','Khác'],item.crew_role,'required')}
+    ${field('birth_date','Ngày sinh (không bắt buộc)',item.birth_date,'date')}
     ${field('phone','Số điện thoại',item.phone,'tel')}
     ${field('identity_no','CCCD / Hộ chiếu',item.identity_no)}
-    <label>Phương tiện<select name="vessel_id"><option value="">Chưa phân công</option>${state.vessels.map(v => `<option value="${v.id}" ${Number(item.vessel_id) === v.id ? 'selected' : ''}>${esc(v.name)} — ${esc(v.registration_no)}</option>`).join('')}</select></label>
     ${field('professional_certificate_type','Loại chứng chỉ chuyên môn',item.professional_certificate_type,'text','required')}
     ${field('professional_certificate_no','Số chứng chỉ',item.professional_certificate_no,'text','required')}
     ${field('certificate_issue_date','Ngày cấp',item.certificate_issue_date,'date')}
@@ -439,9 +442,9 @@ function cargoFields(prefix, title, current = {}, load = false) {
 }
 
 function crewChecklistHtml(vesselId, selectedIds = []) {
-  if (!vesselId) return '<p class="muted">Chọn phương tiện ở bước 1 để xem danh sách thuyền viên.</p>';
-  const pool = state.crew.filter(member => Number(member.vessel_id) === Number(vesselId));
-  if (!pool.length) return '<p class="muted">Chưa có thuyền viên gán cho phương tiện này. Hãy cập nhật Danh sách thuyền viên trước khi tạo phiếu.</p>';
+  if (!vesselId) return '<p class="muted">Chọn phương tiện ở bước 1 để tiếp tục chọn thuyền viên cho lượt khai báo.</p>';
+  const pool = state.crew;
+  if (!pool.length) return '<p class="muted">Chưa có thuyền viên. Hãy cập nhật Danh sách thuyền viên trước khi tạo phiếu.</p>';
   return `<ul class="crew-checklist" role="group" aria-label="Chọn thuyền viên đi theo phương tiện">${pool.map(member => {
     const isCaptain = member.crew_role.trim().toLowerCase() === 'thuyền trưởng';
     const checked = selectedIds.some(id => Number(id) === member.id);
@@ -455,7 +458,8 @@ function crewChecklistHtml(vesselId, selectedIds = []) {
 }
 
 function captainForVessel(vesselId) {
-  return state.crew.find(member => Number(member.vessel_id) === Number(vesselId) && member.crew_role.trim().toLowerCase() === 'thuyền trưởng');
+  if (!vesselId) return null;
+  return state.crew.find(member => member.crew_role.trim().toLowerCase() === 'thuyền trưởng');
 }
 
 function refreshCrewOptions(vesselId) {
@@ -469,7 +473,7 @@ function refreshCrewOptions(vesselId) {
   form.elements.master_name.value = captain?.full_name || '';
   form.elements.master_phone.value = captain?.phone || '';
   const summary = $('#assigned-captain');
-  if (summary) summary.textContent = captain ? `${captain.full_name}${captain.phone ? ` · ${captain.phone}` : ''}` : 'Chưa gán Thuyền trưởng cho phương tiện này.';
+  if (summary) summary.textContent = captain ? `${captain.full_name}${captain.phone ? ` · ${captain.phone}` : ''}` : 'Chưa chọn Thuyền trưởng cho lượt khai báo.';
 }
 
 const DECLARATION_STEPS = [
@@ -888,7 +892,7 @@ async function saveDeclaration(event) {
       })});
       const newCrewIds = [];
       for (const row of state.declarationNewCrew) {
-        const savedCrew = await api('/api/crew', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ...row, vessel_id: newVessel.id })});
+        const savedCrew = await api('/api/crew', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(row)});
         newCrewIds.push(savedCrew.id);
       }
       await Promise.all([loadVessels(), loadCrew()]);
@@ -1046,6 +1050,20 @@ function renderImportPreview() {
           return `<tr><td data-label="Dòng">${row.sourceRow}</td><td data-label="Tên phương tiện">${esc(row.name || '—')}</td><td data-label="Số đăng ký">${esc(row.registration_no || '—')}</td><td data-label="Kiểm tra">${check}</td></tr>`;
         }).join('')}</tbody></table>`
       : empty('Không tìm thấy dòng dữ liệu', 'Kiểm tra lại file có đúng mẫu và còn dữ liệu hay không.');
+  } else if (kind === 'crew') {
+    const rows = preview.rows || [];
+    warningCount = rows.filter(row => row.missingFields?.length).length;
+    conflictCount = rows.filter(row => row.existing).length;
+    bodyHtml = rows.length
+      ? `<table class="data-table responsive-table"><thead><tr><th>Dòng</th><th>Doanh nghiệp</th><th>Họ tên</th><th>Chức danh</th><th>Kiểm tra</th></tr></thead><tbody>${rows.map(row => {
+          const check = row.missingFields?.length
+            ? `<span class="table-badge danger">Thiếu: ${esc(row.missingFields.join(', '))}</span>`
+            : row.existing
+              ? `<span class="table-badge draft" title="${esc((row.changes || []).map(item => `${item.label}: ${item.current ?? '—'} → ${item.incoming ?? '—'}`).join(' · '))}">Sẽ cập nhật · ${(row.changes || []).length} thay đổi</span>`
+              : '<span class="table-badge submitted">Sẽ thêm mới</span>';
+          return `<tr><td data-label="Dòng">${row.sourceRow}</td><td data-label="Doanh nghiệp">${esc(row.organization_name || '—')}</td><td data-label="Họ tên">${esc(row.full_name || '—')}</td><td data-label="Chức danh">${esc(row.crew_role || '—')}</td><td data-label="Kiểm tra">${check}</td></tr>`;
+        }).join('')}</tbody></table>`
+      : empty('Không tìm thấy dòng dữ liệu', 'Kiểm tra lại file có đúng cột và còn dữ liệu hay không.');
   } else {
     const row = preview.row || {};
     const missing = preview.missingFields || [];
@@ -1055,13 +1073,14 @@ function renderImportPreview() {
   const mapping = preview.mapping;
   setImportResult(`
     ${mapping ? `<div class="import-mapping-note"><strong>Đã tự nhận diện cấu trúc</strong><span>Sheet: ${esc(mapping.sheet || '—')} · Mapping: theo nhãn cột</span></div>` : ''}
-    ${warningCount ? `<div class="warning-strip visible">${kind === 'vessels' ? `Có ${warningCount} dòng thiếu dữ liệu bắt buộc — các dòng này sẽ bị bỏ qua nếu bạn tiếp tục.` : 'File thiếu dữ liệu bắt buộc — không thể import cho đến khi bổ sung.'}</div>` : ''}
-    ${conflictCount ? `<div class="warning-strip visible"><strong>Có ${conflictCount} phương tiện đã tồn tại.</strong> Mặc định hệ thống giữ dữ liệu hiện có. Chỉ chọn ghi đè sau khi xem các thay đổi trong cột Kiểm tra.${preview.previousImportId ? ` File này trùng lần import #${esc(preview.previousImportId)}.` : ''}</div>` : ''}
+    ${warningCount ? `<div class="warning-strip visible">${kind === 'declaration' ? 'File thiếu dữ liệu bắt buộc — không thể import cho đến khi bổ sung.' : `Có ${warningCount} dòng thiếu hoặc sai dữ liệu bắt buộc — các dòng này sẽ bị bỏ qua nếu bạn tiếp tục.`}</div>` : ''}
+    ${kind === 'crew' && conflictCount ? `<div class="warning-strip visible"><strong>Có ${conflictCount} thuyền viên đã tồn tại.</strong> Khi xác nhận, nhân viên Cảng sẽ cập nhật các trường thay đổi theo file Excel; không có thao tác gán phương tiện.</div>` : ''}
+    ${kind === 'vessels' && conflictCount ? `<div class="warning-strip visible"><strong>Có ${conflictCount} phương tiện đã tồn tại.</strong> Mặc định hệ thống giữ dữ liệu hiện có. Chỉ chọn ghi đè sau khi xem các thay đổi trong cột Kiểm tra.${preview.previousImportId ? ` File này trùng lần import #${esc(preview.previousImportId)}.` : ''}</div>` : ''}
     ${bodyHtml}
     <div class="modal-actions">
       <button type="button" class="ghost-button" id="cancel-import">Huỷ</button>
-      <button type="button" class="outline-button" id="confirm-import" ${kind === 'declaration' && warningCount ? 'disabled' : ''}>${conflictCount ? 'Giữ dữ liệu hiện có & tiếp tục' : 'Xác nhận import'}</button>
-      ${overwritableCount ? `<button type="button" class="primary-button" id="overwrite-import">Ghi đè ${overwritableCount} bản ghi</button>` : ''}
+      <button type="button" class="outline-button" id="confirm-import" ${kind === 'declaration' && warningCount ? 'disabled' : ''}>${kind === 'vessels' && conflictCount ? 'Giữ dữ liệu hiện có & tiếp tục' : kind === 'crew' ? 'Xác nhận cập nhật' : 'Xác nhận import'}</button>
+      ${kind === 'vessels' && overwritableCount ? `<button type="button" class="primary-button" id="overwrite-import">Ghi đè ${overwritableCount} bản ghi</button>` : ''}
     </div>`);
   $('#cancel-import').onclick = cancelImport;
   $('#confirm-import').onclick = () => confirmImport(false);
@@ -1077,6 +1096,7 @@ function cancelImport() {
   state.pendingImport = null;
   $('#import-vessels').value = '';
   $('#import-declaration').value = '';
+  $('#import-crew').value = '';
   setImportResult('Chưa có file nào được import trong phiên này.', true);
 }
 
@@ -1098,7 +1118,8 @@ async function confirmImport(overwriteExisting = false) {
     state.pendingImport = null;
     $('#import-vessels').value = '';
     $('#import-declaration').value = '';
-    await Promise.all([loadVessels(), loadDeclarations(), loadDashboard()]);
+    $('#import-crew').value = '';
+    await Promise.all([loadVessels(), loadDeclarations(), loadCrew(), loadDashboard()]);
   } catch (error) {
     setImportResult(`<div><strong>Không thể import</strong><p>${esc(error.message)}</p></div>`);
     toast(error.message, true);
@@ -1260,8 +1281,7 @@ async function init() {
   // Load current user profile first (authentication barrier)
   try {
     state.currentUser = await api('/api/auth/me');
-    const displayName = state.currentUser.full_name?.trim() || state.currentUser.username;
-    $('#user-display').innerHTML = `<span class="role-pill">${esc(roleLabel(state.currentUser.role))}</span><strong>${esc(displayName)}</strong><small>@${esc(state.currentUser.username)}</small>`;
+    $('#user-display').innerHTML = `<span class="role-pill" title="${esc(state.currentUser.username)}">${esc(roleLabel(state.currentUser.role))}</span>`;
     $('#logout-button').style.display = 'inline-block';
 
     // Role-based UI visibility constraints
@@ -1269,23 +1289,34 @@ async function init() {
     const isAdmin = state.currentUser.role === 'ADMIN';
     const isReviewer = state.currentUser.role === 'PORT_STAFF';
 
-    $$('[data-action="new-declaration"]').forEach(btn => btn.style.display = isCustomer ? 'inline-block' : 'none');
+    $$('[data-action="new-declaration"]').forEach(btn => { btn.hidden = !isCustomer; });
     const addVesselBtn = $('#add-vessel');
-    if (addVesselBtn) addVesselBtn.style.display = isReviewer ? 'none' : 'inline-block';
+    if (addVesselBtn) addVesselBtn.hidden = isReviewer || isCustomer;
     const addCrewBtn = $('#add-crew');
-    if (addCrewBtn) addCrewBtn.style.display = isReviewer ? 'none' : 'inline-block';
+    if (addCrewBtn) addCrewBtn.hidden = isReviewer;
+
+    if (isCustomer) {
+      $$('nav a[data-route]').forEach(link => {
+        link.hidden = !['declarations', 'crew'].includes(link.dataset.route);
+      });
+    }
 
     const importNav = $('nav a[href="#import"]');
     if (importNav) {
       importNav.style.removeProperty('display');
-      importNav.hidden = !(isCustomer || isAdmin);
+      importNav.hidden = !(isReviewer || isAdmin);
     }
 
     const reportsNav = $('nav a[href="#reports"]');
     if (reportsNav) {
       reportsNav.style.removeProperty('display');
-      reportsNav.hidden = false;
+      reportsNav.hidden = isCustomer;
     }
+
+    $('.data-nav').hidden = isCustomer;
+    $('#import-vessels-card').hidden = !isAdmin;
+    $('#import-crew-card').hidden = !(isReviewer || isAdmin);
+    $('#import-declaration-card').hidden = true;
 
     const integrationActions = $('#integration-admin-actions');
     const integrationJobs = $('#sync-jobs');
@@ -1335,6 +1366,7 @@ async function init() {
   $('#clear-declaration-filter').onclick = () => { ['declaration-search','movement-filter','workflow-filter','master-filter','declaration-from','declaration-to'].forEach(id => $(`#${id}`).value = ''); applyDeclarationFilters(); };
   $('#import-vessels').onchange = event => previewImport(event.target, '/api/import/vessels', 'vessels');
   $('#import-declaration').onchange = event => previewImport(event.target, '/api/import/declaration', 'declaration');
+  $('#import-crew').onchange = event => previewImport(event.target, '/api/import/crew', 'crew');
   $$('[data-report]').forEach(button => button.onclick = () => exportReport(button.dataset.report));
   $('#export-analytics').onclick = exportAnalyticsReport;
   $('#trigger-backup').onclick = triggerBackup;

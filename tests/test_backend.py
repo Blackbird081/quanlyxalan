@@ -192,7 +192,7 @@ def test_static_frontend(client):
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
     assert '/styles.css?v=1.1.3' in res.text
-    assert '/app.js?v=1.1.3' in res.text
+    assert '/app.js?v=1.1.4' in res.text
     assert 'id="analytics-unavailable"' in res.text
     assert 'id="external-integration-panel" class="panel integration-panel"' in res.text
     assert 'id="integration-admin-actions" class="integration-state" hidden' in res.text
@@ -218,7 +218,9 @@ def test_static_frontend(client):
     assert "PORT_STAFF:'Port staff'" in app_js
     assert "ADMIN:'Admin'" in app_js
     assert "if (state.currentUser?.role === 'ADMIN') loadIntegration();" in app_js
-    assert "btn.style.display = isCustomer ? 'inline-block' : 'none'" in app_js
+    assert "btn.hidden = !isCustomer" in app_js
+    assert "!['declarations', 'crew'].includes(link.dataset.route)" in app_js
+    assert "$('#user-display').innerHTML = `<span class=\"role-pill\"" in app_js
     assert "const crewContainer = $('#declaration-crew-container');" in app_js
     assert "? $$('input[name=\"crew_ids\"]:checked', crewContainer).length" in app_js
     assert "node.setAttribute('role', error ? 'alert' : 'status')" in app_js
@@ -233,6 +235,9 @@ def test_static_frontend(client):
     assert "reportsNav.style.display = 'block'" not in app_js
     assert "Giữ dữ liệu hiện có & tiếp tục" in app_js
     assert "overwrite_existing=true" in app_js
+    assert "field('birth_date','Ngày sinh (không bắt buộc)'" in app_js
+    assert 'name="vessel_id"><option value="">Chưa phân công' not in app_js
+    assert "previewImport(event.target, '/api/import/crew', 'crew')" in app_js
     styles_css = client.get("/styles.css").text
     assert "[hidden] { display: none !important; }" in styles_css
     assert "overflow-y: auto" in styles_css
@@ -470,8 +475,10 @@ def test_vessel_verify_registry(client, auth_headers):
 
 def test_crew_create(client, auth_headers):
     payload = {
+        "vessel_id": 999999,
         "full_name": "Nguyễn Văn Thuyền",
         "crew_role": "Thuyền trưởng",
+        "birth_date": "1985-04-12",
         "professional_certificate_type": "Bằng thuyền trưởng",
         "professional_certificate_no": "CERT-001",
         "certificate_expiry_date": "2020-01-01",
@@ -481,6 +488,18 @@ def test_crew_create(client, auth_headers):
     data = res.json()
     assert data["certificate_status"] == "EXPIRED"
     assert data["full_name"] == "Nguyễn Văn Thuyền"
+    assert data["birth_date"] == "1985-04-12"
+    assert data["vessel_id"] is None
+
+
+def test_port_staff_cannot_manually_assign_or_edit_crew(client, port_staff_headers):
+    response = client.post("/api/crew", json={
+        "full_name": "Không được tạo thủ công",
+        "crew_role": "Thủy thủ",
+        "professional_certificate_type": "Chứng chỉ",
+        "professional_certificate_no": "PORT-MANUAL-DENIED",
+    }, headers=port_staff_headers)
+    assert response.status_code == 403
 
 
 def test_crew_list(client, auth_headers):
@@ -997,6 +1016,7 @@ def test_all_frontend_routes_registered():
         "/api/declarations/{declaration_id}/workflow",
         "/api/suggestions",
         "/api/import/vessels",
+        "/api/import/crew",
         "/api/import/declaration",
         "/api/reports/analytics",
         "/api/reports/analytics/export",
@@ -1207,6 +1227,70 @@ def test_vessel_import_normalizes_text_and_requires_explicit_overwrite(client, a
         checksum = overwrite.json()["checksum"]
         db.query(ImportJob).filter(ImportJob.source_checksum == checksum).delete(synchronize_session=False)
         db.delete(updated)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_port_staff_imports_crew_without_vessel_assignment(
+    client, customer_headers, port_staff_headers,
+):
+    certificate_no = f"CREW-{uuid.uuid4().hex[:10]}".upper()
+    created = client.post("/api/crew", json={
+        "full_name": "NGUYỄN VĂN KIỂM THỬ",
+        "crew_role": "THỦY THỦ",
+        "professional_certificate_type": "CHỨNG CHỈ THỦY THỦ",
+        "professional_certificate_no": certificate_no,
+        "phone": "0900000001",
+    }, headers=customer_headers)
+    assert created.status_code == 200
+    crew_id = created.json()["id"]
+
+    workbook = make_xlsx(
+        "Danh sách thuyền viên",
+        [
+            "Tên doanh nghiệp", "Họ và tên", "Chức danh", "Ngày sinh",
+            "Số điện thoại", "CCCD", "Loại chứng chỉ", "Số chứng chỉ",
+            "Ngày hết hạn",
+        ],
+        [[
+            " test   org ", " Nguyễn Văn Kiểm Thử ", "Thủy thủ", "12/04/1985",
+            "0900000099", "079123456789", "Chứng chỉ thủy thủ", certificate_no,
+            "31/12/2030",
+        ]],
+    )
+    headers = {
+        **port_staff_headers,
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
+    preview = client.post("/api/import/crew?preview=true", content=workbook, headers=headers)
+    assert preview.status_code == 200
+    row = preview.json()["rows"][0]
+    assert row["organization_name"] == "TEST ORG"
+    assert row["full_name"] == "NGUYỄN VĂN KIỂM THỬ"
+    assert row["birth_date"] == "1985-04-12"
+    assert row["existing"] is True
+    assert row["missingFields"] == []
+
+    imported = client.post("/api/import/crew", content=workbook, headers=headers)
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["created"] == 0
+    assert imported.json()["updated"] == 1
+    assert client.post(
+        "/api/import/crew", content=workbook,
+        headers={**customer_headers, "Content-Type": headers["Content-Type"]},
+    ).status_code == 403
+
+    db = SessionLocal()
+    try:
+        member = db.query(app_module.CrewMember).filter(app_module.CrewMember.id == crew_id).one()
+        assert member.phone == "0900000099"
+        assert member.birth_date == "1985-04-12"
+        assert member.vessel_id is None
+        db.query(ImportJob).filter(
+            ImportJob.source_checksum == imported.json()["checksum"]
+        ).delete(synchronize_session=False)
+        db.delete(member)
         db.commit()
     finally:
         db.close()

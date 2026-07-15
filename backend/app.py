@@ -37,7 +37,10 @@ from .models import (
     DeclarationCrew, DeclarationEvent, ImportJob, IntegrationConnector, Organization,
     SyncJob, User, Vessel,
 )
-from .xlsx_io import declaration_row, make_xlsx, read_workbook, vessel_rows, excel_date
+from .xlsx_io import (
+    crew_rows, declaration_row, excel_date, import_match_key, make_xlsx,
+    read_workbook, vessel_rows,
+)
 from scripts.backup_local import backup as create_local_backup, prune as prune_local_backups
 
 IMPORT_MAPPING_VERSION = "KBCV-IMPORT-1.3"
@@ -290,9 +293,9 @@ class VesselSaveRequest(BaseModel):
 class CrewSaveRequest(BaseModel):
     id: Optional[int] = None
     version: Optional[int] = None
-    vessel_id: Optional[int] = None
     full_name: str
     crew_role: str
+    birth_date: Optional[str] = None
     phone: str = ""
     identity_no: str = ""
     professional_certificate_type: str = ""
@@ -1003,14 +1006,8 @@ def save_crew(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles("CUSTOMER", "ADMIN")),
 ):
-    # Verify vessel ownership if provided
-    if payload.vessel_id:
-        vessel = db.query(Vessel).filter(Vessel.id == payload.vessel_id).first()
-        if not vessel:
-            raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện được gán.")
-        verify_organization_ownership(user, vessel.organization_id)
-
     data = payload.model_dump(exclude={"id", "version"})
+    data["vessel_id"] = None
     data["updated_at"] = now_iso()
 
     if user.role == "CUSTOMER":
@@ -1671,6 +1668,216 @@ async def import_vessels(
         mapping_version=IMPORT_MAPPING_VERSION, accepted_count=accepted,
         rejected_count=len(rejected), result_json=json.dumps(result, ensure_ascii=False),
         created_by_user_id=user.id, created_at=now_iso(),
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    result["importJobId"] = job.id
+    return result
+
+
+CREW_IMPORT_COMPARE_FIELDS = {
+    "full_name": "Họ và tên",
+    "crew_role": "Chức danh",
+    "birth_date": "Ngày sinh",
+    "phone": "Số điện thoại",
+    "identity_no": "CCCD / Hộ chiếu",
+    "professional_certificate_type": "Loại chứng chỉ",
+    "professional_certificate_no": "Số chứng chỉ",
+    "certificate_issue_date": "Ngày cấp",
+    "certificate_expiry_date": "Ngày hết hạn",
+    "notes": "Ghi chú",
+}
+
+
+def _import_organization(db: Session, name: str) -> Organization | None:
+    key = import_match_key(name)
+    return next(
+        (organization for organization in db.query(Organization).all()
+         if import_match_key(organization.name) == key),
+        None,
+    )
+
+
+def _existing_import_crew(
+    db: Session, organization_id: int, row: dict[str, Any],
+) -> CrewMember | None:
+    query = db.query(CrewMember).filter(CrewMember.organization_id == organization_id)
+    identity_no = str(row.get("identity_no") or "").strip()
+    certificate_no = str(row.get("professional_certificate_no") or "").strip()
+    if identity_no:
+        existing = query.filter(CrewMember.identity_no == identity_no).first()
+        if existing:
+            return existing
+    if certificate_no:
+        return query.filter(CrewMember.professional_certificate_no == certificate_no).first()
+    birth_date = row.get("birth_date")
+    if birth_date:
+        return query.filter(
+            CrewMember.full_name == row.get("full_name"),
+            CrewMember.birth_date == birth_date,
+        ).first()
+    return None
+
+
+def _crew_import_changes(existing: CrewMember, row: dict[str, Any]) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    for field, label in CREW_IMPORT_COMPARE_FIELDS.items():
+        if field not in row:
+            continue
+        current = getattr(existing, field, None)
+        incoming = row[field]
+        if current != incoming:
+            changes.append({
+                "field": field,
+                "label": label,
+                "current": current,
+                "incoming": incoming,
+            })
+    return changes
+
+
+@app.post("/api/import/crew")
+async def import_crew(
+    request: Request,
+    preview: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+):
+    content = await request.body()
+    if not content:
+        raise HTTPException(status_code=400, detail="File trống.")
+    validate_attachment_content(".xlsx", content)
+    try:
+        rows = crew_rows(read_workbook(content))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Lỗi đọc file: {exc}")
+
+    checksum = hashlib.sha256(content).hexdigest()
+    required_fields = {
+        "organization_name": "Tên doanh nghiệp",
+        "full_name": "Họ và tên",
+        "crew_role": "Chức danh",
+    }
+    prepared: list[tuple[dict[str, Any], Organization | None, CrewMember | None]] = []
+    preview_rows: list[dict[str, Any]] = []
+    for row in rows:
+        organization = _import_organization(db, str(row.get("organization_name") or ""))
+        existing = _existing_import_crew(db, organization.id, row) if organization else None
+        missing = [label for field, label in required_fields.items() if not row.get(field)]
+        if row.get("organization_name") and not organization:
+            missing.append("Doanh nghiệp đã có trong hệ thống")
+        clean = {key: value for key, value in row.items() if not key.startswith("_")}
+        clean.update({
+            "sourceRow": row.get("_source_row"),
+            "sourceSheet": row.get("_source_sheet"),
+            "mappingWarnings": row.get("_mapping_warnings", []),
+            "missingFields": missing,
+            "existing": bool(existing),
+            "changes": _crew_import_changes(existing, row) if existing else [],
+        })
+        preview_rows.append(clean)
+        prepared.append((row, organization, existing))
+
+    recognized_organization_ids = {
+        organization.id for _, organization, _ in prepared if organization
+    }
+    if len(recognized_organization_ids) > 1:
+        raise HTTPException(
+            status_code=422,
+            detail="Mỗi file thuyền viên chỉ được chứa dữ liệu của một doanh nghiệp.",
+        )
+    job_organization_id = next(iter(recognized_organization_ids), None)
+    prior = db.query(ImportJob).filter(
+        ImportJob.organization_id == job_organization_id,
+        ImportJob.import_kind == "CREW",
+        ImportJob.source_checksum == checksum,
+        ImportJob.mapping_version == IMPORT_MAPPING_VERSION,
+    ).first()
+    if preview:
+        return {
+            "preview": True,
+            "mappingVersion": IMPORT_MAPPING_VERSION,
+            "checksum": checksum,
+            "mapping": {
+                "strategy": "HEADER_LABEL_DETECTION",
+                "sheet": rows[0].get("_source_sheet") if rows else None,
+            },
+            "rows": preview_rows,
+            "previousImportId": prior.id if prior else None,
+            "accepted": 0,
+            "rejected": [],
+        }
+    if prior:
+        result = json.loads(prior.result_json)
+        result["idempotent"] = True
+        result["importJobId"] = prior.id
+        return result
+    if job_organization_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="File không có doanh nghiệp nào khớp với dữ liệu hệ thống.",
+        )
+
+    created = 0
+    updated = 0
+    rejected: list[dict[str, Any]] = []
+    for row, organization, existing in prepared:
+        missing = [label for field, label in required_fields.items() if not row.get(field)]
+        if row.get("organization_name") and not organization:
+            missing.append("Doanh nghiệp đã có trong hệ thống")
+        if missing:
+            rejected.append({
+                "sourceRow": row.get("_source_row"),
+                "row": row.get("full_name"),
+                "error": f"Thiếu hoặc không hợp lệ: {', '.join(missing)}",
+            })
+            continue
+        data = {
+            key: value for key, value in row.items()
+            if not key.startswith("_") and key != "organization_name" and hasattr(CrewMember, key)
+        }
+        data["organization_id"] = organization.id
+        data["vessel_id"] = None
+        data["updated_at"] = now_iso()
+        if existing:
+            for key, value in data.items():
+                setattr(existing, key, value)
+            existing.version += 1
+            member = existing
+            updated += 1
+            action = "IMPORT_UPDATE"
+        else:
+            data["created_at"] = now_iso()
+            member = CrewMember(**data)
+            db.add(member)
+            created += 1
+            action = "IMPORT_CREATE"
+        db.flush()
+        audit(
+            db, "CREW", member.id, action, f"{member.full_name} / {member.crew_role}",
+            actor_user_id=user.id, organization_id=organization.id,
+        )
+
+    result = {
+        "accepted": created + updated,
+        "created": created,
+        "updated": updated,
+        "rejected": rejected,
+        "mappingVersion": IMPORT_MAPPING_VERSION,
+        "checksum": checksum,
+        "idempotent": False,
+    }
+    job = ImportJob(
+        organization_id=job_organization_id,
+        import_kind="CREW",
+        source_checksum=checksum,
+        mapping_version=IMPORT_MAPPING_VERSION,
+        accepted_count=result["accepted"],
+        rejected_count=len(rejected),
+        result_json=json.dumps(result, ensure_ascii=False),
+        created_by_user_id=user.id,
+        created_at=now_iso(),
     )
     db.add(job)
     db.commit()
