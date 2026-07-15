@@ -465,6 +465,43 @@ Verification:
 
 ---
 
+## Port Salan register and multi-area capacity preservation — 2026-07-15
+
+- **Status**: IN REVIEW — implementation and automated regression PASS; user visual review pending.
+- **Phase**: REVIEW
+- **Risk Level**: R2 (schema migration and controlled overwrite import).
+
+Implemented:
+
+- Replaced the first-number-only import behavior for multi-area Salan records
+  with normalized `vessel_operating_profiles`. Each activity area keeps its
+  corresponding deadweight and cargo capacity; the legacy scalar fields retain
+  profile 1 for compatibility with existing declarations and reports.
+- Added Alembic revision `j09f0f000009`, tracking master name/phone fields and
+  a data migration for existing vessels. Local SQLite was backed up to
+  `data/backups/cang_vu-20260715-porter-register-pre-migration.db` and upgraded;
+  integrity check returned `ok`.
+- Added the role-limited `Sổ theo dõi Salan` tab for PORT_STAFF and ADMIN with
+  all 14 operational workbook columns, search, manual add/edit, authenticated
+  Excel export and access to the smart vessel import card.
+- Advanced vessel import mapping to `KBCV-IMPORT-1.4`. Count mismatches between
+  activity areas, deadweights and cargo capacities are preserved and surfaced
+  as preview warnings instead of silently dropping values.
+- The local source workbook `templates/DU_LIEU_SA_LAN_T7.26.xlsx` was used as
+  read-only validation input. It remains untracked because it contains real
+  operational contact data and is not a public template artifact.
+
+Verification:
+
+- Real source row `NGỌC HUY 01` parsed as two profiles:
+  `VR-SI / 2723.79 / 2698.79` and `VR-SII / 2912.57 / 2887.57`.
+- `pytest -q`: 88 passed.
+- `node --check frontend/app.js`: PASS.
+- Alembic upgrade/downgrade rehearsal: PASS.
+- Manual browser/visual review remains with the user and is not claimed here.
+
+---
+
 ## Customer flow and crew ownership correction — 2026-07-15
 
 - **Status**: IN REVIEW — automated regression PASS; user visual review pending.

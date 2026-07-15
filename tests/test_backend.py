@@ -28,7 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 import backend.app as app_module
 
-from backend.models import AuditEvent, Base, Declaration, ImportJob, User, Organization, Vessel
+from backend.models import AuditEvent, Base, Declaration, ImportJob, User, Organization, Vessel, VesselOperatingProfile
 from backend.database import engine, SessionLocal, now_iso
 from backend.auth import get_password_hash
 from backend.app import app, get_db, DEMO_ORGANIZATION_TAX_CODE, remove_demo_data_for_real_input
@@ -191,8 +191,10 @@ def test_static_frontend(client):
     assert 'id="certificate-reminder"' in res.text
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
-    assert '/styles.css?v=1.1.5' in res.text
-    assert '/app.js?v=1.1.6' in res.text
+    assert '/styles.css?v=1.1.6' in res.text
+    assert '/app.js?v=1.1.7' in res.text
+    assert 'data-page="port-register"' in res.text
+    assert 'id="export-port-register"' in res.text
     assert 'id="analytics-unavailable"' in res.text
     assert 'id="external-integration-panel" class="panel integration-panel"' in res.text
     assert 'id="integration-admin-actions" class="integration-state" hidden' in res.text
@@ -1024,6 +1026,7 @@ def test_all_frontend_routes_registered():
         "/api/organizations",
         "/api/vessels",
         "/api/vessels/{vessel_id}/verify-registry",
+        "/api/port-vessel-register/export",
         "/api/crew",
         "/api/declarations",
         "/api/declarations/{declaration_id}/attachments",
@@ -1123,7 +1126,7 @@ def test_import_preview_and_idempotency(client, auth_headers, customer_headers):
     )
     assert preview.status_code == 200
     assert preview.json()["preview"] is True
-    assert preview.json()["mappingVersion"] == "KBCV-IMPORT-1.3"
+    assert preview.json()["mappingVersion"] == "KBCV-IMPORT-1.4"
     db = SessionLocal()
     assert db.query(ImportJob).count() == before
     db.close()
@@ -1182,7 +1185,8 @@ def test_smart_vessel_import_accepts_complete_non_template_workbook(client, auth
     assert preview.json()["rows"][0]["missingFields"] == []
     assert preview.json()["rows"][0]["deadweight_tons"] == 950.5
     assert preview.json()["rows"][0]["cargo_capacity_tons"] == 900.25
-    assert len(preview.json()["rows"][0]["mappingWarnings"]) == 2
+    assert len(preview.json()["rows"][0]["operating_profiles"]) == 2
+    assert preview.json()["rows"][0]["mappingWarnings"]
     imported = client.post("/api/import/vessels", content=workbook, headers=headers)
     assert imported.status_code == 200
     assert imported.json()["accepted"] == 1
@@ -1192,8 +1196,99 @@ def test_smart_vessel_import_accepts_complete_non_template_workbook(client, auth
         vessel = db.query(Vessel).filter(Vessel.registration_no == registration).one()
         assert vessel.deadweight_tons == 950.5
         assert vessel.cargo_capacity_tons == 900.25
-        assert "950.5 / 980.5" in vessel.notes
+        assert [(p.activity_area, p.deadweight_tons, p.cargo_capacity_tons) for p in vessel.operating_profiles] == [
+            ("VR-SII", 950.5, 900.25),
+            ("VR-SII", 980.5, 930.25),
+        ]
         db.query(ImportJob).filter(ImportJob.source_checksum == imported.json()["checksum"]).delete(synchronize_session=False)
+        db.delete(vessel)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_port_tracking_import_preserves_dual_operating_profiles_and_exports_them(
+    client, port_staff_headers,
+):
+    registration = f"SG-DUAL-{uuid.uuid4().hex[:8]}".upper()
+    workbook = make_xlsx(
+        "DỮ LIỆU SÀ LAN",
+        [
+            "STT", "TÊN PHƯƠNG TIỆN", "SỐ ĐĂNG KÝ", "LOẠI PHƯƠNG TIỆN (CÔNG DỤNG)",
+            "CẤP PT (VÙNG HOẠT ĐỘNG)", "CHIỀU DÀI (M)", "TRỌNG TẢI TOÀN PHẦN (TẤN)",
+            "DUNG TÍCH (M3)", "KHẢ NĂNG KHAI THÁC (TẤN)", "KHẢ NĂNG KHAI THÁC (TEU)",
+            "NGÀY HẾT HẠN GCNATKT&BVMT", "SỐ THUYỀN VIÊN", "THUYỀN TRƯỞNG",
+            "SỐ ĐIỆN THOẠI LIÊN HỆ",
+        ],
+        [[
+            1, "NGỌC HUY KIỂM THỬ", registration, "Chở hàng khô hoặc container",
+            "VR-SI/VR-SII", 70.9, "2723.79 / 2912.57", 1329,
+            "2698.79 / 2887.57", 128, "30/03/2027", 3,
+            "NGUYỄN VĂN KIỂM THỬ", "0900000000",
+        ]],
+    )
+    headers = {
+        **port_staff_headers,
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
+    preview = client.post("/api/import/vessels?preview=true", content=workbook, headers=headers)
+    assert preview.status_code == 200, preview.text
+    row = preview.json()["rows"][0]
+    assert row["mappingWarnings"] == []
+    assert row["operating_profiles"] == [
+        {"sequence": 1, "activity_area": "VR-SI", "deadweight_tons": 2723.79, "cargo_capacity_tons": 2698.79},
+        {"sequence": 2, "activity_area": "VR-SII", "deadweight_tons": 2912.57, "cargo_capacity_tons": 2887.57},
+    ]
+    imported = client.post("/api/import/vessels", content=workbook, headers=headers)
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["created"] == 1
+
+    exported = client.get("/api/port-vessel-register/export", headers=port_staff_headers)
+    assert exported.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+        xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert registration in xml
+    assert "VR-SI / VR-SII" in xml
+    assert "2723.79 / 2912.57" in xml
+    assert "2698.79 / 2887.57" in xml
+
+    db = SessionLocal()
+    try:
+        vessel = db.query(Vessel).filter(Vessel.registration_no == registration).one()
+        assert vessel.tracking_master_name == "NGUYỄN VĂN KIỂM THỬ"
+        assert vessel.tracking_master_phone == "0900000000"
+        assert len(vessel.operating_profiles) == 2
+        db.query(ImportJob).filter(ImportJob.source_checksum == imported.json()["checksum"]).delete(synchronize_session=False)
+        db.delete(vessel)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_port_staff_can_add_salan_manually_with_two_operating_profiles(client, port_staff_headers):
+    registration = f"SG-MANUAL-{uuid.uuid4().hex[:8]}".upper()
+    response = client.post("/api/vessels", headers=port_staff_headers, json={
+        "organization_name": "TEST PORT REGISTER OWNER",
+        "name": "SALAN NHẬP THỦ CÔNG",
+        "registration_no": registration,
+        "vessel_type": "CHỞ HÀNG KHÔ HOẶC CONTAINER",
+        "vessel_class": "VR-SI / VR-SII",
+        "tracking_master_name": "NGUYỄN VĂN A",
+        "tracking_master_phone": "0900000001",
+        "operating_profiles": [
+            {"activity_area": "VR-SI", "deadweight_tons": 1000, "cargo_capacity_tons": 950},
+            {"activity_area": "VR-SII", "deadweight_tons": 1100, "cargo_capacity_tons": 1050},
+        ],
+    })
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["vessel_class"] == "VR-SI / VR-SII"
+    assert data["deadweight_tons"] == 1000
+    assert len(data["operating_profiles"]) == 2
+
+    db = SessionLocal()
+    try:
+        vessel = db.query(Vessel).filter(Vessel.registration_no == registration).one()
         db.delete(vessel)
         db.commit()
     finally:

@@ -35,7 +35,7 @@ from .database import DB_PATH, SessionLocal, audit, cargo, correlation_id, engin
 from .models import (
     Attachment, AuditEvent, Base, CrewMember, Declaration,
     DeclarationCrew, DeclarationEvent, ImportJob, IntegrationConnector, Organization,
-    SyncJob, User, Vessel,
+    SyncJob, User, Vessel, VesselOperatingProfile,
 )
 from .xlsx_io import (
     crew_rows, declaration_row, excel_date, import_match_key, make_xlsx,
@@ -43,7 +43,7 @@ from .xlsx_io import (
 )
 from scripts.backup_local import backup as create_local_backup, prune as prune_local_backups
 
-IMPORT_MAPPING_VERSION = "KBCV-IMPORT-1.3"
+IMPORT_MAPPING_VERSION = "KBCV-IMPORT-1.4"
 DEMO_ORGANIZATION_TAX_CODE = "DEMO-TANTHUAN-2026"
 CREW_ROLES = ("Thuyền trưởng", "Máy trưởng", "Thuyền viên", "Thuyền phó")
 CREW_ROLE_CANONICAL = {import_match_key(role): role for role in CREW_ROLES}
@@ -241,6 +241,28 @@ class CargoPayload(BaseModel):
         return value
 
 
+class VesselOperatingProfilePayload(BaseModel):
+    sequence: int = 1
+    activity_area: str
+    deadweight_tons: Optional[float] = None
+    cargo_capacity_tons: Optional[float] = None
+
+    @field_validator("activity_area")
+    @classmethod
+    def required_activity_area(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Vùng hoạt động là bắt buộc.")
+        return value
+
+    @field_validator("deadweight_tons", "cargo_capacity_tons")
+    @classmethod
+    def non_negative_profile_value(cls, value: Optional[float]) -> Optional[float]:
+        if value is not None and value < 0:
+            raise ValueError("Thông số vùng hoạt động không được âm.")
+        return value
+
+
 class VesselSaveRequest(BaseModel):
     id: Optional[int] = None
     version: Optional[int] = None
@@ -267,6 +289,9 @@ class VesselSaveRequest(BaseModel):
     safety_certificate_no: str = ""
     certificate_issue_date: Optional[str] = None
     certificate_expiry_date: Optional[str] = None
+    tracking_master_name: str = ""
+    tracking_master_phone: str = ""
+    operating_profiles: Optional[List[VesselOperatingProfilePayload]] = None
     notes: str = ""
 
     @field_validator("name", "registration_no")
@@ -879,7 +904,44 @@ def _vessel_dict(v: Vessel) -> dict:
     d = {c.name: getattr(v, c.name) for c in v.__table__.columns}
     d["organization_name"] = v.organization.name if v.organization else None
     d["certificate_status"] = certificate_status(v.certificate_expiry_date)
+    d["operating_profiles"] = [
+        {
+            "id": profile.id,
+            "sequence": profile.sequence,
+            "activity_area": profile.activity_area,
+            "deadweight_tons": profile.deadweight_tons,
+            "cargo_capacity_tons": profile.cargo_capacity_tons,
+        }
+        for profile in v.operating_profiles
+    ]
     return d
+
+
+def _sync_vessel_operating_profiles(
+    vessel: Vessel,
+    profiles: Optional[List[VesselOperatingProfilePayload | dict[str, Any]]],
+) -> None:
+    if profiles is None:
+        return
+    vessel.operating_profiles.clear()
+    normalized: list[dict[str, Any]] = []
+    for index, profile in enumerate(profiles, start=1):
+        values = profile.model_dump() if isinstance(profile, BaseModel) else profile
+        activity_area = str(values.get("activity_area") or "").strip()
+        if not activity_area:
+            continue
+        item = {
+            "sequence": index,
+            "activity_area": activity_area,
+            "deadweight_tons": values.get("deadweight_tons"),
+            "cargo_capacity_tons": values.get("cargo_capacity_tons"),
+        }
+        normalized.append(item)
+        vessel.operating_profiles.append(VesselOperatingProfile(**item))
+    if normalized:
+        vessel.vessel_class = " / ".join(item["activity_area"] for item in normalized)
+        vessel.deadweight_tons = normalized[0]["deadweight_tons"]
+        vessel.cargo_capacity_tons = normalized[0]["cargo_capacity_tons"]
 
 
 @app.get("/api/vessels")
@@ -891,11 +953,62 @@ def get_vessels(db: Session = Depends(get_db), user: User = Depends(require_role
     return [_vessel_dict(v) for v in vessels]
 
 
+def _joined_profile_value(vessel: Vessel, field: str) -> Any:
+    values = [getattr(profile, field) for profile in vessel.operating_profiles]
+    values = [value for value in values if value is not None]
+    if not values:
+        return getattr(vessel, field, None)
+    if len(values) == 1:
+        return values[0]
+    return " / ".join(f"{value:g}" for value in values)
+
+
+@app.get("/api/port-vessel-register/export")
+def export_port_vessel_register(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+):
+    vessels = db.query(Vessel).order_by(Vessel.name, Vessel.registration_no).all()
+    headers = [
+        "STT", "TÊN PHƯƠNG TIỆN", "SỐ ĐĂNG KÝ", "LOẠI PHƯƠNG TIỆN (CÔNG DỤNG)",
+        "CẤP PT (VÙNG HOẠT ĐỘNG)", "CHIỀU DÀI (M)", "TRỌNG TẢI TOÀN PHẦN (TẤN)",
+        "DUNG TÍCH (M3)", "KHẢ NĂNG KHAI THÁC (TẤN)", "KHẢ NĂNG KHAI THÁC (TEU)",
+        "NGÀY HẾT HẠN GCNATKT&BVMT", "SỐ THUYỀN VIÊN", "THUYỀN TRƯỞNG",
+        "SỐ ĐIỆN THOẠI LIÊN HỆ",
+    ]
+    rows = []
+    for index, vessel in enumerate(vessels, start=1):
+        areas = [profile.activity_area for profile in vessel.operating_profiles if profile.activity_area]
+        rows.append([
+            index,
+            vessel.name,
+            vessel.registration_no,
+            vessel.vessel_type,
+            " / ".join(areas) if areas else vessel.vessel_class,
+            vessel.length_m,
+            _joined_profile_value(vessel, "deadweight_tons"),
+            vessel.gross_tonnage,
+            _joined_profile_value(vessel, "cargo_capacity_tons"),
+            vessel.container_capacity_teu,
+            vessel.certificate_expiry_date or "",
+            vessel.min_crew,
+            vessel.tracking_master_name,
+            vessel.tracking_master_phone,
+        ])
+    content = make_xlsx("DỮ LIỆU SÀ LAN", headers, rows)
+    filename = f"DU_LIEU_SA_LAN_{date.today().isoformat()}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.post("/api/vessels")
 def save_vessel(
     payload: VesselSaveRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
 ):
     if user.role == "CUSTOMER":
         # Force organization to the customer's bound organization
@@ -916,7 +1029,9 @@ def save_vessel(
             organization_data=payload.organization if isinstance(payload.organization, dict) else None,
         )
 
-    data = payload.model_dump(exclude={"id", "version", "organization", "organization_name"})
+    data = payload.model_dump(
+        exclude={"id", "version", "organization", "organization_name", "operating_profiles"}
+    )
     data["organization_id"] = org_id
     data["updated_at"] = now_iso()
 
@@ -932,6 +1047,7 @@ def save_vessel(
         for k, v in data.items():
             if hasattr(vessel, k):
                 setattr(vessel, k, v)
+        _sync_vessel_operating_profiles(vessel, payload.operating_profiles)
         vessel.version += 1
         audit(
             db, "VESSEL", vessel.id, "UPDATE", f"{vessel.name} / {vessel.registration_no}",
@@ -944,6 +1060,14 @@ def save_vessel(
         vessel = Vessel(**{k: v for k, v in data.items() if hasattr(Vessel, k)})
         db.add(vessel)
         db.flush()
+        profiles = payload.operating_profiles
+        if profiles is None and vessel.vessel_class:
+            profiles = [VesselOperatingProfilePayload(
+                activity_area=vessel.vessel_class,
+                deadweight_tons=vessel.deadweight_tons,
+                cargo_capacity_tons=vessel.cargo_capacity_tons,
+            )]
+        _sync_vessel_operating_profiles(vessel, profiles)
         audit(
             db, "VESSEL", vessel.id, "CREATE", f"{vessel.name} / {vessel.registration_no}",
             actor_user_id=user.id, organization_id=vessel.organization_id,
@@ -1481,6 +1605,8 @@ VESSEL_IMPORT_COMPARE_FIELDS = {
     "safety_certificate_no": "Số chứng nhận an toàn",
     "certificate_issue_date": "Ngày cấp chứng nhận",
     "certificate_expiry_date": "Ngày hết hạn chứng nhận",
+    "tracking_master_name": "Thuyền trưởng theo dõi",
+    "tracking_master_phone": "Số điện thoại liên hệ",
     "notes": "Ghi chú",
 }
 
@@ -1499,6 +1625,25 @@ def _vessel_import_changes(existing: Vessel, row: dict[str, Any]) -> list[dict[s
                 "current": current,
                 "incoming": incoming,
             })
+    incoming_profiles = [
+        (
+            profile.get("activity_area") or "",
+            profile.get("deadweight_tons"),
+            profile.get("cargo_capacity_tons"),
+        )
+        for profile in row.get("operating_profiles", [])
+    ]
+    current_profiles = [
+        (profile.activity_area, profile.deadweight_tons, profile.cargo_capacity_tons)
+        for profile in existing.operating_profiles
+    ]
+    if incoming_profiles and incoming_profiles != current_profiles:
+        changes.append({
+            "field": "operating_profiles",
+            "label": "Vùng hoạt động / trọng tải / khả năng khai thác",
+            "current": current_profiles,
+            "incoming": incoming_profiles,
+        })
     return changes
 
 @app.post("/api/import/vessels")
@@ -1507,7 +1652,7 @@ async def import_vessels(
     preview: bool = False,
     overwrite_existing: bool = False,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
 ):
     content = await request.body()
     if not content:
@@ -1548,7 +1693,7 @@ async def import_vessels(
         ).first() if row.get("registration_no") else None
         if existing:
             conflict_count += 1
-            same_scope = user.role == "ADMIN" or existing.organization_id == user.organization_id
+            same_scope = user.role != "CUSTOMER" or existing.organization_id == user.organization_id
             clean_row["existing"] = True
             clean_row["ownershipConflict"] = not same_scope
             if same_scope:
@@ -1626,8 +1771,9 @@ async def import_vessels(
                         continue
                     verify_organization_ownership(user, existing.organization_id)
                     for k, v in row.items():
-                        if hasattr(existing, k) and k not in ("id", "created_at", "organization_id"):
+                        if k != "operating_profiles" and hasattr(existing, k) and k not in ("id", "created_at", "organization_id"):
                             setattr(existing, k, excel_date(v) if "date" in k else v)
+                    _sync_vessel_operating_profiles(existing, row.get("operating_profiles", []))
                     existing.organization_id = org_id
                     existing.updated_at = now_iso()
                     existing.version += 1
@@ -1636,12 +1782,15 @@ async def import_vessels(
                     safe = {
                         k: (excel_date(v) if "date" in k else v)
                         for k, v in row.items()
-                        if not k.startswith("_") and hasattr(Vessel, k) and k not in ("id", "organization_id")
+                        if not k.startswith("_") and hasattr(Vessel, k) and k not in ("id", "organization_id", "operating_profiles")
                     }
                     safe["organization_id"] = org_id
                     safe["created_at"] = now_iso()
                     safe["updated_at"] = now_iso()
-                    db.add(Vessel(**safe))
+                    vessel = Vessel(**safe)
+                    db.add(vessel)
+                    db.flush()
+                    _sync_vessel_operating_profiles(vessel, row.get("operating_profiles", []))
                     created += 1
                 db.flush()
             accepted += 1

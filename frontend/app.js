@@ -136,7 +136,7 @@ function values(form) {
 }
 
 function pageName(route) {
-  return ({dashboard:'Tổng quan khai báo', declarations:'Phiếu khai báo', vessels:'Hồ sơ phương tiện', crew:'Danh sách thuyền viên', import:'Import dữ liệu Excel', reports:'Báo cáo hoạt động Cảng'})[route] || 'Tổng quan khai báo';
+  return ({dashboard:'Tổng quan khai báo', declarations:'Phiếu khai báo', vessels:'Hồ sơ phương tiện', 'port-register':'Sổ theo dõi Salan', crew:'Danh sách thuyền viên', import:'Import dữ liệu Excel', reports:'Báo cáo hoạt động Cảng'})[route] || 'Tổng quan khai báo';
 }
 
 function roleLabel(role) {
@@ -156,6 +156,7 @@ function route() {
   requestAnimationFrame(() => $('#main-content').focus({ preventScroll: true }));
   if (name === 'dashboard') loadDashboard();
   if (name === 'vessels') loadVessels();
+  if (name === 'port-register') loadPortRegister();
   if (name === 'declarations') loadDeclarations();
   if (name === 'crew') loadCrew();
   if (name === 'reports') {
@@ -362,33 +363,62 @@ async function saveCrew(event) {
 
 function empty(title, text) { return `<div class="empty-state"><div><strong>${title}</strong><p>${text}</p></div></div>`; }
 
+function vesselProfilesHtml() {
+  return state.editingVesselProfiles.map((profile, index) => `<div class="operating-profile-row" data-profile-index="${index}">
+    ${field('activity_area', 'Vùng hoạt động / Cấp PT', profile.activity_area, 'text', 'required')}
+    ${field('profile_deadweight_tons', 'Trọng tải toàn phần (tấn)', profile.deadweight_tons, 'number', 'step="0.01" min="0"')}
+    ${field('profile_cargo_capacity_tons', 'Khả năng khai thác (tấn)', profile.cargo_capacity_tons, 'number', 'step="0.01" min="0"')}
+    <button type="button" class="table-icon-button remove-profile" data-remove-profile="${index}" aria-label="Xóa vùng hoạt động" ${state.editingVesselProfiles.length === 1 ? 'disabled' : ''}>×</button>
+  </div>`).join('');
+}
+
+function renderVesselProfiles() {
+  const container = $('#operating-profiles');
+  if (!container) return;
+  container.innerHTML = vesselProfilesHtml();
+  $$('[data-remove-profile]', container).forEach(button => button.onclick = () => {
+    state.editingVesselProfiles.splice(Number(button.dataset.removeProfile), 1);
+    renderVesselProfiles();
+  });
+}
+
 function openVessel(id = null) {
   const v = id ? state.vessels.find(item => item.id === id) : {};
   state.editingVessel = v || {};
+  state.editingVesselProfiles = (v.operating_profiles?.length ? v.operating_profiles : [{
+    activity_area: v.vessel_class || '',
+    deadweight_tons: v.deadweight_tons ?? '',
+    cargo_capacity_tons: v.cargo_capacity_tons ?? '',
+  }]).map(profile => ({...profile}));
   $('#vessel-fields').innerHTML = `
     ${field('organization_name','Doanh nghiệp / Chủ phương tiện',v.organization_name || '', 'text', 'required class="span-2"')}
     ${field('name','Tên phương tiện',v.name,'text','required')}
     ${field('registration_no','Số đăng ký',v.registration_no,'text','required')}
     ${field('registry_or_imo','Số đăng kiểm / IMO',v.registry_or_imo)}
     ${selectField('vessel_type','Loại phương tiện / Công dụng',state.catalogs.vesselTypes,v.vessel_type,'required')}
-    ${selectField('vessel_class','Cấp phương tiện',state.catalogs.vesselClasses,v.vessel_class,'required')}
     ${selectField('shell_material','Vật liệu vỏ',state.catalogs.shellMaterials,v.shell_material)}
     ${field('build_year','Năm đóng',v.build_year,'number','min="1800" max="2100"')}
     ${field('length_m','Chiều dài Lmax (m)',v.length_m,'number','step="0.01" min="0"')}
     ${field('width_m','Chiều rộng B (m)',v.width_m,'number','step="0.01" min="0"')}
     ${field('side_height_m','Chiều cao mạn (m)',v.side_height_m,'number','step="0.01" min="0"')}
     ${field('draft_m','Mớn nước đầy tải (m)',v.draft_m,'number','step="0.01" min="0"')}
-    ${field('deadweight_tons','Trọng tải toàn phần (tấn)',v.deadweight_tons,'number','step="0.01" min="0"')}
     ${field('gross_tonnage','Dung tích (GT)',v.gross_tonnage,'number','step="0.01" min="0"')}
     ${field('engine_power_cv','Tổng công suất máy (CV)',v.engine_power_cv,'number','step="0.01" min="0"')}
-    ${field('cargo_capacity_tons','Sức chở hàng (tấn)',v.cargo_capacity_tons,'number','step="0.01" min="0"')}
     ${field('container_capacity_teu','Sức chở container (TEU)',v.container_capacity_teu,'number','step="1" min="0"')}
     ${field('passenger_capacity','Sức chở khách',v.passenger_capacity,'number','min="0"')}
     ${field('min_crew','Định biên thuyền viên tối thiểu',v.min_crew,'number','min="0"')}
     ${field('safety_certificate_no','Số GCN ATKT & BVMT',v.safety_certificate_no)}
     ${field('certificate_issue_date','Ngày cấp GCN',v.certificate_issue_date,'date')}
     ${field('certificate_expiry_date','Ngày hết hạn GCN',v.certificate_expiry_date,'date')}
+    ${field('tracking_master_name','Thuyền trưởng theo dõi',v.tracking_master_name)}
+    ${field('tracking_master_phone','Số điện thoại liên hệ',v.tracking_master_phone,'tel')}
+    <section class="form-section span-3 operating-profiles-section"><div class="panel-header"><div><h3>Vùng hoạt động và năng lực tương ứng</h3><p>Mỗi vùng giữ riêng trọng tải và khả năng khai thác.</p></div><button type="button" class="outline-button" id="add-operating-profile">+ Thêm vùng</button></div><div id="operating-profiles"></div></section>
     <label class="span-3">Ghi chú<textarea name="notes">${esc(v.notes || '')}</textarea></label>`;
+  renderVesselProfiles();
+  $('#add-operating-profile').onclick = () => {
+    state.editingVesselProfiles.push({activity_area: '', deadweight_tons: '', cargo_capacity_tons: ''});
+    renderVesselProfiles();
+  };
   $('#vessel-dialog').showModal();
 }
 
@@ -396,6 +426,19 @@ async function saveVessel(event) {
   event.preventDefault();
   const form = $('#vessel-form');
   const data = values(form);
+  data.operating_profiles = $$('.operating-profile-row', form).map((row, index) => ({
+    sequence: index + 1,
+    activity_area: $('[name="activity_area"]', row).value.trim(),
+    deadweight_tons: $('[name="profile_deadweight_tons"]', row).value || null,
+    cargo_capacity_tons: $('[name="profile_cargo_capacity_tons"]', row).value || null,
+  }));
+  const primaryProfile = data.operating_profiles[0] || {};
+  data.vessel_class = data.operating_profiles.map(profile => profile.activity_area).filter(Boolean).join(' / ');
+  data.deadweight_tons = primaryProfile.deadweight_tons;
+  data.cargo_capacity_tons = primaryProfile.cargo_capacity_tons;
+  delete data.activity_area;
+  delete data.profile_deadweight_tons;
+  delete data.profile_cargo_capacity_tons;
   data.organization = {name: data.organization_name};
   delete data.organization_name;
   if (state.editingVessel?.id) {
@@ -697,6 +740,26 @@ function reviewSummaryHtml(d) {
   <p class="muted">${isAdmin
     ? 'Kiểm tra kỹ thông tin trước khi lưu phiếu thủ công.'
     : 'Kiểm tra kỹ thông tin trước khi bấm “Xác nhận & gửi”. Sau khi gửi, thông tin được khóa trong khi Cảng xem xét.'}</p></section>`;
+}
+
+async function loadPortRegister() {
+  await loadVessels();
+  renderPortRegister();
+}
+
+function profileText(vessel, field, fallback = '') {
+  const values = (vessel.operating_profiles || []).map(profile => profile[field]).filter(value => value !== null && value !== undefined && value !== '');
+  return values.length ? values.map(value => typeof value === 'number' ? value.toLocaleString('vi-VN') : value).join(' / ') : fallback;
+}
+
+function renderPortRegister() {
+  const input = $('#port-register-search');
+  if (!input) return;
+  const term = input.value.trim().toLowerCase();
+  const items = state.vessels.filter(v => `${v.name} ${v.registration_no} ${v.tracking_master_name || ''}`.toLowerCase().includes(term));
+  $('#port-register-count').textContent = `${items.length} Salan`;
+  $('#port-register-table').innerHTML = items.length ? `<table class="data-table port-register-table"><thead><tr><th>STT</th><th>Tên phương tiện</th><th>Số đăng ký</th><th>Loại / công dụng</th><th>Vùng hoạt động</th><th>Chiều dài (m)</th><th>Trọng tải toàn phần (tấn)</th><th>Dung tích (m³)</th><th>Khả năng khai thác (tấn)</th><th>Khả năng khai thác (TEU)</th><th>Hạn GCN ATKT & BVMT</th><th>Số thuyền viên</th><th>Thuyền trưởng</th><th>Điện thoại</th><th></th></tr></thead><tbody>${items.map((v, index) => `<tr><td>${index + 1}</td><td><strong>${esc(v.name)}</strong></td><td>${esc(v.registration_no)}</td><td>${esc(v.vessel_type)}</td><td>${esc(profileText(v, 'activity_area', v.vessel_class))}</td><td>${esc(v.length_m ?? '')}</td><td>${esc(profileText(v, 'deadweight_tons', v.deadweight_tons ?? ''))}</td><td>${esc(v.gross_tonnage ?? '')}</td><td>${esc(profileText(v, 'cargo_capacity_tons', v.cargo_capacity_tons ?? ''))}</td><td>${esc(v.container_capacity_teu ?? '')}</td><td>${fmtDate(v.certificate_expiry_date)}</td><td>${esc(v.min_crew ?? '')}</td><td>${esc(v.tracking_master_name || '')}</td><td>${esc(v.tracking_master_phone || '')}</td><td><button class="table-icon-button" data-edit-port-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có dữ liệu Salan', 'Import file theo dõi hoặc thêm thủ công một Salan.');
+  $$('[data-edit-port-vessel]').forEach(button => button.onclick = () => openVessel(Number(button.dataset.editPortVessel)));
 }
 
 function renderDeclarationWizard() {
@@ -1311,8 +1374,11 @@ async function init() {
       reportsNav.hidden = isCustomer;
     }
 
+    const portRegisterNav = $('nav a[href="#port-register"]');
+    if (portRegisterNav) portRegisterNav.hidden = !(isReviewer || isAdmin);
+
     $('.data-nav').hidden = isCustomer;
-    $('#import-vessels-card').hidden = !isAdmin;
+    $('#import-vessels-card').hidden = !(isReviewer || isAdmin);
     $('#import-crew-card').hidden = !(isReviewer || isAdmin);
     $('#import-declaration-card').hidden = !isAdmin;
 
@@ -1337,7 +1403,10 @@ async function init() {
   $$('[data-route-link]').forEach(button => button.onclick = () => location.hash = button.dataset.routeLink);
   $$('[data-action="new-declaration"]').forEach(button => button.onclick = () => openDeclaration());
   $('#add-vessel').onclick = () => openVessel();
+  $('#add-port-vessel').onclick = () => openVessel();
   $('#vessel-search').addEventListener('input', renderVessels);
+  $('#port-register-search').addEventListener('input', renderPortRegister);
+  $('#export-port-register').onclick = () => downloadFile('/api/port-vessel-register/export', `DU_LIEU_SA_LAN_${new Date().toISOString().slice(0, 10)}.xlsx`).catch(error => toast(error.message, true));
   let dashboardTimer;
   $('#dashboard-vessel-search').addEventListener('input', event => {
     clearTimeout(dashboardTimer);

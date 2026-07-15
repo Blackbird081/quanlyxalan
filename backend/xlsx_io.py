@@ -24,6 +24,7 @@ SAFE_IGNORED_EXTERNAL_RELATIONSHIPS = {"hyperlink", "externalLinkPath"}
 VESSEL_IMPORT_TEXT_FIELDS = {
     "name", "registration_no", "registry_or_imo", "vessel_type",
     "vessel_class", "shell_material", "safety_certificate_no", "notes",
+    "tracking_master_name", "tracking_master_phone",
 }
 
 
@@ -224,6 +225,8 @@ VESSEL_HEADER_ALIASES = {
     "safety_certificate_no": ("SO GCN ATKT", "GCNATKT", "GCN ATKT"),
     "certificate_issue_date": ("NGAY CAP GCN",),
     "certificate_expiry_date": ("NGAY HET HAN GCN", "HET HAN GCN", "GCNATKT BVMT"),
+    "tracking_master_name": ("THUYEN TRUONG",),
+    "tracking_master_phone": ("SO DIEN THOAI LIEN HE", "DIEN THOAI LIEN HE"),
     "notes": ("GHI CHU",),
     "updated_at": ("NGAY CAP NHAT",),
 }
@@ -278,6 +281,29 @@ def _numeric_from_excel(value: Any, *, integer: bool = False) -> tuple[Any, str 
         return None, f"Không đọc được giá trị số: {source}"
     warning = f"Giữ giá trị đầu tiên từ ô đa giá trị: {source}" if len(tokens) > 1 else None
     return (int(parsed) if integer else parsed), warning
+
+
+def _numeric_values_from_excel(value: Any, *, integer: bool = False) -> tuple[list[Any], str | None]:
+    """Read every certified numeric value from one Excel cell in source order."""
+    if value in (None, ""):
+        return [], None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return [int(value) if integer else float(value)], None
+    source = str(value).strip()
+    tokens = re.findall(r"[-+]?\d[\d.,]*", source)
+    values: list[Any] = []
+    for token in tokens:
+        token = token.rstrip(".,")
+        if "," in token and "." in token:
+            token = token.replace(".", "").replace(",", ".") if token.rfind(",") > token.rfind(".") else token.replace(",", "")
+        elif "," in token:
+            token = token.replace(",", ".")
+        try:
+            parsed = float(token)
+            values.append(int(parsed) if integer else parsed)
+        except ValueError:
+            continue
+    return values, None if values else f"Không đọc được giá trị số: {source}"
 
 
 def _detect_vessel_table(sheets: dict[str, dict[str, Any]]) -> tuple[str, dict[str, Any], int, dict[str, str]]:
@@ -342,6 +368,10 @@ def vessel_rows(sheets: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], list
         blank_run = 0
         mapping_warnings: list[str] = []
         source_notes: list[str] = []
+        raw_operating_values = {
+            field: row.get(field)
+            for field in ("vessel_class", "deadweight_tons", "cargo_capacity_tons")
+        }
         for field in VESSEL_IMPORT_TEXT_FIELDS:
             if field not in row or row[field] in (None, ""):
                 continue
@@ -360,6 +390,42 @@ def vessel_rows(sheets: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], list
             if warning:
                 mapping_warnings.append(f"{field}: {warning}")
                 source_notes.append(f"{field}={raw_value}")
+        areas = [
+            normalize_import_text(value, field="vessel_class")[0]
+            for value in re.split(r"\s*/\s*", str(raw_operating_values.get("vessel_class") or ""))
+            if value.strip()
+        ]
+        deadweights, deadweight_warning = _numeric_values_from_excel(raw_operating_values.get("deadweight_tons"))
+        capacities, capacity_warning = _numeric_values_from_excel(raw_operating_values.get("cargo_capacity_tons"))
+        if deadweight_warning:
+            mapping_warnings.append(f"deadweight_tons: {deadweight_warning}")
+        if capacity_warning:
+            mapping_warnings.append(f"cargo_capacity_tons: {capacity_warning}")
+        profile_count = max(len(areas), len(deadweights), len(capacities), 0)
+        non_empty_counts = [count for count in (len(areas), len(deadweights), len(capacities)) if count]
+        if non_empty_counts and len(set(non_empty_counts)) > 1:
+            mapping_warnings.append(
+                "Vùng hoạt động, trọng tải và khả năng khai thác không có cùng số giá trị; "
+                "hệ thống giữ đủ dữ liệu để nhân viên Cảng kiểm tra."
+            )
+        row["operating_profiles"] = [
+            {
+                "sequence": index + 1,
+                "activity_area": areas[index] if index < len(areas) else (areas[-1] if areas else ""),
+                "deadweight_tons": deadweights[index] if index < len(deadweights) else None,
+                "cargo_capacity_tons": capacities[index] if index < len(capacities) else None,
+            }
+            for index in range(profile_count)
+        ]
+        for field in ("deadweight_tons", "cargo_capacity_tons"):
+            source_notes = [note for note in source_notes if not note.startswith(f"{field}=")]
+        mapping_warnings = [
+            warning for warning in mapping_warnings
+            if not (
+                warning.startswith("deadweight_tons: Giữ giá trị đầu tiên")
+                or warning.startswith("cargo_capacity_tons: Giữ giá trị đầu tiên")
+            )
+        ]
         if source_notes:
             existing_notes = str(row.get("notes") or "").strip()
             source_note = "Giá trị gốc Excel: " + "; ".join(source_notes)

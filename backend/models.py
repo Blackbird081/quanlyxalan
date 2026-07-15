@@ -63,6 +63,8 @@ class Vessel(Base):
     safety_certificate_no = Column(String, nullable=False, default="")
     certificate_issue_date = Column(String)
     certificate_expiry_date = Column(String)
+    tracking_master_name = Column(String, nullable=False, default="")
+    tracking_master_phone = Column(String, nullable=False, default="")
     registry_verification_status = Column(String, nullable=False, default="NOT_VERIFIED")
     registry_verified_at = Column(String)
     registry_verification_source = Column(String, nullable=False, default="")
@@ -73,6 +75,23 @@ class Vessel(Base):
     organization = relationship("Organization", back_populates="vessels", lazy="select")
     crew_members = relationship("CrewMember", back_populates="vessel", lazy="dynamic")
     declarations = relationship("Declaration", back_populates="vessel", lazy="dynamic")
+    operating_profiles = relationship(
+        "VesselOperatingProfile",
+        back_populates="vessel",
+        cascade="all, delete-orphan",
+        order_by="VesselOperatingProfile.sequence",
+    )
+
+
+class VesselOperatingProfile(Base):
+    __tablename__ = "vessel_operating_profiles"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    vessel_id = Column(Integer, ForeignKey("vessels.id", ondelete="CASCADE"), nullable=False)
+    sequence = Column(Integer, nullable=False, default=1)
+    activity_area = Column(String, nullable=False, default="")
+    deadweight_tons = Column(Float)
+    cargo_capacity_tons = Column(Float)
+    vessel = relationship("Vessel", back_populates="operating_profiles")
 
 class Declaration(Base):
     __tablename__ = "declarations"

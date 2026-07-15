@@ -220,3 +220,16 @@ nav a span svg {
   display: block;
   margin: 0 auto;
 }
+
+.port-register-wrap { max-width: 100%; overflow-x: auto; }
+.port-register-table { min-width: 1850px; }
+.port-register-table th { white-space: normal; vertical-align: bottom; }
+.port-register-table td { white-space: nowrap; }
+.operating-profiles-section { padding: 14px; border: 1px solid var(--cvf-border); border-radius: 10px; background: var(--cvf-surface-elevated); }
+.operating-profiles-section .panel-header { margin-bottom: 10px; }
+.operating-profiles-section .panel-header h3 { margin-bottom: 4px; }
+.operating-profiles-section .panel-header p { margin: 0; color: var(--cvf-text-muted); font-size: 11px; }
+.operating-profile-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) 34px; align-items: end; gap: 10px; padding: 10px 0; }
+.operating-profile-row + .operating-profile-row { border-top: 1px solid var(--cvf-border); }
+.operating-profile-row .remove-profile { margin-bottom: 2px; font-size: 20px; }
+@media (max-width: 760px) { .operating-profile-row { grid-template-columns: 1fr; }.operating-profile-row .remove-profile { justify-self: end; } }
