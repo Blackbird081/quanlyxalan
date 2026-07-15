@@ -98,3 +98,11 @@ def test_preview_uses_customer_confirmation_language():
     assert "Khách hàng xác nhận gửi phiếu" in preview_html
     assert "Khách hàng nộp phiếu" not in preview_html
     assert "Khách hàng duyệt phiếu" not in preview_html
+
+
+def test_data_navigation_stays_with_primary_navigation():
+    styles_css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+
+    assert ".data-nav { margin-top: 0; padding-top: 0; }" in styles_css
+    assert ".data-nav { margin-top: auto;" not in styles_css
+    assert ".sidebar-footer { margin-top: auto;" in styles_css

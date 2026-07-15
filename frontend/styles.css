@@ -72,12 +72,12 @@ code { color: var(--cvf-info); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cvf-success); box-shadow: 0 0 0 4px color-mix(in srgb, var(--cvf-success) 15%, transparent); }
 .nav-label, .eyebrow { margin: 14px 9px 7px; color: var(--cvf-text-muted); font-size: 9px; font-weight: 800; letter-spacing: .13em; }
 .primary-nav, .data-nav { flex: 0 0 auto; }
-.data-nav { margin-top: auto; padding-top: 18px; }
+.data-nav { margin-top: 0; padding-top: 0; }
 nav a { display: flex; align-items: center; gap: 10px; margin: 2px 0; padding: 10px 11px; border-radius: 8px; color: var(--cvf-text-secondary); text-decoration: none; transition: 150ms ease; }
 nav a:hover, nav a.active { background: var(--cvf-accent-soft); color: var(--cvf-text-primary); }
 nav a.active { box-shadow: inset 3px 0 var(--cvf-accent); }
 nav a span { width: 17px; color: var(--cvf-text-muted); text-align: center; }
-.sidebar-footer { display: grid; gap: 10px; padding-top: 14px; color: var(--cvf-text-muted); text-align: center; font-size: 10px; }
+.sidebar-footer { margin-top: auto; display: grid; gap: 10px; padding-top: 14px; color: var(--cvf-text-muted); text-align: center; font-size: 10px; }
 .sidebar-user-name { display: grid; justify-items: center; gap: 3px; overflow-wrap: anywhere; }
 .sidebar-user-name strong { color: var(--cvf-text-primary); font-size: 10px; }
 .sidebar-user-name small { color: var(--cvf-text-muted); font-size: 9px; }

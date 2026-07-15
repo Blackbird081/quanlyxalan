@@ -190,7 +190,7 @@ def test_static_frontend(client):
     assert 'id="certificate-reminder"' in res.text
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
-    assert '/styles.css?v=1.1.2' in res.text
+    assert '/styles.css?v=1.1.3' in res.text
     assert '/app.js?v=1.1.2' in res.text
     assert 'id="analytics-unavailable"' in res.text
     assert 'id="external-integration-panel" class="panel integration-panel"' in res.text
@@ -228,7 +228,8 @@ def test_static_frontend(client):
     assert "[hidden] { display: none !important; }" in styles_css
     assert "overflow-y: auto" in styles_css
     assert "overscroll-behavior: contain" in styles_css
-    assert ".data-nav { margin-top: auto" in styles_css
+    assert ".data-nav { margin-top: 0" in styles_css
+    assert ".sidebar-footer { margin-top: auto" in styles_css
     assert ".integration-readiness" in styles_css
 
 
