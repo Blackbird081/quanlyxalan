@@ -192,7 +192,7 @@ def test_static_frontend(client):
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
     assert '/styles.css?v=1.1.3' in res.text
-    assert '/app.js?v=1.1.2' in res.text
+    assert '/app.js?v=1.1.3' in res.text
     assert 'id="analytics-unavailable"' in res.text
     assert 'id="external-integration-panel" class="panel integration-panel"' in res.text
     assert 'id="integration-admin-actions" class="integration-state" hidden' in res.text
