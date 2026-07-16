@@ -26,6 +26,7 @@ os.environ["TEST_DATABASE_URL"] = f"sqlite:///{_test_db_path}"
 # ── Now import backend (picks up TEST_DATABASE_URL) ───────────────────────────
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 import backend.app as app_module
 
 from backend.models import AuditEvent, Base, Declaration, ImportJob, User, Organization, Vessel, VesselOperatingProfile
@@ -192,7 +193,7 @@ def test_static_frontend(client):
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
     assert '/styles.css?v=1.1.9' in res.text
-    assert '/app.js?v=1.1.9' in res.text
+    assert '/app.js?v=1.2.0' in res.text
     assert 'data-page="port-register"' in res.text
     assert 'id="export-port-register"' in res.text
     assert 'id="import-port-register"' in res.text
@@ -902,16 +903,35 @@ def test_xlsx_report_appendix1(client, auth_headers):
     with zipfile.ZipFile(io.BytesIO(res.content)) as archive:
         assert "xl/workbook.xml" in archive.namelist()
         assert "xl/worksheets/sheet1.xml" in archive.namelist()
+    sheet = load_workbook(io.BytesIO(res.content)).active
+    assert sheet.max_column == 16
+    assert {"A1:A4", "B1:H1", "I1:O1", "P1:P4"}.issubset(
+        {str(cell_range) for cell_range in sheet.merged_cells.ranges}
+    )
+    assert sheet["B1"].value == "PHƯƠNG TIỆN"
+    assert sheet["I1"].value == "HOẠT ĐỘNG"
 
 
 def test_xlsx_report_appendix2(client, auth_headers):
     res = client.get("/api/reports/appendix2", headers=auth_headers)
     assert res.status_code == 200
+    sheet = load_workbook(io.BytesIO(res.content)).active
+    assert sheet.max_column == 16
+    assert {"C1:F1", "G1:H1", "I1:J1", "K1:L1", "M1:N1", "O1:P1"}.issubset(
+        {str(cell_range) for cell_range in sheet.merged_cells.ranges}
+    )
+    assert sheet["C1"].value == "Container"
+    assert [sheet.cell(4, column).value for column in range(3, 17)] == list(range(1, 15))
 
 
 def test_xlsx_report_appendix3(client, auth_headers):
     res = client.get("/api/reports/appendix3", headers=auth_headers)
     assert res.status_code == 200
+    sheet = load_workbook(io.BytesIO(res.content)).active
+    assert sheet.max_column == 35
+    assert sheet["B5"].value == "Tên PTTND"
+    assert sheet["I5"].value == "Hàng hóa"
+    assert sheet["AI5"].value == "Đại lý PTND"
 
 
 def test_report_analytics_supports_week_month_quarter_year_and_export(client, customer_headers):
@@ -990,20 +1010,82 @@ def test_approved_report_golden_mapping_uses_actual_times_and_cargo_rows(client,
     declaration.status = "SUBMITTED"
     declaration.actual_arrival_at = "2026-07-11T09:15"
     declaration.actual_departure_at = "2026-07-11T19:30"
+    tracked_vessel = Vessel(
+        organization_id=declaration.organization_id,
+        name="SỔ THEO DÕI 01",
+        registration_no=declaration.registration_no,
+        vessel_type="CHỞ HÀNG KHÔ HOẶC CONTAINER",
+        vessel_class="VR-SII",
+        length_m=61.5,
+        deadweight_tons=987.0,
+        gross_tonnage=456.0,
+        cargo_capacity_tons=970.0,
+        container_capacity_teu=54.0,
+        tracking_master_name="THUYỀN TRƯỞNG THEO SỔ",
+        tracking_master_phone="0909123456",
+        is_port_tracked=1,
+    )
+    db.add(tracked_vessel)
+    db.flush()
+    db.add(VesselOperatingProfile(
+        vessel_id=tracked_vessel.id,
+        sequence=1,
+        activity_area="VR-SII",
+        deadweight_tons=987.0,
+        cargo_capacity_tons=970.0,
+    ))
+    db.add(VesselOperatingProfile(
+        vessel_id=tracked_vessel.id,
+        sequence=2,
+        activity_area="VR-SI",
+        deadweight_tons=1020.0,
+        cargo_capacity_tons=1000.0,
+    ))
     db.commit()
+    tracked_vessel_id = tracked_vessel.id
+    tracked_registration = tracked_vessel.registration_no
     db.close()
 
     appendix1 = client.get("/api/reports/appendix1?from=2026-01-01&to=2026-12-31", headers=customer_headers)
-    with zipfile.ZipFile(io.BytesIO(appendix1.content)) as archive:
-        xml1 = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
-    assert "2026-07-11T09:15" in xml1 and "2026-07-11T19:30" in xml1
+    sheet1 = load_workbook(io.BytesIO(appendix1.content)).active
+    appendix1_row = next(
+        row_number for row_number in range(5, sheet1.max_row + 1)
+        if sheet1.cell(row_number, 3).value == tracked_registration
+    )
+    assert sheet1.cell(appendix1_row, 2).value == "SỔ THEO DÕI 01"
+    assert sheet1.cell(appendix1_row, 4).value == "VR-SII"
+    assert sheet1.cell(appendix1_row, 7).value == "970 / 1000 tấn / 54 TEU"
+    assert sheet1.cell(appendix1_row, 10).value == "2026-07-11T09:15"
+    assert sheet1.cell(appendix1_row, 12).value == "2026-07-11T19:30"
+    assert sheet1.cell(appendix1_row, 16).value == "THUYỀN TRƯỞNG THEO SỔ - 0909123456"
 
     appendix3 = client.get("/api/reports/appendix3?from=2026-01-01&to=2026-12-31", headers=customer_headers)
-    with zipfile.ZipFile(io.BytesIO(appendix3.content)) as archive:
-        xml3 = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
-    assert "Hàng A" in xml3 and "Hàng B" in xml3
-    assert "12.0 tấn / 2.0 TEU" in xml3
-    assert "20.0 tấn / 2.0 TEU" in xml3
+    sheet3 = load_workbook(io.BytesIO(appendix3.content)).active
+    matching_rows = [
+        row_number for row_number in range(10, sheet3.max_row + 1)
+        if sheet3.cell(row_number, 3).value == tracked_registration
+    ]
+    assert len(matching_rows) == 2
+    assert sheet3.cell(matching_rows[0], 2).value == "SỔ THEO DÕI 01"
+    assert sheet3.cell(matching_rows[0], 5).value == "VR-SII"
+    assert sheet3.cell(matching_rows[0], 7).value == "987 / 1020"
+    exported_rows = [
+        [sheet3.cell(row_number, column_number).value for column_number in range(1, 36)]
+        for row_number in matching_rows
+    ]
+    assert {row[28] for row in exported_rows} == {"Hàng A", "Hàng B"}
+    assert any(row[11] == 12 and row[12] == 2 for row in exported_rows)
+    assert any(row[8] == 20 and row[9] == 2 for row in exported_rows)
+
+    db = SessionLocal()
+    try:
+        db.query(VesselOperatingProfile).filter(
+            VesselOperatingProfile.vessel_id == tracked_vessel_id
+        ).delete(synchronize_session=False)
+        db.query(Vessel).filter(Vessel.id == tracked_vessel_id).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
 
 
 def test_report_unknown_kind(client, auth_headers):
@@ -1400,12 +1482,26 @@ def test_port_register_row_actions_and_pagination_are_present(client):
     assert response.status_code == 200
     assert 'id="port-register-pagination"' in response.text
     assert 'id="remove-selected-port-vessels"' in response.text
-    script = client.get("/app.js?v=1.1.9")
+    script = client.get("/app.js?v=1.2.0")
     assert script.status_code == 200
     assert "portRegisterPageSize: 15" in script.text
     assert "select-port-register-page" in script.text
     assert "data-edit-port-vessel" in script.text
     assert "data-remove-port-vessel" in script.text
+
+
+def test_vessel_list_has_stt_pagination_and_no_import_owner_remark(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'id="vessel-pagination"' in response.text
+    script = client.get("/app.js?v=1.2.0")
+    assert script.status_code == 200
+    assert "vesselPageSize: 15" in script.text
+    assert '<th>STT</th><th>Phương tiện</th>' in script.text
+    vessel_render = script.text.split("function renderVessels()", 1)[1].split(
+        "async function loadDeclarations()", 1
+    )[0]
+    assert "organization_name" not in vessel_render
 
 
 def test_vessel_import_normalizes_text_and_requires_explicit_overwrite(client, auth_headers):

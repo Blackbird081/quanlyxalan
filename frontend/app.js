@@ -1,6 +1,6 @@
 const state = {
   catalogs: {}, vessels: [], declarations: [], crew: [],
-  declarationFilter: {}, declarationPage: 1, declarationPaging: null, dashboardCertificateWarnings: 0, editingVessel: null, editingDeclaration: null, editingCrew: null, workflowDeclaration: null,
+  declarationFilter: {}, declarationPage: 1, declarationPaging: null, vesselPage: 1, vesselPageSize: 15, dashboardCertificateWarnings: 0, editingVessel: null, editingDeclaration: null, editingCrew: null, workflowDeclaration: null,
   wizardStep: 1, wizardMaxStep: 1, declarationVesselMode: 'existing', declarationNewCrew: [],
   pendingImport: null, importResultTarget: 'main',
   portRegisterItems: [], portRegisterStats: {}, portRegisterPage: 1, portRegisterPageSize: 15,
@@ -264,9 +264,19 @@ async function loadVessels() {
 function renderVessels() {
   const term = ($('#vessel-search').value || '').toLowerCase();
   const items = state.vessels.filter(v => `${v.name} ${v.registration_no}`.toLowerCase().includes(term));
-  $('#vessel-count').textContent = `${items.length} phương tiện`;
-  $('#vessel-table').innerHTML = items.length ? `<table class="data-table responsive-table record-table vessel-record-table"><colgroup><col style="width:26%"><col style="width:13%"><col style="width:17%"><col style="width:10%"><col style="width:13%"><col style="width:15%"><col style="width:6%"></colgroup><thead><tr><th>Phương tiện</th><th>Số đăng ký</th><th>Loại / Cấp</th><th>Trọng tải</th><th>Hạn đăng kiểm</th><th>Trạng thái</th><th aria-label="Thao tác"></th></tr></thead><tbody>${items.map(v => `<tr><td data-label="Phương tiện"><strong>${esc(v.name)}</strong><br><small>${esc(v.organization_name || 'Chưa gán doanh nghiệp')}</small></td><td data-label="Số đăng ký">${esc(v.registration_no)}</td><td data-label="Loại / Cấp">${esc(v.vessel_type)} / ${esc(v.vessel_class)}</td><td data-label="Trọng tải">${number(v.deadweight_tons).toLocaleString('vi-VN')} tấn</td><td data-label="Hạn đăng kiểm" class="date-cell">${fmtDate(v.certificate_expiry_date)}</td><td data-label="Trạng thái"><span class="table-badge ${v.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(v.certificate_status)}</span></td><td data-label="Thao tác" class="action-cell"><button class="table-icon-button" data-edit-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có phương tiện', 'Thêm hồ sơ hoặc import file Excel mẫu.');
+  const totalPages = Math.max(1, Math.ceil(items.length / state.vesselPageSize));
+  state.vesselPage = Math.min(Math.max(1, state.vesselPage), totalPages);
+  const offset = (state.vesselPage - 1) * state.vesselPageSize;
+  const pageItems = items.slice(offset, offset + state.vesselPageSize);
+  $('#vessel-count').textContent = term ? `${items.length} / ${state.vessels.length} phương tiện` : `${items.length} phương tiện`;
+  $('#vessel-table').innerHTML = items.length ? `<table class="data-table responsive-table record-table vessel-record-table"><colgroup><col style="width:5%"><col style="width:24%"><col style="width:13%"><col style="width:17%"><col style="width:10%"><col style="width:13%"><col style="width:12%"><col style="width:6%"></colgroup><thead><tr><th>STT</th><th>Phương tiện</th><th>Số đăng ký</th><th>Loại / Cấp</th><th>Trọng tải</th><th>Hạn đăng kiểm</th><th>Trạng thái</th><th aria-label="Thao tác"></th></tr></thead><tbody>${pageItems.map((v, index) => `<tr><td data-label="STT">${offset + index + 1}</td><td data-label="Phương tiện"><strong>${esc(v.name)}</strong></td><td data-label="Số đăng ký">${esc(v.registration_no)}</td><td data-label="Loại / Cấp">${esc(v.vessel_type)} / ${esc(v.vessel_class)}</td><td data-label="Trọng tải">${number(v.deadweight_tons).toLocaleString('vi-VN')} tấn</td><td data-label="Hạn đăng kiểm" class="date-cell">${fmtDate(v.certificate_expiry_date)}</td><td data-label="Trạng thái"><span class="table-badge ${v.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(v.certificate_status)}</span></td><td data-label="Thao tác" class="action-cell"><button class="table-icon-button" data-edit-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có phương tiện', 'Thêm hồ sơ hoặc import file Excel mẫu.');
+  $('#vessel-pagination').innerHTML = items.length > state.vesselPageSize ? `<span>Trang ${state.vesselPage}/${totalPages}</span><button type="button" class="ghost-button" data-vessel-page="${state.vesselPage - 1}" ${state.vesselPage === 1 ? 'disabled' : ''}>Trước</button><button type="button" class="ghost-button" data-vessel-page="${state.vesselPage + 1}" ${state.vesselPage === totalPages ? 'disabled' : ''}>Sau</button>` : '';
   $$('[data-edit-vessel]').forEach(button => button.onclick = () => openVessel(Number(button.dataset.editVessel)));
+  $$('[data-vessel-page]').forEach(button => button.onclick = () => {
+    state.vesselPage = Number(button.dataset.vesselPage);
+    renderVessels();
+    $('#vessel-table').scrollIntoView({behavior: 'smooth', block: 'start'});
+  });
 }
 
 async function loadDeclarations() {
@@ -1492,7 +1502,7 @@ async function init() {
   $$('[data-action="new-declaration"]').forEach(button => button.onclick = () => openDeclaration());
   $('#add-vessel').onclick = () => openVessel();
   $('#add-port-vessel').onclick = () => openVessel(null, true);
-  $('#vessel-search').addEventListener('input', renderVessels);
+  $('#vessel-search').addEventListener('input', () => { state.vesselPage = 1; renderVessels(); });
   $('#port-register-search').addEventListener('input', () => {
     state.portRegisterPage = 1;
     state.portRegisterSelected.clear();

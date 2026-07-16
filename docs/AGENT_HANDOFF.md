@@ -465,6 +465,39 @@ Verification:
 
 ---
 
+## Appendix export and vessel-list correction — 2026-07-16
+
+- **Status**: IN REVIEW — automated regression PASS; user visual review pending.
+- **Phase**: REVIEW
+- **Risk Level**: R2 (official report mapping and current register inheritance).
+
+Implemented:
+
+- Replaced the former generic Excel exports with the approved table structures:
+  16 columns for PL.01, 16 columns for PL.02 and the original 35-column
+  `templates/Phụ lục 3.xlsx` table for PL.03.
+- Activity reports remain based on approved declarations. When registration
+  numbers match, current static vessel data from Hồ sơ phương tiện / Sổ theo
+  dõi Salan overrides stale declaration snapshot values. Multiple operating
+  profiles retain all deadweight and cargo-capacity values.
+- PL.02 now separates selected-period metrics from year-to-report-date
+  cumulative metrics.
+- Hồ sơ phương tiện now shows STT, paginates at 15 records per page, resets to
+  page one on search and no longer displays the import-owner remark.
+
+Verification:
+
+- `pytest -q`: 93 passed.
+- `node --check frontend/app.js`: PASS.
+- `python -m compileall -q backend`: PASS.
+- `git diff --check`: PASS.
+- Workbook structure tests verify column counts, merged headers, template
+  headers, approved-only mapping and Sổ theo dõi inheritance.
+- Manual browser/Excel visual review remains with the user and is not claimed
+  here.
+
+---
+
 ## Port Salan register and multi-area capacity preservation — 2026-07-15
 
 - **Status**: IN REVIEW — implementation and automated regression PASS; user visual review pending.

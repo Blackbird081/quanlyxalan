@@ -18,7 +18,7 @@
 
 ## Eligible declarations
 
-- Include only declarations in `APPROVED` or `ISSUED` workflow state.
+- Include only declarations in `APPROVED` workflow state.
 - Exclude `DRAFT`, pending review states, `CHANGES_REQUESTED`, cancelled and
   `REVOKED` declarations.
 - Report queries remain tenant-scoped for CUSTOMER users.
@@ -29,13 +29,36 @@
 - Departure uses `actual_departure_at` (ATD) when present; otherwise uses `etd`.
 - ETA, ETD, ATA and ATD remain distinct source fields for traceability.
 
+## Template table structures
+
+- Appendix 1 exports the 16-column `PHƯƠNG TIỆN` / `HOẠT ĐỘNG` table from
+  `templates/Phụ lục 1.docx`.
+- Appendix 2 exports the 16-column current-period and cumulative table from
+  `templates/Phụ lục 2.docx`.
+- Appendix 3 preserves the 35-column table, merged headers and cell formatting
+  from `templates/Phụ lục 3.xlsx`.
+- Only the table is reproduced; document titles and other cover information are
+  outside the current scope.
+
+## Vessel register inheritance
+
+- A report row remains driven by an approved declaration/trip.
+- When its registration number matches a vessel in Hồ sơ phương tiện / Sổ theo
+  dõi Salan, current vessel name, type, class, dimensions, capacities,
+  certificate expiry and tracked master contact take priority over the older
+  declaration snapshot.
+- Multiple operating-area profiles remain separate source records. Exported
+  cells retain all corresponding deadweight and cargo-capacity values in their
+  stored order instead of selecting or averaging one profile.
+- Static register records alone do not fabricate a vessel call, cargo movement
+  or passenger movement in an activity report.
+
 ## Cargo expansion and totals
 
 - Emit one detail row for each non-empty cargo movement/type.
 - Unload and load movements are distinct rows when both exist.
 - Each detail row records cargo name, movement, tons, TEU and empty TEU.
-- A final `sum_total` value provides the declaration total; Appendix 2 also
-  provides period totals and cumulative totals.
+- Appendix 2 provides period totals and year-to-report-date cumulative totals.
 - Container conversion remains 20 feet = 1 TEU and 40 feet = 2 TEU.
 
 ## Import policy
