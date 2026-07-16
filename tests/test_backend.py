@@ -191,8 +191,8 @@ def test_static_frontend(client):
     assert 'id="certificate-reminder"' in res.text
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
-    assert '/styles.css?v=1.1.7' in res.text
-    assert '/app.js?v=1.1.8' in res.text
+    assert '/styles.css?v=1.1.9' in res.text
+    assert '/app.js?v=1.1.9' in res.text
     assert 'data-page="port-register"' in res.text
     assert 'id="export-port-register"' in res.text
     assert 'id="import-port-register"' in res.text
@@ -1340,6 +1340,72 @@ def test_port_staff_can_add_salan_manually_with_two_operating_profiles(client, p
         db.commit()
     finally:
         db.close()
+
+
+def test_port_staff_can_remove_salan_from_internal_register_without_deleting_master_record(
+    client, port_staff_headers, customer_headers,
+):
+    registration = f"SG-REMOVE-{uuid.uuid4().hex[:8]}".upper()
+    created = client.post("/api/vessels?port_register=true", headers=port_staff_headers, json={
+        "organization_name": "TEST PORT REGISTER OWNER",
+        "name": "SALAN GỠ KHỎI SỔ",
+        "registration_no": registration,
+        "vessel_type": "CHỞ HÀNG KHÔ",
+        "vessel_class": "VR-SI",
+        "operating_profiles": [
+            {"activity_area": "VR-SI", "deadweight_tons": 700, "cargo_capacity_tons": 650},
+        ],
+    })
+    assert created.status_code == 200, created.text
+    vessel_id = created.json()["id"]
+
+    denied = client.post(
+        "/api/port-vessel-register/remove",
+        headers=customer_headers,
+        json={"ids": [vessel_id]},
+    )
+    assert denied.status_code == 403
+
+    removed = client.post(
+        "/api/port-vessel-register/remove",
+        headers=port_staff_headers,
+        json={"ids": [vessel_id]},
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json() == {"removed": 1, "ids": [vessel_id]}
+    assert all(
+        item["id"] != vessel_id
+        for item in client.get("/api/port-vessel-register", headers=port_staff_headers).json()["items"]
+    )
+
+    db = SessionLocal()
+    try:
+        vessel = db.query(Vessel).filter(Vessel.id == vessel_id).one()
+        assert vessel.is_port_tracked == 0
+        assert vessel.version == created.json()["version"] + 1
+        event = db.query(app_module.AuditEvent).filter(
+            app_module.AuditEvent.entity_type == "VESSEL",
+            app_module.AuditEvent.entity_id == vessel_id,
+            app_module.AuditEvent.action == "PORT_REGISTER_REMOVE",
+        ).one()
+        db.delete(event)
+        db.delete(vessel)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_port_register_row_actions_and_pagination_are_present(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'id="port-register-pagination"' in response.text
+    assert 'id="remove-selected-port-vessels"' in response.text
+    script = client.get("/app.js?v=1.1.9")
+    assert script.status_code == 200
+    assert "portRegisterPageSize: 15" in script.text
+    assert "select-port-register-page" in script.text
+    assert "data-edit-port-vessel" in script.text
+    assert "data-remove-port-vessel" in script.text
 
 
 def test_vessel_import_normalizes_text_and_requires_explicit_overwrite(client, auth_headers):

@@ -317,6 +317,22 @@ class VesselSaveRequest(BaseModel):
         return value
 
 
+class PortRegisterRemoveRequest(BaseModel):
+    ids: List[int]
+
+    @field_validator("ids")
+    @classmethod
+    def valid_ids(cls, value: List[int]) -> List[int]:
+        ids = list(dict.fromkeys(value))
+        if not ids:
+            raise ValueError("Cần chọn ít nhất một Salan.")
+        if len(ids) > 100:
+            raise ValueError("Mỗi lần chỉ được xử lý tối đa 100 Salan.")
+        if any(item <= 0 for item in ids):
+            raise ValueError("Mã Salan không hợp lệ.")
+        return ids
+
+
 class CrewSaveRequest(BaseModel):
     id: Optional[int] = None
     version: Optional[int] = None
@@ -1054,6 +1070,45 @@ def export_port_vessel_register(
     )
 
 
+@app.post("/api/port-vessel-register/remove")
+def remove_from_port_vessel_register(
+    payload: PortRegisterRemoveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+):
+    """Remove rows from the internal Port register without deleting master records."""
+    vessels = (
+        db.query(Vessel)
+        .filter(Vessel.id.in_(payload.ids), Vessel.is_port_tracked == 1)
+        .all()
+    )
+    found_ids = {vessel.id for vessel in vessels}
+    missing_ids = [item for item in payload.ids if item not in found_ids]
+    if missing_ids:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Không tìm thấy Salan đang được theo dõi: {', '.join(map(str, missing_ids))}.",
+        )
+
+    updated_at = now_iso()
+    for vessel in vessels:
+        vessel.is_port_tracked = 0
+        vessel.port_tracking_updated_at = updated_at
+        vessel.updated_at = updated_at
+        vessel.version += 1
+        audit(
+            db,
+            "VESSEL",
+            vessel.id,
+            "PORT_REGISTER_REMOVE",
+            f"{vessel.name} / {vessel.registration_no}",
+            actor_user_id=user.id,
+            organization_id=vessel.organization_id,
+        )
+    db.commit()
+    return {"removed": len(vessels), "ids": payload.ids}
+
+
 @app.post("/api/vessels")
 def save_vessel(
     payload: VesselSaveRequest,
@@ -1394,7 +1449,7 @@ def save_declaration(
         decl.updated_at = now_iso()
         decl.version += 1
     else:
-        ref_no = f"TT-{datetime.now():%Y%m%d-%H%M%S}-{datetime.now().microsecond:06d}"
+        ref_no = f"TT-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8].upper()}"
         decl = Declaration(
             reference_no=ref_no,
             organization_id=org_id,

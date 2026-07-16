@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=1.1.7">
+  <link rel="stylesheet" href="/styles.css?v=1.1.9">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Bỏ qua điều hướng, đến nội dung chính</a>
@@ -79,7 +79,7 @@
           <div class="page-heading"><div><p class="eyebrow">THEO DÕI NỘI BỘ CỦA CẢNG</p><p>Dữ liệu vận hành riêng do Nhân viên Cảng/Admin cập nhật, không thay thế hồ sơ khách hàng khai báo.</p></div><div class="panel-actions"><label class="file-button port-import-button">Import file theo dõi<input type="file" id="import-port-register" accept=".xlsx"></label><button class="outline-button" id="export-port-register">Xuất báo cáo Excel</button><button class="primary-button" id="add-port-vessel">+ Thêm Salan</button></div></div>
           <div id="port-register-stats" class="stat-grid port-register-stats"></div>
           <div class="port-register-dashboard"><section class="panel"><div class="panel-header"><div><p class="eyebrow">PHÂN BỔ VÙNG HOẠT ĐỘNG</p><h2>Số Salan theo vùng</h2></div></div><div id="port-register-by-area" class="summary-bars"></div></section><section class="panel"><div class="panel-header"><div><p class="eyebrow">CƠ CẤU PHƯƠNG TIỆN</p><h2>Số Salan theo công dụng</h2></div></div><div id="port-register-by-type" class="summary-bars"></div></section></div>
-          <section class="panel"><div class="filter-bar"><label class="search"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M20 20l-4.8-4.8"></path></svg></span><input id="port-register-search" placeholder="Tìm tên Salan, số đăng ký hoặc thuyền trưởng"></label><span id="port-register-count" class="muted"></span></div><div id="port-register-table" class="table-wrap port-register-wrap"></div></section>
+          <section class="panel"><div class="filter-bar"><label class="search"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M20 20l-4.8-4.8"></path></svg></span><input id="port-register-search" placeholder="Tìm tên Salan, số đăng ký hoặc thuyền trưởng"></label><div class="port-register-list-meta"><span id="port-register-selection" class="muted" hidden></span><button id="remove-selected-port-vessels" class="table-icon-button danger-icon" type="button" title="Gỡ các dòng đã chọn khỏi sổ theo dõi" aria-label="Gỡ các dòng đã chọn khỏi sổ theo dõi" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5M14 11v5"></path></svg></button><span id="port-register-count" class="muted"></span></div></div><div id="port-register-table" class="table-wrap port-register-wrap"></div><div id="port-register-pagination" class="pagination" aria-label="Phân trang sổ theo dõi Salan"></div></section>
         </section>
 
         <section class="page" data-page="declarations">
@@ -159,6 +159,6 @@
   </dialog>
 
   <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script src="/app.js?v=1.1.8" defer></script>
+  <script src="/app.js?v=1.1.9" defer></script>
 </body>
 </html>

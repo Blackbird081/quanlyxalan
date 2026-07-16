@@ -222,6 +222,17 @@ nav a span svg {
 }
 
 .port-register-wrap { max-width: 100%; overflow-x: auto; }
+.port-register-list-meta { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+.table-icon-button { display: inline-grid; place-items: center; width: 32px; min-width: 32px; height: 32px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--cvf-accent-hover); cursor: pointer; }
+.table-icon-button:hover { background: var(--cvf-accent-soft); }
+.table-icon-button svg { width: 16px; height: 16px; }
+.table-icon-button.danger-icon { color: var(--cvf-danger); }
+.table-icon-button.danger-icon:hover { background: color-mix(in srgb, var(--cvf-danger) 12%, transparent); }
+.select-column { width: 38px; min-width: 38px; text-align: center !important; }
+.select-column input { width: 16px; min-height: 16px; padding: 0; accent-color: var(--cvf-accent); cursor: pointer; }
+.port-row-actions { display: flex; align-items: center; gap: 2px; }
+.port-register-table tbody tr.selected-row { background: var(--cvf-accent-soft); }
+.port-register-table + .pagination { min-width: 0; }
 .port-register-stats { margin-bottom: 16px; }
 .port-register-dashboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
 .port-import-button { display: inline-flex; align-items: center; margin: 0; }

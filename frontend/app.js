@@ -3,7 +3,8 @@ const state = {
   declarationFilter: {}, declarationPage: 1, declarationPaging: null, dashboardCertificateWarnings: 0, editingVessel: null, editingDeclaration: null, editingCrew: null, workflowDeclaration: null,
   wizardStep: 1, wizardMaxStep: 1, declarationVesselMode: 'existing', declarationNewCrew: [],
   pendingImport: null, importResultTarget: 'main',
-  portRegisterItems: [], portRegisterStats: {}, vesselSaveContext: 'customer-record',
+  portRegisterItems: [], portRegisterStats: {}, portRegisterPage: 1, portRegisterPageSize: 15,
+  portRegisterSelected: new Set(), vesselSaveContext: 'customer-record',
   dashboardSearchSequence: 0,
 };
 const CREW_ROLES = ['Thuyền trưởng', 'Máy trưởng', 'Thuyền viên', 'Thuyền phó'];
@@ -757,6 +758,24 @@ async function loadPortRegister() {
   renderPortRegister();
 }
 
+async function removePortRegisterItems(ids, label = '') {
+  if (!ids.length) return;
+  const target = label || `${ids.length} Salan đã chọn`;
+  if (!window.confirm(`Gỡ ${target} khỏi sổ theo dõi nội bộ của Cảng? Hồ sơ phương tiện gốc vẫn được giữ lại.`)) return;
+  try {
+    const result = await api('/api/port-vessel-register/remove', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids}),
+    });
+    ids.forEach(id => state.portRegisterSelected.delete(id));
+    toast(`Đã gỡ ${result.removed} Salan khỏi sổ theo dõi.`);
+    await loadPortRegister();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function renderPortRegisterStats(data) {
   const stats = data.stats || {};
   const cards = [
@@ -784,9 +803,39 @@ function renderPortRegister() {
   if (!input) return;
   const term = input.value.trim().toLowerCase();
   const items = state.portRegisterItems.filter(v => `${v.name} ${v.registration_no} ${v.tracking_master_name || ''}`.toLowerCase().includes(term));
-  $('#port-register-count').textContent = `${items.length} Salan`;
-  $('#port-register-table').innerHTML = items.length ? `<table class="data-table port-register-table"><thead><tr><th>STT</th><th>Tên phương tiện</th><th>Số đăng ký</th><th>Loại / công dụng</th><th>Vùng hoạt động</th><th>Chiều dài (m)</th><th>Trọng tải toàn phần (tấn)</th><th>Dung tích (m³)</th><th>Khả năng khai thác (tấn)</th><th>Khả năng khai thác (TEU)</th><th>Hạn GCN ATKT & BVMT</th><th>Số thuyền viên</th><th>Thuyền trưởng</th><th>Điện thoại</th><th></th></tr></thead><tbody>${items.map((v, index) => `<tr><td>${index + 1}</td><td><strong>${esc(v.name)}</strong></td><td>${esc(v.registration_no)}</td><td>${esc(v.vessel_type)}</td><td>${esc(profileText(v, 'activity_area', v.vessel_class))}</td><td>${esc(v.length_m ?? '')}</td><td>${esc(profileText(v, 'deadweight_tons', v.deadweight_tons ?? ''))}</td><td>${esc(v.gross_tonnage ?? '')}</td><td>${esc(profileText(v, 'cargo_capacity_tons', v.cargo_capacity_tons ?? ''))}</td><td>${esc(v.container_capacity_teu ?? '')}</td><td>${fmtDate(v.certificate_expiry_date)}</td><td>${esc(v.min_crew ?? '')}</td><td>${esc(v.tracking_master_name || '')}</td><td>${esc(v.tracking_master_phone || '')}</td><td><button class="table-icon-button" data-edit-port-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có dữ liệu Salan', 'Import file theo dõi hoặc thêm thủ công một Salan.');
+  const totalPages = Math.max(1, Math.ceil(items.length / state.portRegisterPageSize));
+  state.portRegisterPage = Math.min(Math.max(1, state.portRegisterPage), totalPages);
+  const offset = (state.portRegisterPage - 1) * state.portRegisterPageSize;
+  const pageItems = items.slice(offset, offset + state.portRegisterPageSize);
+  const pageIds = pageItems.map(item => item.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every(id => state.portRegisterSelected.has(id));
+  const selectedCount = state.portRegisterSelected.size;
+  $('#port-register-count').textContent = term ? `${items.length} / ${state.portRegisterItems.length} Salan` : `${items.length} Salan`;
+  $('#port-register-selection').hidden = selectedCount === 0;
+  $('#port-register-selection').textContent = `Đã chọn ${selectedCount}`;
+  $('#remove-selected-port-vessels').hidden = selectedCount === 0;
+  $('#port-register-table').innerHTML = items.length ? `<table class="data-table port-register-table"><thead><tr><th class="select-column"><input id="select-port-register-page" type="checkbox" ${allPageSelected ? 'checked' : ''} aria-label="Chọn tất cả Salan trên trang này"></th><th>STT</th><th>Tên phương tiện</th><th>Số đăng ký</th><th>Loại / công dụng</th><th>Vùng hoạt động</th><th>Chiều dài (m)</th><th>Trọng tải toàn phần (tấn)</th><th>Dung tích (m³)</th><th>Khả năng khai thác (tấn)</th><th>Khả năng khai thác (TEU)</th><th>Hạn GCN ATKT & BVMT</th><th>Số thuyền viên</th><th>Thuyền trưởng</th><th>Điện thoại</th><th aria-label="Thao tác"></th></tr></thead><tbody>${pageItems.map((v, index) => `<tr class="${state.portRegisterSelected.has(v.id) ? 'selected-row' : ''}"><td class="select-column"><input type="checkbox" data-select-port-vessel="${v.id}" ${state.portRegisterSelected.has(v.id) ? 'checked' : ''} aria-label="Chọn ${esc(v.name)}"></td><td>${offset + index + 1}</td><td><strong>${esc(v.name)}</strong></td><td>${esc(v.registration_no)}</td><td>${esc(v.vessel_type)}</td><td>${esc(profileText(v, 'activity_area', v.vessel_class))}</td><td>${esc(v.length_m ?? '')}</td><td>${esc(profileText(v, 'deadweight_tons', v.deadweight_tons ?? ''))}</td><td>${esc(v.gross_tonnage ?? '')}</td><td>${esc(profileText(v, 'cargo_capacity_tons', v.cargo_capacity_tons ?? ''))}</td><td>${esc(v.container_capacity_teu ?? '')}</td><td>${fmtDate(v.certificate_expiry_date)}</td><td>${esc(v.min_crew ?? '')}</td><td>${esc(v.tracking_master_name || '')}</td><td>${esc(v.tracking_master_phone || '')}</td><td class="action-cell port-row-actions"><button class="table-icon-button" data-edit-port-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button><button class="table-icon-button danger-icon" data-remove-port-vessel="${v.id}" title="Gỡ ${esc(v.name)} khỏi sổ theo dõi" aria-label="Gỡ ${esc(v.name)} khỏi sổ theo dõi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5M14 11v5"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có dữ liệu Salan', 'Import file theo dõi hoặc thêm thủ công một Salan.');
+  $('#port-register-pagination').innerHTML = items.length > state.portRegisterPageSize ? `<span>Trang ${state.portRegisterPage}/${totalPages}</span><button type="button" class="ghost-button" data-port-register-page="${state.portRegisterPage - 1}" ${state.portRegisterPage === 1 ? 'disabled' : ''}>Trước</button><button type="button" class="ghost-button" data-port-register-page="${state.portRegisterPage + 1}" ${state.portRegisterPage === totalPages ? 'disabled' : ''}>Sau</button>` : '';
   $$('[data-edit-port-vessel]').forEach(button => button.onclick = () => openVessel(Number(button.dataset.editPortVessel), true));
+  $$('[data-remove-port-vessel]').forEach(button => button.onclick = () => {
+    const id = Number(button.dataset.removePortVessel);
+    const vessel = state.portRegisterItems.find(item => item.id === id);
+    removePortRegisterItems([id], vessel ? vessel.name : 'Salan này');
+  });
+  $$('[data-select-port-vessel]').forEach(checkbox => checkbox.onchange = () => {
+    const id = Number(checkbox.dataset.selectPortVessel);
+    if (checkbox.checked) state.portRegisterSelected.add(id); else state.portRegisterSelected.delete(id);
+    renderPortRegister();
+  });
+  if ($('#select-port-register-page')) $('#select-port-register-page').onchange = event => {
+    pageIds.forEach(id => event.target.checked ? state.portRegisterSelected.add(id) : state.portRegisterSelected.delete(id));
+    renderPortRegister();
+  };
+  $$('[data-port-register-page]').forEach(button => button.onclick = () => {
+    state.portRegisterPage = Number(button.dataset.portRegisterPage);
+    renderPortRegister();
+    $('#port-register-table').scrollIntoView({behavior: 'smooth', block: 'start'});
+  });
 }
 
 function renderDeclarationWizard() {
@@ -1444,7 +1493,12 @@ async function init() {
   $('#add-vessel').onclick = () => openVessel();
   $('#add-port-vessel').onclick = () => openVessel(null, true);
   $('#vessel-search').addEventListener('input', renderVessels);
-  $('#port-register-search').addEventListener('input', renderPortRegister);
+  $('#port-register-search').addEventListener('input', () => {
+    state.portRegisterPage = 1;
+    state.portRegisterSelected.clear();
+    renderPortRegister();
+  });
+  $('#remove-selected-port-vessels').onclick = () => removePortRegisterItems([...state.portRegisterSelected]);
   $('#export-port-register').onclick = () => downloadFile('/api/port-vessel-register/export', `DU_LIEU_SA_LAN_${new Date().toISOString().slice(0, 10)}.xlsx`).catch(error => toast(error.message, true));
   let dashboardTimer;
   $('#dashboard-vessel-search').addEventListener('input', event => {
