@@ -1,20 +1,30 @@
 # Maritime Report Mapping Specification
 
-- Spec id: `KBCV-REPORT-MAP-1.0`
-- Status: APPROVED BY PROJECT OWNER
-- Approval date: 2026-07-11
+- Spec id: `KBCV-REPORT-MAP-1.1`
+- Status: BUSINESS RULES APPROVED; DESIGN DETAILS PENDING
+- Initial approval date: 2026-07-11
+- Owner reconfirmation: 2026-07-17
 - Reporting unit: **Cảng Tân Thuận**
 - Port label: **Cảng Sài Gòn-Cảng Tân Thuận**
 - Source templates: `templates/Phụ lục 1.docx`, `templates/Phụ lục 2.docx`,
   `templates/Phụ lục 3.xlsx`
 
-## Reporting period
+## Product and reporting-period boundaries
 
-- Users may choose an arbitrary `from` and `to` date using calendar controls.
-- Default cumulative period is January 1 of the report year through the report
-  end date.
-- When dates are omitted, the application uses January 1 of the current year
-  through today.
+- PL.01 is the daily Port-company report driven only by approved customer
+  declarations.
+- PL.02 produces one official form for one selected calendar month. Its
+  `Thực hiện tháng báo cáo` columns contain that month only; its
+  `Lũy kế đến tháng báo cáo` columns contain January 1 through the end of the
+  selected month.
+- PL.03 is an official Port-company appendix for the selected reporting period
+  and aggregates approved customer declarations by canonical vessel.
+- Sổ theo dõi Salan and its week/month/year statistics are a separate internal
+  Port-management product for staff and leadership. Static register rows do
+  not become PL.01/PL.02/PL.03 activity without an eligible declaration.
+- The web application requires a separate analytical reporting dashboard.
+  Flexible week/month/year or date-range analytics do not change the official
+  monthly structure or wording of PL.02.
 
 ## Eligible declarations
 
@@ -28,17 +38,27 @@
 - Arrival uses `actual_arrival_at` (ATA) when present; otherwise uses `eta`.
 - Departure uses `actual_departure_at` (ATD) when present; otherwise uses `etd`.
 - ETA, ETD, ATA and ATD remain distinct source fields for traceability.
+- `declaration_date` is the form creation date and must not determine the
+  operating reporting month.
+- PL.02 `Lượt tàu` is counted by operating arrival (`ATA`, fallback `ETA`). A
+  departure in a later month does not create another call by default.
+- PORT_STAFF and ADMIN may apply a controlled manual reporting adjustment. The
+  adjustment must record report month, metric, before/after value, reason,
+  actor and timestamp; it must never rewrite the source declaration silently.
 
-## Template table structures
+## Official form fidelity
 
-- Appendix 1 exports the 16-column `PHƯƠNG TIỆN` / `HOẠT ĐỘNG` table from
-  `templates/Phụ lục 1.docx`.
-- Appendix 2 exports the 16-column current-period and cumulative table from
-  `templates/Phụ lục 2.docx`.
-- Appendix 3 preserves the 35-column table, merged headers and cell formatting
-  from `templates/Phụ lục 3.xlsx`.
-- Only the table is reproduced; document titles and other cover information are
-  outside the current scope.
+- Appendix 1 reproduces the complete official form, including its title/date,
+  reporting-company information, note block and 16-column table.
+- Appendix 2 reproduces the complete official monthly form, including its
+  title, `Tháng` field and 16-column monthly/cumulative table.
+- Appendix 2 must retain the exact meanings `Thực hiện tháng báo cáo` and
+  `Lũy kế đến tháng báo cáo`; `kỳ báo cáo` is not an approved substitute.
+- Appendix 3 preserves the 35-column form, merged headers and formatting. The
+  owner-approved export exception does not require the preparer/authority
+  signature block.
+- Standardize the Appendix 3 labels to `TEUs`, `TEUs Rỗng` and `Quá cảnh` in
+  the approved template/export revision.
 
 ## Vessel register inheritance
 
@@ -53,12 +73,41 @@
 - Static register records alone do not fabricate a vessel call, cargo movement
   or passenger movement in an activity report.
 
-## Cargo expansion and totals
+## Canonical position, passenger and agent rules
 
-- Emit one detail row for each non-empty cargo movement/type.
-- Unload and load movements are distinct rows when both exist.
-- Each detail row records cargo name, movement, tons, TEU and empty TEU.
-- Appendix 2 provides period totals and year-to-report-date cumulative totals.
+- PL.01/H is static design passenger capacity. It must never fall back to the
+  actual `declarations.passenger_count`.
+- PL.01/O is actual crew/passenger count for the eligible declaration.
+- PL.01/I is the approved arrival/working port or berth. PL.01/K is the approved
+  departure berth and needs a distinct event snapshot because a vessel may
+  shift berth within the same port.
+- `destination_port` is the next destination and must not populate PL.01/K.
+- PL.03/AE is `Cảng đến (Cảng làm hàng)` / working port. PL.03/AF is the next
+  destination port.
+- PL.03/AI keeps the official label `Đại lý PTND` and uses the explicit value
+  declared by the customer for the approved call. Do not infer it from current
+  `company_name` after approval.
+- A passenger vessel that berths counts as a passenger call even when actual
+  passenger count is zero. `passenger_count > 0` is not a valid call classifier.
+- No eligible activity, or an eligible call with no applicable cargo/passenger
+  measure, is rendered as blank rather than a synthetic numeric zero. A light
+  gray no-data presentation may be designed without changing value semantics.
+
+## PL.03 vessel aggregation and PL.02 totals
+
+- PL.03 emits one row per canonical Salan/vessel for the reporting output, not
+  one row per cargo item.
+- All eligible approved customer declarations and cargo items contributing to
+  that vessel are preserved as source facts and aggregated into the applicable
+  cargo-category columns.
+- T1 DESIGN must define deterministic representation for non-additive PL.03
+  fields such as multiple cargo names, dates, ports and agents, plus drill-down
+  reconciliation. No exporter implementation is authorized before that rule is
+  approved.
+- Appendix 2 totals both eligible load and unload/import and export activity,
+  grouped by the approved cargo categories, without double counting.
+- Appendix 2 provides selected-month totals and January-through-selected-month
+  cumulative totals.
 - Container conversion remains 20 feet = 1 TEU and 40 feet = 2 TEU.
 
 ## Import policy
@@ -79,6 +128,8 @@
 
 ## Approval boundary
 
-This approval covers field mapping and selection rules. It does not approve
-external transmission, legal acceptance by the Maritime Authority or production
-deployment.
+This approval covers business meaning, product boundaries and selection rules.
+It authorizes DESIGN only. It does not authorize schema/code/template changes,
+external transmission, legal acceptance by the Maritime Authority or
+production deployment. BUILD requires an approved T1 data contract and
+acceptance-test plan.
