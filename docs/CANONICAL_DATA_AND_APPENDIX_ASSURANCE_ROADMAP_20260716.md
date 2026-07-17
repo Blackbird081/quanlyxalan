@@ -302,6 +302,8 @@ The repository remains in REVIEW rather than claiming production/live-data
 readiness. The operational database has 47 canonical Salan but no approved
 declarations; therefore activity cells are correctly blank and live business
 data remains NOT PROVABLE. The next downstream evidence step is to reconcile a
-small approved operational sample against its declaration source. T5 remains
-deferred and must be performed in a separate CVF-core session; no upstream
-change is authorized here.
+small approved operational sample against its declaration source using
+`LIVE_DATA_VALIDATION_AND_POST_PILOT_RUNBOOK_20260717.md`. This live-data gate
+is separate from the already closed implementation tranche. T5 remains deferred
+and must be performed in a separate CVF-core session; no upstream change is
+authorized here.

@@ -947,3 +947,20 @@ declarations must not remove the 47 known Salan rows from PL.01/PL.03.
   `outputs/codex-desktop-spreadsheet-regression-recheck-20260717/`.
 - No CVF-core change is authorized. T5 stays deferred to a separate session in
   the CVF repository.
+
+---
+
+## End-user live-data follow-up — 2026-07-17
+
+- The implementation tranche remains CLOSED/PASS; a separate live-data
+  acceptance gate is OPEN because the current DB has no approved declarations.
+- Use `docs/LIVE_DATA_VALIDATION_AND_POST_PILOT_RUNBOOK_20260717.md` after end
+  users have entered a small representative approved sample.
+- Remaining evidence covers operating dates across months, real cargo
+  classification, missing-versus-zero, berth/port/agent snapshots, PL.02 audit
+  adjustments, multi-declaration PL.03 aggregation and tenant/role behavior.
+- Diagnose source → workflow → canonical snapshot → projection → workbook
+  before changing code. A fix requires a reproducible case, owner-confirmed
+  expectation, regression test and renewed Spreadsheet render when applicable.
+- Raw customer workbooks, DB snapshots and personal data must remain outside
+  Git; commit only sanitized acceptance evidence.
