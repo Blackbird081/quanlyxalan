@@ -1,7 +1,7 @@
 # Appendix Business Decision Register — 2026-07-17
 
-Status: BUSINESS DECISIONS APPROVED — BUILD IN PROGRESS; ROW-SKELETON CLARIFICATION RECORDED
-Project phase: BUILD
+Status: BUSINESS AND IMPLEMENTATION DECISIONS CLOSED — LIVE DATA NOT PROVABLE
+Project phase: REVIEW
 Risk level: R2
 Source owner: Project owner / port-domain user
 
@@ -101,20 +101,21 @@ The answers were compared with:
 
 ## 4. APPX and MAP disposition
 
-These statuses close or retain the **business decision**, not the code defect.
-No implementation was changed in this review.
+Business decisions and implementation disposition are recorded separately.
+Implementation closure is based on automated tests, the six-workbook Desktop
+regression and the focused PL.03 recheck dated 2026-07-17.
 
 | ID | Decision status | Basis | Implementation status |
 |---|---|---|---|
-| APPX-01 | CLOSED | PL.01 should follow the complete form | OPEN — title/date/company/note must be implemented and verified |
-| APPX-02 | CLOSED | PL.02 should follow the complete form | OPEN — title/month block must be implemented and verified |
-| APPX-03 | CLOSED | Must use `tháng báo cáo`, not `kỳ báo cáo` | OPEN — exporter wording must be corrected |
-| APPX-04 | CLOSED BY EXCEPTION | Owner explicitly says PL.03 signature block is not required | No signature implementation required; exception must enter the approved spec |
-| MAP-01 | CLOSED | PL.01/H is static design capacity; PL.01/O is actual count | OPEN — remove cross-class fallback and add tests |
-| MAP-02 | CLOSED | Departure berth is distinct; AE=working port and AF=destination port | OPEN IMPLEMENTATION — schema/UI/export design pending |
-| MAP-03 | CLOSED | Official PL.02 is monthly; YTD is January-through-month; operating arrival controls call count; blank rules are approved | OPEN IMPLEMENTATION — query/aggregation/override workflow pending |
-| MAP-04 | CLOSED | PL.03/AI keeps `Đại lý PTND` and uses the customer-declared approved snapshot | OPEN IMPLEMENTATION — dedicated field/import/UI pending |
-| MAP-05 | CLOSED | PL.03 grain is one canonical vessel per reporting output, aggregating eligible declarations | OPEN DESIGN/IMPLEMENTATION — non-additive field aggregation and drill-down contract pending |
+| APPX-01 | CLOSED | PL.01 should follow the complete form | CLOSED — full FORM and visual regression PASS |
+| APPX-02 | CLOSED | PL.02 should follow the complete form | CLOSED — title/month/company blocks and visual regression PASS |
+| APPX-03 | CLOSED | Must use `tháng báo cáo`, not `kỳ báo cáo` | CLOSED — wording verified in both export paths |
+| APPX-04 | CLOSED BY EXCEPTION | Owner explicitly says PL.03 signature block is not required | CLOSED BY APPROVED EXCEPTION |
+| MAP-01 | CLOSED | PL.01/H is static design capacity; PL.01/O is actual count | CLOSED — fallback removed and positive/blank paths PASS |
+| MAP-02 | CLOSED | Departure berth is distinct; AE=working port and AF=destination port | CLOSED — schema/UI/export mapping and tests PASS |
+| MAP-03 | CLOSED | Official PL.02 is monthly; YTD is January-through-month; operating arrival controls call count; blank rules are approved | CLOSED — month/YTD, adjustment and blank-versus-zero paths PASS |
+| MAP-04 | CLOSED | PL.03/AI keeps `Đại lý PTND` and uses the customer-declared approved snapshot | CLOSED — dedicated snapshot/UI/export path PASS |
+| MAP-05 | CLOSED | PL.03 grain is one canonical vessel per reporting output, aggregating eligible declarations | CLOSED — deterministic aggregation, tests and render PASS |
 
 ## 5. Field and UI implications
 
@@ -167,12 +168,8 @@ No implementation was changed in this review.
 
 ## 7. Phase conclusion
 
-All APPX-01 through APPX-04 and MAP-01 through MAP-05 business decisions are
-now closed. T0 is complete and the project may transition from REVIEW to
-DESIGN.
-
-This approval authorizes T1 data-contract and dashboard/report design only. It
-does **not** authorize code, schema, UI, template or workbook implementation.
-Before BUILD, DESIGN must define PL.03 aggregation for non-additive fields,
-the audited PL.02 manual-adjustment model, exact new field names and acceptance
-tests, then receive human review.
+All APPX-01 through APPX-04 and MAP-01 through MAP-05 are closed at business
+and implementation level. The Spreadsheet implementation gate is PASS after
+the focused PL.03 recheck. This does not prove live customer data: the local
+operational database has no approved declarations, so live business evidence
+remains NOT PROVABLE until an approved operational sample is reconciled.

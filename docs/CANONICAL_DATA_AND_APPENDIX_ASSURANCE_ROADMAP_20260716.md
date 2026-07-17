@@ -1,11 +1,11 @@
 # Roadmap — Canonical Data and Appendix Assurance
 
-Status: T0/T1 CLOSED — BUILD AUTHORIZED; T2 IN PROGRESS
+Status: T0–T4 IMPLEMENTATION CLOSED — LIVE BUSINESS VALIDATION REMAINS
 Date: 2026-07-16
 Updated: 2026-07-17 — incorporated the 67-column mapping and owner decision register
 Project: Khai-bao-Cang-vu-recovery-ux
-Current phase: BUILD
-Next implementation phase: REVIEW after T2/T3 implementation
+Current phase: REVIEW
+Next phase: downstream live-data acceptance or separate T5 upstream proposal
 Risk level: R2
 
 ## 1. Outcome
@@ -171,7 +171,7 @@ Exit gate:
 
 ### T2 — Canonical foundation and provenance
 
-Status: IN PROGRESS
+Status: CLOSED — APPROVED LOCAL IMPLEMENTATION SCOPE 2026-07-17
 Phase: BUILD
 
 Actions:
@@ -193,10 +193,13 @@ Exit gate:
 
 - Migration rehearsal, integrity checks, tenant isolation, provenance and
   conflict-resolution tests pass.
+- **PASSED 2026-07-17:** local DB backup and migration to `l11f0f000011`,
+  canonical snapshot fields, append-only adjustment audit model and full test
+  suite are recorded in the implementation handoff.
 
 ### T3 — Shared projections and inheritance between tabs
 
-Status: NOT STARTED
+Status: CLOSED — APPROVED LOCAL IMPLEMENTATION SCOPE 2026-07-17
 Phase: BUILD after T2
 
 Actions:
@@ -218,10 +221,13 @@ Exit gate:
 
 - Cross-tab inheritance tests cover create, update, blank input, conflicting
   source, tenant boundary and approved-snapshot behavior.
+- **PASSED 2026-07-17:** canonical vessel/crew/declaration projections,
+  snapshot behavior, explicit-overwrite import rules and role/tenant controls
+  are covered by the 95-test application suite.
 
 ### T4 — Report hardening and repeatable artifact assurance
 
-Status: NOT STARTED
+Status: CLOSED — SPREADSHEET IMPLEMENTATION GATE PASS 2026-07-17
 Phase: REVIEW after T3
 
 Actions:
@@ -250,6 +256,10 @@ Exit gate:
   traceable exception; MAP-01 through MAP-05 are closed.
 - Any remaining limitation is explicit; no `100% template compliant` claim is
   made without complete evidence.
+- **PASSED 2026-07-17:** six-workbook regression plus focused PL.03 recheck
+  close REG-01, APPX-01–04 and MAP-01–05 at implementation level.
+- **LIMITATION:** live business data remains NOT PROVABLE because the
+  operational database contains no approved declarations.
 
 ### T5 — Upstream CVF lesson extraction
 
@@ -273,7 +283,7 @@ Exit gate:
 
 ## 5. Execution order
 
-`T0 CLOSED → T1 DESIGN → human design approval → T2 → T3 → T4 → downstream acceptance → T5`
+`T0 CLOSED → T1 CLOSED → T2 CLOSED → T3 CLOSED → T4 CLOSED → live-data acceptance → T5 DEFERRED`
 
 No tranche may use the existence of this roadmap as implementation approval.
 T2 and T3 are production-data/schema-impacting R2 work and require explicit
@@ -281,31 +291,17 @@ human review at the T1 gate.
 
 ## 6. Current hold point
 
-The repository is in BUILD. T0 and T1 are closed; T2 is implementing the
-approved canonical snapshots and report-adjustment audit model. The 2026-07-17
-Desktop Spreadsheet QA is the visual baseline: APPX-04 is closed by exception,
-while APPX-01–03 and MAP-01–05 remain open until positive fixtures and fresh
-Spreadsheet renders pass. No upstream CVF-core change is authorized here.
+The approved canonical-data and appendix implementation tranche is CLOSED for
+the local implementation scope. T0 through T4 have passed their documented
+business, design, migration, automated-test and Spreadsheet artifact gates.
+The focused recheck reviewed seven artifact-tool renders: REG-01 is CLOSED,
+positive PL.03 is PASS, the 47-Salan operational guardrail is PASS and the
+overall Spreadsheet implementation gate is PASS.
 
-Owner clarification after the first BUILD commit: PL.01 and PL.03 retain the
-canonical 47-Salan row skeleton. Only approved declarations overlay activity;
-known static columns are exported and missing activity remains blank. PL.02
-remains activity-only. Operational review workbooks now prove the 47-row/blank
-baseline structurally; the synthetic positive set proves activity mapping. Both
-sets must pass Desktop Spreadsheet regression before tranche closure.
-
-### Spreadsheet regression status — 2026-07-17
-
-The first full Desktop regression inspected six workbooks and reviewed 24
-artifact-tool renders covering 100% of every used range. Operational zero-path,
-positive mapping, APPX-01–04 and MAP-01–05 passed at implementation level;
-live business data remains NOT PROVABLE until approved operational declarations
-exist. The only release-gate defect was clipped multi-value timestamps at
-`B/PL.03!AG10:AH10` because the exporter fixed every PL.03 data row at 66 pt.
-
-The exporter now estimates PL.03 row height from wrapped content across all 35
-columns. The positive fixture row is 108 pt, the targeted regression test and
-the complete 95-test suite pass, and both review sets were regenerated. T2/T3
-remain BUILD IN PROGRESS until
-`WORK_ORDER_CODEX_DESKTOP_SPREADSHEET_REGRESSION_RECHECK_20260717.md` returns a
-visual PASS. Do not treat implementation PASS as proof of live customer data.
+The repository remains in REVIEW rather than claiming production/live-data
+readiness. The operational database has 47 canonical Salan but no approved
+declarations; therefore activity cells are correctly blank and live business
+data remains NOT PROVABLE. The next downstream evidence step is to reconcile a
+small approved operational sample against its declaration source. T5 remains
+deferred and must be performed in a separate CVF-core session; no upstream
+change is authorized here.

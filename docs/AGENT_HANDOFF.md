@@ -925,3 +925,25 @@ declarations must not remove the 47 known Salan rows from PL.01/PL.03.
 - Live business data evidence remains NOT PROVABLE because the operational DB
   still has no approved declarations; synthetic fixture PASS proves only the
   exporter implementation path.
+
+---
+
+## Canonical appendix implementation tranche closure — 2026-07-17
+
+- **Status**: CLOSED / PASS for the approved local implementation scope.
+- **Phase**: REVIEW; production/live-business readiness is not claimed.
+- Codex Desktop used the required Spreadsheets runtime and artifact-tool to
+  inspect both PL.03 workbooks and review seven renders.
+- REG-01 is CLOSED. Positive PL.03 visual gate, operational 47-Salan guardrail
+  and overall Spreadsheet implementation gate are PASS.
+- APPX-01–04 and MAP-01–05 are CLOSED at implementation level. APPX-04 remains
+  an approved no-signature exception.
+- Application verification rerun: `python -m pytest -q` → `95 passed`.
+- The local operational database still has zero approved declarations. Static
+  Salan rows are valid; blank activity is expected. Live business data remains
+  NOT PROVABLE until a real approved sample is reconciled.
+- Evidence:
+  `docs/CODEX_DESKTOP_SPREADSHEET_REGRESSION_RECHECK_RESULT_20260717.md` and
+  `outputs/codex-desktop-spreadsheet-regression-recheck-20260717/`.
+- No CVF-core change is authorized. T5 stays deferred to a separate session in
+  the CVF repository.
