@@ -138,7 +138,7 @@ function values(form) {
 }
 
 function pageName(route) {
-  return ({dashboard:'Tổng quan khai báo', declarations:'Phiếu khai báo', vessels:'Hồ sơ phương tiện', 'port-register':'Sổ theo dõi Salan', crew:'Danh sách thuyền viên', import:'Import dữ liệu Excel', reports:'Báo cáo hoạt động Cảng'})[route] || 'Tổng quan khai báo';
+  return ({dashboard:'Tổng quan khai báo', declarations:'Phiếu khai báo', vessels:'Hồ sơ phương tiện', 'port-register':'Sổ theo dõi Salan', crew:'Danh sách thuyền viên', import:'Import dữ liệu Excel', reports:'Báo cáo hoạt động'})[route] || 'Tổng quan khai báo';
 }
 
 function roleLabel(role) {

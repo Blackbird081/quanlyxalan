@@ -202,7 +202,7 @@ def test_static_frontend(client):
     assert 'id="external-integration-panel" class="panel integration-panel"' in res.text
     assert 'id="integration-admin-actions" class="integration-state" hidden' in res.text
     assert 'class="primary-nav"' in res.text and 'class="data-nav"' in res.text
-    assert "Báo cáo hoạt động Cảng" in res.text
+    assert "Báo cáo hoạt động" in res.text
     assert "Báo cáo Cảng vụ" not in res.text
     assert 'class="panel action-panel"' not in res.text
     app_js = client.get("/app.js").text
@@ -382,6 +382,20 @@ def test_vessel_list(client, auth_headers):
     res = client.get("/api/vessels", headers=auth_headers)
     assert res.status_code == 200
     assert isinstance(res.json(), list)
+
+
+def test_vessel_lists_use_the_same_order(client, port_staff_headers):
+    vessels = client.get("/api/vessels", headers=port_staff_headers)
+    port_register = client.get("/api/port-vessel-register", headers=port_staff_headers)
+    assert vessels.status_code == 200
+    assert port_register.status_code == 200
+
+    tracked_ids = [item["id"] for item in port_register.json()["items"]]
+    tracked_id_set = set(tracked_ids)
+    vessel_order_for_tracked_items = [
+        item["id"] for item in vessels.json() if item["id"] in tracked_id_set
+    ]
+    assert vessel_order_for_tracked_items == tracked_ids
 
 
 def test_vessel_update(client, auth_headers):

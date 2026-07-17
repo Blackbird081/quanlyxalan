@@ -999,10 +999,10 @@ def _sync_vessel_operating_profiles(
 
 @app.get("/api/vessels")
 def get_vessels(db: Session = Depends(get_db), user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN"))):
+    query = db.query(Vessel)
     if user.role == "CUSTOMER":
-        vessels = db.query(Vessel).filter(Vessel.organization_id == user.organization_id).order_by(desc(Vessel.updated_at)).all()
-    else:
-        vessels = db.query(Vessel).order_by(desc(Vessel.updated_at)).all()
+        query = query.filter(Vessel.organization_id == user.organization_id)
+    vessels = query.order_by(Vessel.name, Vessel.registration_no).all()
     return [_vessel_dict(v) for v in vessels]
 
 
