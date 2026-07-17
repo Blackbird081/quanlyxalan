@@ -2554,12 +2554,33 @@ def _report_vessel(db: Session, declaration: Declaration) -> Optional[Vessel]:
     ).first()
 
 
-def _report_static_value(vessel: Optional[Vessel], declaration: Declaration, field: str) -> Any:
+def _report_static_value(vessel: Optional[Vessel], declaration: Optional[Declaration], field: str) -> Any:
     if vessel is not None:
         value = getattr(vessel, field, None)
         if value not in (None, ""):
             return value
-    return getattr(declaration, field, None)
+    return getattr(declaration, field, None) if declaration is not None else None
+
+
+def _report_base_vessels(db: Session, user: User) -> list[Vessel]:
+    query = db.query(Vessel)
+    if user.role == "CUSTOMER":
+        query = query.filter(Vessel.organization_id == user.organization_id)
+    else:
+        query = query.filter(Vessel.is_port_tracked == 1)
+    return query.order_by(Vessel.registration_no, Vessel.id).all()
+
+
+def _report_group_key(vessel_id: Optional[int], registration_no: str) -> str:
+    return f"id:{vessel_id}" if vessel_id else f"reg:{import_match_key(registration_no)}"
+
+
+def _declaration_report_group_key(db: Session, declaration: Declaration) -> str:
+    vessel = _report_vessel(db, declaration)
+    return _report_group_key(
+        vessel.id if vessel else declaration.vessel_id,
+        vessel.registration_no if vessel else declaration.registration_no,
+    )
 
 
 def _cargo_summary(item: dict[str, Any]) -> str:
@@ -2573,10 +2594,25 @@ def _cargo_summary(item: dict[str, Any]) -> str:
     return " - ".join(part for part in parts if part)
 
 
-def _appendix1_rows(db: Session, declarations: list[Declaration]) -> list[list[Any]]:
+def _appendix1_rows(
+    db: Session,
+    declarations: list[Declaration],
+    vessels: Optional[list[Vessel]] = None,
+) -> list[list[Any]]:
+    groups: dict[str, list[Declaration]] = {}
+    for declaration in declarations:
+        groups.setdefault(_declaration_report_group_key(db, declaration), []).append(declaration)
+    base_vessels = vessels or []
+    vessel_by_key = {_report_group_key(vessel.id, vessel.registration_no): vessel for vessel in base_vessels}
+    ordered_keys = list(vessel_by_key)
+    ordered_keys.extend(key for key in groups if key not in vessel_by_key)
+
     rows = []
-    for index, declaration in enumerate(declarations, start=1):
-        vessel = _report_vessel(db, declaration)
+    for index, key in enumerate(ordered_keys, start=1):
+        group = groups.get(key, [])
+        group.sort(key=lambda item: (_declaration_operating_date(item) or date.max, item.id))
+        declaration = group[0] if group else None
+        vessel = vessel_by_key.get(key) or (_report_vessel(db, declaration) if declaration else None)
         capacity_tons = _joined_profile_value(vessel, "cargo_capacity_tons") if vessel else None
         capacity_teu = getattr(vessel, "container_capacity_teu", None) if vessel else None
         capacity = " / ".join(
@@ -2589,23 +2625,23 @@ def _appendix1_rows(db: Session, declarations: list[Declaration]) -> list[list[A
         master_phone = getattr(vessel, "tracking_master_phone", "") if vessel else ""
         rows.append([
             index,
-            _report_static_value(vessel, declaration, "name") or declaration.vessel_name,
-            _report_static_value(vessel, declaration, "registration_no") or declaration.registration_no,
+            _report_static_value(vessel, declaration, "name") or (declaration.vessel_name if declaration else ""),
+            _report_static_value(vessel, declaration, "registration_no") or (declaration.registration_no if declaration else ""),
             _report_static_value(vessel, declaration, "vessel_class") or "",
             _report_static_value(vessel, declaration, "vessel_type") or "",
             _report_static_value(vessel, declaration, "certificate_expiry_date") or "",
             capacity,
             getattr(vessel, "passenger_capacity", None) if vessel else None,
-            declaration.working_port,
-            declaration.actual_arrival_at or declaration.eta,
-            declaration.departure_berth or "",
-            declaration.actual_departure_at or declaration.etd,
-            _cargo_summary(json.loads(declaration.unload_json or "{}")),
-            _cargo_summary(json.loads(declaration.load_json or "{}")),
-            f"{declaration.crew_count} / {declaration.passenger_count}",
+            _distinct_join([item.working_port for item in group]),
+            _distinct_join([item.actual_arrival_at or item.eta for item in group]),
+            _distinct_join([item.departure_berth for item in group]),
+            _distinct_join([item.actual_departure_at or item.etd for item in group]),
+            _distinct_join([_cargo_summary(json.loads(item.unload_json or "{}")) for item in group]),
+            _distinct_join([_cargo_summary(json.loads(item.load_json or "{}")) for item in group]),
+            _distinct_join([f"{item.crew_count} / {item.passenger_count}" for item in group]),
             " - ".join(value for value in (
-                master_name or declaration.master_name,
-                master_phone or declaration.master_phone,
+                master_name or (declaration.master_name if declaration else ""),
+                master_phone or (declaration.master_phone if declaration else ""),
             ) if value),
         ])
     return rows
@@ -2711,26 +2747,36 @@ def _distinct_join(values: list[Any]) -> str:
     return "\n".join(result)
 
 
-def _appendix3_rows(db: Session, declarations: list[Declaration]) -> list[list[Any]]:
+def _appendix3_rows(
+    db: Session,
+    declarations: list[Declaration],
+    vessels: Optional[list[Vessel]] = None,
+) -> list[list[Any]]:
     rows: list[list[Any]] = []
     groups: dict[str, list[Declaration]] = {}
     for declaration in declarations:
-        key = f"id:{declaration.vessel_id}" if declaration.vessel_id else f"reg:{import_match_key(declaration.registration_no)}"
+        key = _declaration_report_group_key(db, declaration)
         groups.setdefault(key, []).append(declaration)
 
-    ordered_groups = sorted(groups.values(), key=lambda items: (_declaration_operating_date(items[0]) or date.max, items[0].id))
-    for group in ordered_groups:
+    base_vessels = vessels or []
+    vessel_by_key = {_report_group_key(vessel.id, vessel.registration_no): vessel for vessel in base_vessels}
+    ordered_keys = list(vessel_by_key)
+    unmatched_keys = [key for key in groups if key not in vessel_by_key]
+    unmatched_keys.sort(key=lambda key: (_declaration_operating_date(groups[key][0]) or date.max, groups[key][0].id))
+    ordered_keys.extend(unmatched_keys)
+    for key in ordered_keys:
+        group = groups.get(key, [])
         group.sort(key=lambda item: (_declaration_operating_date(item) or date.max, item.id))
-        declaration = group[0]
-        vessel = _report_vessel(db, declaration)
+        declaration = group[0] if group else None
+        vessel = vessel_by_key.get(key) or (_report_vessel(db, declaration) if declaration else None)
         row: list[Any] = [None] * 35
         row[0] = len(rows) + 1
-        row[1] = _report_static_value(vessel, declaration, "name") or declaration.vessel_name
-        row[2] = _report_static_value(vessel, declaration, "registration_no") or declaration.registration_no
+        row[1] = _report_static_value(vessel, declaration, "name") or (declaration.vessel_name if declaration else "")
+        row[2] = _report_static_value(vessel, declaration, "registration_no") or (declaration.registration_no if declaration else "")
         row[3] = _report_static_value(vessel, declaration, "vessel_type") or ""
         row[4] = _report_static_value(vessel, declaration, "vessel_class") or ""
         row[5] = _report_static_value(vessel, declaration, "length_m")
-        row[6] = _joined_profile_value(vessel, "deadweight_tons") if vessel else declaration.deadweight_tons
+        row[6] = _joined_profile_value(vessel, "deadweight_tons") if vessel else (declaration.deadweight_tons if declaration else None)
         row[7] = _report_static_value(vessel, declaration, "gross_tonnage")
         cargo_names: list[str] = []
         for item_declaration in group:
@@ -2878,9 +2924,10 @@ def export_report(
     else:
         decls = [item for item in approved if (value := _declaration_operating_date(item)) and report_start <= value <= report_end]
     decls.sort(key=lambda item: (_declaration_operating_date(item) or date.max, item.id))
+    base_vessels = _report_base_vessels(db, user) if kind in {"appendix1", "appendix3"} else []
 
     if kind == "appendix1":
-        rows = _appendix1_rows(db, decls)
+        rows = _appendix1_rows(db, decls, base_vessels)
 
     elif kind == "appendix2":
         cumulative_start = date(report_end.year, 1, 1)
@@ -2899,7 +2946,7 @@ def export_report(
 
     else:  # appendix3
         try:
-            rows = _appendix3_rows(db, decls)
+            rows = _appendix3_rows(db, decls, base_vessels)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

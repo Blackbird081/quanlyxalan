@@ -9,6 +9,8 @@
 7. Destination port cannot populate departure berth.
 8. Unknown cargo/movement classification is rejected from official aggregation and surfaced for review; it cannot silently enter a default category.
 9. All reads and writes retain tenant scope and role checks.
+10. PL.01 and PL.03 start from canonical master rows. Absence of an approved
+    declaration leaves activity blank; it does not remove the Salan row.
 
 ## PL.03 deterministic aggregation
 

@@ -1,7 +1,7 @@
 # Appendix Business Decision Register — 2026-07-17
 
-Status: BUSINESS DECISIONS APPROVED — READY FOR DESIGN; CODE NOT AUTHORIZED
-Project phase: DESIGN
+Status: BUSINESS DECISIONS APPROVED — BUILD IN PROGRESS; ROW-SKELETON CLARIFICATION RECORDED
+Project phase: BUILD
 Risk level: R2
 Source owner: Project owner / port-domain user
 
@@ -36,9 +36,10 @@ The answers were compared with:
 
 ## 2. Faithful summary of the owner's answers
 
-- PL.01 is a daily report from approved declarations. The full Salan register
-  is a separate internal dashboard/register product for Port staff and Port
-  leadership; it is not the PL.01 row population.
+- PL.01 is a daily report whose row skeleton retains the canonical Salan list.
+  Approved declarations overlay activity values; a Salan with no eligible
+  activity remains present with its known static columns and blank activity.
+  The internal dashboard/register remains a separate management product.
 - PL.02 is one official form per calendar month. It contains the selected
   month's values and cumulative values from January through that month. The web
   application also needs a separate analytical reporting dashboard.
@@ -74,7 +75,7 @@ The answers were compared with:
 
 | Decision ID | Appendix/column | Business question | Owner answer | Status | Canonical mapping impact | DB/schema impact | UI/workflow impact | Exporter impact | Required acceptance test |
 |---|---|---|---|---|---|---|---|---|---|
-| BD-01 | PL.01 scope | Approved daily calls or all Salan vessels? | PL.01 uses approved daily declarations; all Salan vessels belong to the separate internal register/dashboard | CONFIRMED | PL.01 remains activity-driven; register rows cannot fabricate calls | No new field | Keep external appendix reports separate from the internal Salan dashboard | Do not mix static register rows into PL.01 | Approved call appears in PL.01; static-only vessel appears only in the internal register/dashboard |
+| BD-01 | PL.01/PL.03 row population | Approved calls only or canonical Salan skeleton? | Clarified after BUILD: retain all canonical Salan rows; overlay activity only from approved declarations; missing activity stays blank | CONFIRMED — SUPERSEDES EARLIER APPROVED-ONLY ROW INTERPRETATION | Master facts create row skeleton but never fabricate activity | No new field | Keep internal dashboard separate while sharing the same canonical Salan index | Union master Salan rows with approved activity projection | Static-only Salan appears with blank activity; approved call fills the same canonical row without duplication |
 | BD-02 | PL.02 period | Monthly form or arbitrary range? | One month per official form; current-month columns plus cumulative January-through-selected-month columns; separate web dashboard required | CONFIRMED | Official PL.02 period is a calendar month; analytics are a separate projection | No new field necessarily | Month selector for official export; analytical dashboard may support week/month/year/range | Preserve `tháng báo cáo` and YTD columns | July export contains July values and January–July cumulative values |
 | BD-03 | PL.03 row grain | One row per call/cargo item or per vessel? | One Salan/vessel per row, aggregating its eligible customer declarations | CONFIRMED | Replace cargo-row expansion with vessel-period aggregation | Keep cargo/call facts separately; aggregate by canonical vessel identity at report time | Drill-down must preserve contributing declarations | Emit one row per vessel and aggregate cargo category measures | Multiple declarations/cargo items for one vessel produce one row; drill-down totals reconcile |
 | BD-04 | All appendices | Eligible workflow state | PL.01 explicitly approved-only; current approved spec already makes all reports approved-only and is not contradicted | CONFIRMED | Retain `APPROVED`, tenant-scoped eligibility | None | Status eligibility remains governed | Exclude draft/pending/revoked/cancelled | Same data in DRAFT is absent; after APPROVED it appears |
@@ -149,8 +150,9 @@ No implementation was changed in this review.
 
 ## 6. Owner confirmations received on 2026-07-17
 
-1. PL.01 uses approved daily declarations; the Salan register/dashboard is a
-   separate internal Port-management product.
+1. PL.01 and PL.03 retain the canonical Salan row skeleton; approved
+   declarations only supply activity. Static-only Salan rows remain with blank
+   activity. The Salan register/dashboard is still a separate internal product.
 2. PL.02 produces one official form per month with current-month and
    January-through-month cumulative columns; the web also needs an analytical
    dashboard.

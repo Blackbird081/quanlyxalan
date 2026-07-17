@@ -887,4 +887,20 @@ Open gate:
 
 - Browser interaction QA is blocked because the managed browser policy rejects localhost; only static frontend and API regression checks are complete.
 - Run `docs/WORK_ORDER_CODEX_DESKTOP_SPREADSHEET_REGRESSION_20260717.md` in Codex Desktop. Do not close APPX/MAP implementation items until its artifact-tool renders pass.
-- No commit or push has been made for this BUILD tranche.
+- BUILD foundation was committed locally as `5db6022`; it has not been pushed.
+
+### Owner clarification — canonical Salan row skeleton
+
+After commit `5db6022`, the owner clarified that having zero approved
+declarations must not remove the 47 known Salan rows from PL.01/PL.03.
+
+- PL.01 and PL.03: start from canonical Salan master rows; populate every known
+  static field; overlay activity only from `APPROVED` declarations; otherwise
+  leave activity cells blank.
+- PL.02: activity aggregate only; with zero approved activity, C:P remain blank.
+- This supersedes the earlier interpretation that approval controlled the
+  existence of the entire PL.01/PL.03 row. Approval controls activity only.
+- Automated static-only coverage was added, and read-only operational review
+  files contain 47 PL.01 rows, blank PL.02 metrics and 47 PL.03 rows.
+- The updated Desktop work order now checks both the operational 47-Salan set
+  and the isolated positive fixture before recommending tranche closure.

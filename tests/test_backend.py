@@ -937,6 +937,58 @@ def test_xlsx_report_appendix3(client, auth_headers):
     assert sheet["AI5"].value == "Đại lý PTND"
 
 
+def test_static_only_port_salan_remains_in_pl01_and_pl03_with_blank_activity(
+    client, port_staff_headers,
+):
+    registration = _reg()
+    db = SessionLocal()
+    vessel = Vessel(
+        name="SALAN KHUNG TĨNH",
+        registration_no=registration,
+        vessel_type="Sà lan",
+        vessel_class="VR-SI",
+        length_m=45.5,
+        deadweight_tons=700,
+        gross_tonnage=320,
+        cargo_capacity_tons=680,
+        passenger_capacity=25,
+        tracking_master_name="THUYỀN TRƯỞNG TĨNH",
+        tracking_master_phone="0900000000",
+        is_port_tracked=1,
+    )
+    db.add(vessel)
+    db.commit()
+    vessel_id = vessel.id
+    db.close()
+
+    try:
+        pl01 = load_workbook(io.BytesIO(client.get(
+            "/api/reports/appendix1?from=2099-01-01&to=2099-01-31", headers=port_staff_headers,
+        ).content)).active
+        row1 = next(row for row in range(11, pl01.max_row + 1) if pl01.cell(row, 3).value == registration)
+        assert pl01.cell(row1, 2).value == "SALAN KHUNG TĨNH"
+        assert pl01.cell(row1, 8).value == 25
+        assert all(pl01.cell(row1, column).value is None for column in range(9, 16))
+        assert pl01.cell(row1, 16).value == "THUYỀN TRƯỞNG TĨNH - 0900000000"
+
+        pl03 = load_workbook(io.BytesIO(client.get(
+            "/api/reports/appendix3?from=2099-01-01&to=2099-01-31", headers=port_staff_headers,
+        ).content)).active
+        row3 = next(row for row in range(10, pl03.max_row + 1) if pl03.cell(row, 3).value == registration)
+        assert pl03.cell(row3, 2).value == "SALAN KHUNG TĨNH"
+        assert all(pl03.cell(row3, column).value is None for column in range(9, 36))
+
+        pl02 = load_workbook(io.BytesIO(client.get(
+            "/api/reports/appendix2?to=2099-01-15", headers=port_staff_headers,
+        ).content)).active
+        assert all(pl02.cell(12, column).value is None for column in range(3, 17))
+    finally:
+        db = SessionLocal()
+        db.query(Vessel).filter(Vessel.id == vessel_id).delete()
+        db.commit()
+        db.close()
+
+
 def test_report_analytics_supports_week_month_quarter_year_and_export(client, customer_headers):
     created_ids = []
     for operating_date, tons, teu, pax in (

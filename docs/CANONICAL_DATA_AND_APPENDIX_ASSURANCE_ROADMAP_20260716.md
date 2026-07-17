@@ -286,3 +286,10 @@ approved canonical snapshots and report-adjustment audit model. The 2026-07-17
 Desktop Spreadsheet QA is the visual baseline: APPX-04 is closed by exception,
 while APPX-01–03 and MAP-01–05 remain open until positive fixtures and fresh
 Spreadsheet renders pass. No upstream CVF-core change is authorized here.
+
+Owner clarification after the first BUILD commit: PL.01 and PL.03 retain the
+canonical 47-Salan row skeleton. Only approved declarations overlay activity;
+known static columns are exported and missing activity remains blank. PL.02
+remains activity-only. Operational review workbooks now prove the 47-row/blank
+baseline structurally; the synthetic positive set proves activity mapping. Both
+sets must pass Desktop Spreadsheet regression before tranche closure.

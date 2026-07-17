@@ -28,7 +28,10 @@
 
 ## Eligible declarations
 
-- Include only declarations in `APPROVED` workflow state.
+- PL.01 and PL.03 row population is the canonical Salan master set plus any
+  unmatched eligible call; only declarations in `APPROVED` workflow state may
+  populate activity columns. Static-only rows keep activity blank.
+- PL.02 remains activity-only and includes only `APPROVED` declarations.
 - Exclude `DRAFT`, pending review states, `CHANGES_REQUESTED`, cancelled and
   `REVOKED` declarations.
 - Report queries remain tenant-scoped for CUSTOMER users.

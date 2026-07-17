@@ -1,7 +1,11 @@
 {
   "version": "KBCV-CANONICAL-1.0",
   "approved_for_build": "2026-07-17",
-  "eligibility": {"workflow_status": "APPROVED", "tenant_scoped": true},
+  "eligibility": {
+    "workflow_status_for_activity": "APPROVED",
+    "tenant_scoped": true,
+    "row_population": {"appendix1": "canonical_salan", "appendix2": "activity_only", "appendix3": "canonical_salan"}
+  },
   "operating_dates": {
     "arrival": ["actual_arrival_at", "eta"],
     "departure": ["actual_departure_at", "etd"],

@@ -12,12 +12,18 @@ The operational database is the single system of record. Hồ sơ phương tiệ
 - Report adjustments are append-only audit facts. They never rewrite declarations.
 - Official appendix exports and the analytical dashboard are separate consumers.
 
-Only `APPROVED` declarations enter official reports. Static master data may refresh static report columns; approved activity, berth, agent, passenger classification and cargo facts remain event snapshots.
+PL.01 and PL.03 use the canonical Salan set as their row skeleton. Only
+`APPROVED` declarations may fill activity columns; missing activity stays
+blank. PL.02 is activity-only. Static master data may refresh static report
+columns; approved activity, berth, agent, passenger classification and cargo
+facts remain event snapshots.
 
 ## Product boundaries
 
-- PL.01: approved daily activity, not the complete Salan register.
+- PL.01: canonical Salan rows with approved daily activity overlaid; it is not
+  the internal register product even though both share the same master data.
 - PL.02: one calendar month plus January-to-month cumulative values.
-- PL.03: one canonical vessel per reporting period, aggregating eligible declarations.
+- PL.03: one canonical vessel per reporting period, including static-only
+  vessels and aggregating eligible declarations where present.
 - Sổ theo dõi Salan: internal management view over canonical vessels.
 - Dashboard: analytical projection; it does not change official FORM semantics.

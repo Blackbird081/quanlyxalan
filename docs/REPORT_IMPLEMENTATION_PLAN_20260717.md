@@ -9,5 +9,8 @@ Status: BUILD AUTHORIZED by owner instruction `Tiến hành sửa`.
 5. Correct `TEUs`, `TEUs Rỗng`, `Quá cảnh`; repair PL.03 clipping without changing column order.
 6. Add positive fixtures covering approval status, cross-month dates, blank versus zero, passenger call zero, shifted berth, agent snapshot and multiple declarations/cargo per vessel.
 7. Run migration, backend, frontend and Spreadsheet visual regression gates before closing MAP/APPX implementation.
+8. Preserve the canonical Salan row skeleton in PL.01/PL.03 and overlay only
+   approved activity; verify the 47-row operational baseline separately from
+   the synthetic positive fixture.
 
 The Spreadsheet QA result `docs/CODEX_DESKTOP_SPREADSHEET_QA_RESULT_20260717.md` is the baseline. APPX-04 is closed by exception; all other implementation items remain open until positive export evidence passes.
