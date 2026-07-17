@@ -465,6 +465,39 @@ Verification:
 
 ---
 
+## Appendix export and vessel-list correction — 2026-07-16
+
+- **Status**: IN REVIEW — automated regression PASS; user visual review pending.
+- **Phase**: REVIEW
+- **Risk Level**: R2 (official report mapping and current register inheritance).
+
+Implemented:
+
+- Replaced the former generic Excel exports with the approved table structures:
+  16 columns for PL.01, 16 columns for PL.02 and the original 35-column
+  `templates/Phụ lục 3.xlsx` table for PL.03.
+- Activity reports remain based on approved declarations. When registration
+  numbers match, current static vessel data from Hồ sơ phương tiện / Sổ theo
+  dõi Salan overrides stale declaration snapshot values. Multiple operating
+  profiles retain all deadweight and cargo-capacity values.
+- PL.02 now separates selected-period metrics from year-to-report-date
+  cumulative metrics.
+- Hồ sơ phương tiện now shows STT, paginates at 15 records per page, resets to
+  page one on search and no longer displays the import-owner remark.
+
+Verification:
+
+- `pytest -q`: 93 passed.
+- `node --check frontend/app.js`: PASS.
+- `python -m compileall -q backend`: PASS.
+- `git diff --check`: PASS.
+- Workbook structure tests verify column counts, merged headers, template
+  headers, approved-only mapping and Sổ theo dõi inheritance.
+- Manual browser/Excel visual review remains with the user and is not claimed
+  here.
+
+---
+
 ## Port Salan register and multi-area capacity preservation — 2026-07-15
 
 - **Status**: IN REVIEW — implementation and automated regression PASS; user visual review pending.
@@ -493,7 +526,7 @@ Implemented:
 
 Verification:
 
-- Real source row `NGỌC HUY 01` parsed as two profiles:
+- A validated source row (name withheld from public documentation) parsed as two profiles:
   `VR-SI / 2723.79 / 2698.79` and `VR-SII / 2912.57 / 2887.57`.
 - `pytest -q`: 88 passed.
 - `node --check frontend/app.js`: PASS.
@@ -610,3 +643,215 @@ Verification:
 - `node --check frontend/app.js`: PASS.
 - `git diff --check`: PASS.
 - Manual browser/visual review remains with the user and is not claimed here.
+
+---
+
+## Canonical data and appendix assurance roadmap — 2026-07-16
+
+- **Status**: PLANNED / NOT STARTED — documentation handoff only.
+- **Phase**: REVIEW; return to DESIGN before implementation.
+- **Risk Level**: R2 (canonical data ownership, schema/import behavior,
+  tenant-scoped inheritance and official report output).
+
+Decision:
+
+- Keep all current downstream evidence and QA artifacts unchanged.
+- Use the operational database as the canonical system of record; use a
+  README/index only as the discovery and governance control plane.
+- Separate master data, approved event data and report aggregates. Static Salan
+  records may populate static QA fields but must not fabricate activity facts.
+- Implement shared, tenant-scoped projections so tabs inherit governed data
+  instead of maintaining independent copies.
+- Defer all mapping into CVF public core until downstream decisions and evidence
+  are stable. Upstream work must run in a separate session rooted at
+  `D:\UNG DUNG AI\TOOL AI 2026\Controlled-Vibe-Framework-CVF`.
+
+Evidence now available:
+
+- `docs/APPENDIX_TEMPLATE_AUDIT_20260716.md` — static template/code audit.
+- `docs/APPENDIX_EXPORT_VERIFICATION_20260716.md` — generated-workbook and
+  visual Spreadsheet verification.
+- `docs/CVF_UPSTREAM_USE_CASE_CANONICAL_DATA_AND_APPENDIX_AUDIT_20260716.md` —
+  sanitized upstream proposal.
+- `docs/CANONICAL_DATA_AND_APPENDIX_ASSURANCE_ROADMAP_20260716.md` — governed
+  downstream execution order and gates.
+
+Current report conclusion:
+
+- Column counts, table mapping and static-data placement pass for PL.01,
+  PL.02 and PL.03.
+- Full template fidelity is not yet approved: PL.01/PL.02 title blocks are
+  absent, PL.02 changes `tháng báo cáo` to `kỳ báo cáo`, and PL.03 omits the
+  signature block after dynamic rows.
+- No report code should be changed until these four Major items are resolved by
+  a human decision or documented exception.
+
+Not done in this handoff:
+
+- No application code, schema, template, workbook or operational data was
+  changed.
+- No commit or publication was made.
+- No file was written to the CVF core or any sibling repository.
+- No production-readiness or CVF-governance-behavior claim is made.
+
+Next governed move:
+
+1. Review and decide the T0 report-intent questions in the roadmap.
+2. Move the new tranche to DESIGN and draft the canonical data catalog, index,
+   inheritance rules and machine-readable field manifest.
+3. Obtain human approval at the design gate before schema/code work.
+4. Complete downstream implementation and evidence before opening a separate
+   CVF-core session for the upstream lesson.
+
+---
+
+## Canonical Field Mapping addendum — 2026-07-17
+
+- **Status**: REVIEWED / DESIGN BLOCKERS RECORDED — no implementation started.
+- **Phase**: REVIEW; next implementation tranche remains DESIGN.
+- **Risk Level**: R2.
+
+New evidence:
+
+- Section 11 of `docs/APPENDIX_EXPORT_VERIFICATION_20260716.md` now maps all
+  67 columns: PL.01 16, PL.02 16 and PL.03 35.
+- Each mapping identifies static/activity/aggregate class, canonical source,
+  fallback, read time, report condition, blank/conflict rule and concrete
+  workbook evidence.
+
+Code-confirmed blockers:
+
+1. **MAP-01 — PL.01/H:** `_appendix1_rows` falls back from static
+   `vessels.passenger_capacity` to activity `declarations.passenger_count`.
+2. **MAP-02 — PL.01/K:** `_appendix1_rows` uses `destination_port` as the
+   departure position even though destination and departure berth are distinct
+   concepts.
+3. **MAP-03 — PL.02/C:P:** report queries filter by `declaration_date` and
+   aggregation initializes no-activity metrics as `0.0`; the operating-date
+   precedence and blank-versus-zero rule require formal approval.
+4. **MAP-04 — PL.03/AI:** `_appendix3_rows` writes `company_name` into the
+   agent/operator column without a dedicated canonical field or confirmed
+   equivalence.
+
+Field/UI gaps recorded for DESIGN:
+
+- ATA/ATD already exist in the schema but need a controlled UI/workflow for
+  entry or confirmation.
+- Arrival/departure berth, agent/operator snapshot/relationship and an explicit
+  passenger-call classification require business approval and may require
+  schema/UI additions.
+- Missing values must remain blank; numeric zero is valid only when explicitly
+  measured or recorded.
+
+Roadmap impact:
+
+- T0 now gates APPX-01 through APPX-04 and MAP-01 through MAP-04.
+- T1 adopts the 67-column mapping as its baseline data contract.
+- T2/T3 cover approved schema, provenance and UI/workflow gaps.
+- T4 requires a positive `APPROVED` event dataset and Spreadsheet visual QA,
+  including arrival, departure, cargo, empty TEU, passenger, ATA/ATD, berth,
+  agent/operator and missing-versus-zero cases.
+
+Boundary:
+
+- No application code, schema, template, workbook or operational data was
+  changed during this review.
+- No CVF-core file was changed. Upstream transfer remains deferred to a
+  separate session after downstream acceptance.
+
+---
+
+## Appendix business decision review — 2026-07-17
+
+- **Status**: PARTIALLY RESOLVED — T0 remains open; no code authorized.
+- **Phase**: REVIEW.
+- **Risk Level**: R2.
+
+Source and method:
+
+- Read all 55 paragraphs in the local owner-response document `AI.docx` using the
+  Documents skill runtime. The source has no tables, comments or tracked
+  changes.
+- `render_docx.py` was attempted but could not run because LibreOffice/`soffice`
+  is unavailable. Visual page QA is therefore explicitly unverified.
+- Created `docs/APPENDIX_BUSINESS_DECISION_REGISTER_20260717.md` with the full
+  decision matrix, APPX/MAP disposition, field implications and minimal
+  remaining questions.
+
+Decisions recorded:
+
+- APPX-01 through APPX-03 are closed as business decisions: PL.01/PL.02 should
+  keep the complete form, and PL.02 must use `tháng báo cáo`.
+- APPX-04 is closed by explicit exception: PL.03 does not require the signature
+  block.
+- MAP-01 is closed as a business decision: PL.01/H is design passenger
+  capacity; PL.01/O is the actual crew/passenger count.
+- ATA/ETA, ATD/ETD, `declaration_date` as creation date, current static master
+  inheritance, blank no-data behavior, passenger-call counting with zero
+  passengers and YTD-from-January-1 are recorded.
+
+Open decisions:
+
+- MAP-02 through MAP-04 remain partially resolved.
+- MAP-05 is newly opened: the owner requests one PL.03 row per call, while the
+  approved mapping spec/exporter use one row per cargo movement.
+- PL.01 versus Salan-dashboard scope, official multi-month PL.02 shape,
+  cross-month call counting, PL.03 AE/AF ownership, agent snapshot/default and
+  template spelling still require owner confirmation.
+
+Boundary and next move:
+
+- No application code, schema, frontend, template or workbook was changed.
+- Remain in REVIEW until the seven questions in Decision Register section 6 are
+  answered and `REPORT_MAPPING_SPEC.md` is revised/approved.
+- Only then transition to DESIGN. Do not begin implementation from this
+  handoff alone.
+
+---
+
+## T0 closure and transition to DESIGN — 2026-07-17
+
+- **Status**: T0 CLOSED — T1 DESIGN AUTHORIZED; BUILD NOT AUTHORIZED.
+- **Phase**: DESIGN.
+- **Risk Level**: R2.
+
+Owner confirmations:
+
+- PL.01 uses approved daily declarations. Sổ theo dõi Salan and its leadership
+  dashboard/export are a separate internal Port-management product.
+- PL.02 produces one official form per month: selected-month values plus
+  January-through-selected-month cumulative values. The web also needs a
+  separate analytical reporting dashboard.
+- PL.03 produces one row per canonical Salan/vessel, aggregating eligible
+  customer declarations instead of expanding one row per cargo item.
+- PL.02 calls are counted by operating arrival. PORT_STAFF/ADMIN may apply a
+  controlled, reasoned and audited manual adjustment.
+- PL.03 AE is working/cargo-working port; AF is next destination.
+- PL.03/AI keeps `Đại lý PTND` and reports the customer-declared approved
+  snapshot.
+- Approved labels are `TEUs`, `TEUs Rỗng` and `Quá cảnh`.
+
+Artifacts updated:
+
+- `docs/APPENDIX_BUSINESS_DECISION_REGISTER_20260717.md` now closes all seven
+  confirmations and APPX-01–04/MAP-01–05 business decisions.
+- `docs/REPORT_MAPPING_SPEC.md` is advanced to `KBCV-REPORT-MAP-1.1`, status
+  `BUSINESS RULES APPROVED; DESIGN DETAILS PENDING`.
+- `docs/CANONICAL_DATA_AND_APPENDIX_ASSURANCE_ROADMAP_20260716.md` closes T0
+  and starts T1 DESIGN.
+
+T1 must still define before BUILD:
+
+- deterministic PL.03 aggregation for multiple cargo names, dates, ports and
+  agents on one vessel row, with drill-down reconciliation;
+- audited PL.02 manual-adjustment data and workflow;
+- canonical new fields and source precedence;
+- official-export versus analytical-dashboard projections;
+- positive approved-event and Spreadsheet visual acceptance evidence.
+
+Boundary:
+
+- No application code, schema, frontend, template or workbook was changed.
+- No commit or push was made.
+- Do not start BUILD until the T1 data contract and acceptance-test plan receive
+  human approval.

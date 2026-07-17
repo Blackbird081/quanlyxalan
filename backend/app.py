@@ -38,8 +38,8 @@ from .models import (
     SyncJob, User, Vessel, VesselOperatingProfile,
 )
 from .xlsx_io import (
-    crew_rows, declaration_row, excel_date, import_match_key, make_xlsx,
-    read_workbook, vessel_rows,
+    crew_rows, declaration_row, excel_date, import_match_key, make_report_xlsx,
+    make_xlsx, read_workbook, vessel_rows,
 )
 from scripts.backup_local import backup as create_local_backup, prune as prune_local_backups
 
@@ -315,6 +315,22 @@ class VesselSaveRequest(BaseModel):
         if value is not None and value < 0:
             raise ValueError("Thông số không được âm.")
         return value
+
+
+class PortRegisterRemoveRequest(BaseModel):
+    ids: List[int]
+
+    @field_validator("ids")
+    @classmethod
+    def valid_ids(cls, value: List[int]) -> List[int]:
+        ids = list(dict.fromkeys(value))
+        if not ids:
+            raise ValueError("Cần chọn ít nhất một Salan.")
+        if len(ids) > 100:
+            raise ValueError("Mỗi lần chỉ được xử lý tối đa 100 Salan.")
+        if any(item <= 0 for item in ids):
+            raise ValueError("Mã Salan không hợp lệ.")
+        return ids
 
 
 class CrewSaveRequest(BaseModel):
@@ -1054,6 +1070,45 @@ def export_port_vessel_register(
     )
 
 
+@app.post("/api/port-vessel-register/remove")
+def remove_from_port_vessel_register(
+    payload: PortRegisterRemoveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+):
+    """Remove rows from the internal Port register without deleting master records."""
+    vessels = (
+        db.query(Vessel)
+        .filter(Vessel.id.in_(payload.ids), Vessel.is_port_tracked == 1)
+        .all()
+    )
+    found_ids = {vessel.id for vessel in vessels}
+    missing_ids = [item for item in payload.ids if item not in found_ids]
+    if missing_ids:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Không tìm thấy Salan đang được theo dõi: {', '.join(map(str, missing_ids))}.",
+        )
+
+    updated_at = now_iso()
+    for vessel in vessels:
+        vessel.is_port_tracked = 0
+        vessel.port_tracking_updated_at = updated_at
+        vessel.updated_at = updated_at
+        vessel.version += 1
+        audit(
+            db,
+            "VESSEL",
+            vessel.id,
+            "PORT_REGISTER_REMOVE",
+            f"{vessel.name} / {vessel.registration_no}",
+            actor_user_id=user.id,
+            organization_id=vessel.organization_id,
+        )
+    db.commit()
+    return {"removed": len(vessels), "ids": payload.ids}
+
+
 @app.post("/api/vessels")
 def save_vessel(
     payload: VesselSaveRequest,
@@ -1394,7 +1449,7 @@ def save_declaration(
         decl.updated_at = now_iso()
         decl.version += 1
     else:
-        ref_no = f"TT-{datetime.now():%Y%m%d-%H%M%S}-{datetime.now().microsecond:06d}"
+        ref_no = f"TT-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8].upper()}"
         decl = Declaration(
             reference_no=ref_no,
             organization_id=org_id,
@@ -2411,6 +2466,183 @@ def export_analytics(
         headers={"Content-Disposition": f'attachment; filename="analytics_{period}_{payload["asOf"]}.xlsx"'},
     )
 
+
+def _approved_report_query(db: Session, user: User):
+    query = db.query(Declaration).filter(Declaration.workflow_status == "APPROVED")
+    if user.role == "CUSTOMER":
+        query = query.filter(Declaration.organization_id == user.organization_id)
+    return query
+
+
+def _report_vessel(db: Session, declaration: Declaration) -> Optional[Vessel]:
+    if declaration.vessel_id:
+        vessel = db.query(Vessel).filter(Vessel.id == declaration.vessel_id).first()
+        if vessel:
+            return vessel
+    return db.query(Vessel).filter(
+        Vessel.registration_no == declaration.registration_no
+    ).first()
+
+
+def _report_static_value(vessel: Optional[Vessel], declaration: Declaration, field: str) -> Any:
+    if vessel is not None:
+        value = getattr(vessel, field, None)
+        if value not in (None, ""):
+            return value
+    return getattr(declaration, field, None)
+
+
+def _cargo_summary(item: dict[str, Any]) -> str:
+    parts = [str(item.get("cargo_name") or item.get("cargo_type") or "").strip()]
+    tons = float(item.get("tons") or 0)
+    teu = float(item.get("teu") or 0)
+    if tons:
+        parts.append(f"{tons:g} tấn")
+    if teu:
+        parts.append(f"{teu:g} TEU")
+    return " - ".join(part for part in parts if part)
+
+
+def _appendix1_rows(db: Session, declarations: list[Declaration]) -> list[list[Any]]:
+    rows = []
+    for index, declaration in enumerate(declarations, start=1):
+        vessel = _report_vessel(db, declaration)
+        capacity_tons = _joined_profile_value(vessel, "cargo_capacity_tons") if vessel else None
+        capacity_teu = getattr(vessel, "container_capacity_teu", None) if vessel else None
+        capacity = " / ".join(
+            value for value in (
+                f"{capacity_tons} tấn" if capacity_tons not in (None, "") else "",
+                f"{capacity_teu:g} TEU" if isinstance(capacity_teu, (int, float)) and capacity_teu else "",
+            ) if value
+        )
+        master_name = getattr(vessel, "tracking_master_name", "") if vessel else ""
+        master_phone = getattr(vessel, "tracking_master_phone", "") if vessel else ""
+        rows.append([
+            index,
+            _report_static_value(vessel, declaration, "name") or declaration.vessel_name,
+            _report_static_value(vessel, declaration, "registration_no") or declaration.registration_no,
+            _report_static_value(vessel, declaration, "vessel_class") or "",
+            _report_static_value(vessel, declaration, "vessel_type") or "",
+            _report_static_value(vessel, declaration, "certificate_expiry_date") or "",
+            capacity,
+            getattr(vessel, "passenger_capacity", None) or declaration.passenger_count or 0,
+            declaration.working_port,
+            declaration.actual_arrival_at or declaration.eta,
+            declaration.destination_port or declaration.working_port,
+            declaration.actual_departure_at or declaration.etd,
+            _cargo_summary(json.loads(declaration.unload_json or "{}")),
+            _cargo_summary(json.loads(declaration.load_json or "{}")),
+            f"{declaration.crew_count} / {declaration.passenger_count}",
+            " - ".join(value for value in (
+                master_name or declaration.master_name,
+                master_phone or declaration.master_phone,
+            ) if value),
+        ])
+    return rows
+
+
+def _report_period_metrics(declarations: list[Declaration]) -> dict[str, float]:
+    metrics = {
+        "container_tons": 0.0, "container_teu": 0.0,
+        "dry_tons": 0.0, "liquid_tons": 0.0, "foreign_tons": 0.0,
+        "calls": float(len(declarations)), "passenger_calls": 0.0, "passengers": 0.0,
+    }
+    for declaration in declarations:
+        metrics["passengers"] += float(declaration.passenger_count or 0)
+        if declaration.passenger_count:
+            metrics["passenger_calls"] += 1
+        for item in (json.loads(declaration.unload_json or "{}"), json.loads(declaration.load_json or "{}")):
+            cargo_key = import_match_key(item.get("cargo_type"))
+            movement_key = import_match_key(item.get("movement_type"))
+            tons = float(item.get("tons") or 0)
+            teu = float(item.get("teu") or 0)
+            if "CONTAINER" in cargo_key or "CONGTENO" in cargo_key:
+                metrics["container_tons"] += tons
+                metrics["container_teu"] += teu
+            elif "HANGKHO" in cargo_key or cargo_key == "KHO":
+                metrics["dry_tons"] += tons
+            elif "HANGLONG" in cargo_key or cargo_key == "LONG":
+                metrics["liquid_tons"] += tons
+            if "NHAPKHAU" in movement_key or "XUATKHAU" in movement_key:
+                metrics["foreign_tons"] += tons
+    return metrics
+
+
+def _appendix2_rows(current: list[Declaration], cumulative: list[Declaration]) -> list[list[Any]]:
+    current_metrics = _report_period_metrics(current)
+    cumulative_metrics = _report_period_metrics(cumulative)
+    values = [
+        current_metrics["container_tons"], current_metrics["container_teu"],
+        cumulative_metrics["container_tons"], cumulative_metrics["container_teu"],
+        current_metrics["dry_tons"], cumulative_metrics["dry_tons"],
+        current_metrics["liquid_tons"], cumulative_metrics["liquid_tons"],
+        current_metrics["foreign_tons"], cumulative_metrics["foreign_tons"],
+        current_metrics["calls"], cumulative_metrics["calls"],
+        current_metrics["passenger_calls"], current_metrics["passengers"],
+    ]
+    return [
+        ["I", "Bến cảng biển", *([None] * 14)],
+        [None, "- Cảng Tân Thuận", *values],
+        ["Tổng", None, *values],
+    ]
+
+
+def _cargo_column_start(movement_type: str) -> int:
+    key = import_match_key(movement_type)
+    if "XUATKHAU" in key:
+        return 8
+    if "NHAPKHAU" in key:
+        return 11
+    if "NOIDIADEN" in key:
+        return 14
+    if "NOIDIAROI" in key:
+        return 17
+    if "CHUYENTAI" in key:
+        return 20
+    if "QUACANH" in key and ("BOCDO" in key or "XEPDO" in key):
+        return 22
+    if "QUACANH" in key or "QUACANG" in key:
+        return 24
+    return 14
+
+
+def _appendix3_rows(db: Session, declarations: list[Declaration]) -> list[list[Any]]:
+    rows: list[list[Any]] = []
+    for declaration in declarations:
+        vessel = _report_vessel(db, declaration)
+        cargo_items = [
+            item for item in (
+                json.loads(declaration.unload_json or "{}"),
+                json.loads(declaration.load_json or "{}"),
+            ) if any((item.get("cargo_type"), item.get("cargo_name"), item.get("tons"), item.get("teu")))
+        ] or [{}]
+        for item in cargo_items:
+            row: list[Any] = [None] * 35
+            row[0] = len(rows) + 1
+            row[1] = _report_static_value(vessel, declaration, "name") or declaration.vessel_name
+            row[2] = _report_static_value(vessel, declaration, "registration_no") or declaration.registration_no
+            row[3] = _report_static_value(vessel, declaration, "vessel_type") or ""
+            row[4] = _report_static_value(vessel, declaration, "vessel_class") or ""
+            row[5] = _report_static_value(vessel, declaration, "length_m") or 0
+            row[6] = _joined_profile_value(vessel, "deadweight_tons") if vessel else (declaration.deadweight_tons or 0)
+            row[7] = _report_static_value(vessel, declaration, "gross_tonnage") or 0
+            cargo_start = _cargo_column_start(str(item.get("movement_type") or ""))
+            row[cargo_start] = float(item.get("tons") or 0)
+            row[cargo_start + 1] = float(item.get("teu") or 0)
+            if cargo_start in {8, 11, 14, 17}:
+                row[cargo_start + 2] = float(item.get("empty_teu") or 0)
+            if declaration.passenger_count:
+                row[26 if declaration.movement_type == "ARRIVAL" else 27] = declaration.passenger_count
+            row[28] = item.get("cargo_name") or item.get("cargo_type") or ""
+            row[29] = declaration.last_port
+            row[30] = declaration.working_port
+            row[31] = declaration.destination_port
+            row[32] = declaration.actual_arrival_at or declaration.eta
+            row[33] = declaration.actual_departure_at or declaration.etd
+            row[34] = declaration.company_name
+            rows.append(row)
+    return rows
+
 @app.get("/api/reports/{kind}")
 def export_report(
     kind: str,
@@ -2441,65 +2673,39 @@ def export_report(
     if report_start > report_end:
         raise HTTPException(status_code=422, detail="Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.")
 
-    query = db.query(Declaration).filter(
-        Declaration.workflow_status == "APPROVED"
+    query = _approved_report_query(db, user)
+    decls = (
+        query.filter(
+            Declaration.declaration_date >= from_,
+            Declaration.declaration_date <= to,
+        )
+        .order_by(Declaration.declaration_date, Declaration.id)
+        .all()
     )
-    if user.role == "CUSTOMER":
-        query = query.filter(Declaration.organization_id == user.organization_id)
-
-    if from_:
-        query = query.filter(Declaration.declaration_date >= from_)
-    if to:
-        query = query.filter(Declaration.declaration_date <= to)
-    decls = query.order_by(Declaration.declaration_date).all()
 
     if kind == "appendix1":
-        headers = ["Mã phiếu", "Loại", "Phương tiện", "Số đăng ký", "ETA", "ETD",
-                   "Cảng cuối", "Cảng làm hàng", "Thuyền trưởng", "Trạng thái"]
-        rows = [[
-            d.reference_no,
-            "Vào cảng" if d.movement_type == "ARRIVAL" else "Rời cảng",
-            d.vessel_name, d.registration_no,
-            d.actual_arrival_at or d.eta, d.actual_departure_at or d.etd,
-            d.last_port, d.working_port, d.master_name, d.workflow_status,
-        ] for d in decls]
-        title = "Phụ lục 1 — Cảng Tân Thuận"
+        rows = _appendix1_rows(db, decls)
 
     elif kind == "appendix2":
-        headers = ["Nhóm hàng", "Tấn kỳ báo cáo", "TEU kỳ báo cáo", "TEU rỗng", "Lượt phiếu"]
-        totals: dict[str, dict[str, float]] = {}
-        for d in decls:
-            for cargo_item in (json.loads(d.unload_json or "{}"), json.loads(d.load_json or "{}")):
-                group = cargo_item.get("cargo_type") or "Khác"
-                bucket = totals.setdefault(group, {"tons": 0, "teu": 0, "empty_teu": 0, "calls": 0})
-                bucket["tons"] += float(cargo_item.get("tons") or 0)
-                bucket["teu"] += float(cargo_item.get("teu") or 0)
-                bucket["empty_teu"] += float(cargo_item.get("empty_teu") or 0)
-                bucket["calls"] += 1
-        rows = [[group, value["tons"], value["teu"], value["empty_teu"], value["calls"]] for group, value in sorted(totals.items())]
-        rows.append(["Tổng", sum(v["tons"] for v in totals.values()), sum(v["teu"] for v in totals.values()), sum(v["empty_teu"] for v in totals.values()), len(decls)])
-        title = "Phụ lục 2 — Cảng Tân Thuận"
+        cumulative = (
+            _approved_report_query(db, user)
+            .filter(
+                Declaration.declaration_date >= date(report_end.year, 1, 1).isoformat(),
+                Declaration.declaration_date <= to,
+            )
+            .order_by(Declaration.declaration_date, Declaration.id)
+            .all()
+        )
+        rows = _appendix2_rows(decls, cumulative)
 
     else:  # appendix3
-        headers = ["Mã phiếu", "Tên PTTND", "Số đăng ký", "Loại", "Cấp", "Chiều dài", "DWT", "GT",
-                   "Hướng hàng", "Loại hình", "Tên hàng", "Tấn", "TEU", "TEU rỗng", "Cảng rời", "Cảng làm hàng",
-                   "Cảng đích", "Ngày đến", "Ngày rời", "Đại lý", "sum_total"]
-        rows = []
-        for d in decls:
-            cargo_rows = [("Dỡ", json.loads(d.unload_json or "{}")), ("Xếp", json.loads(d.load_json or "{}"))]
-            for direction, item in cargo_rows:
-                if not any((item.get("cargo_type"), item.get("cargo_name"), item.get("tons"), item.get("teu"))):
-                    continue
-                tons, teu = float(item.get("tons") or 0), float(item.get("teu") or 0)
-                rows.append([d.reference_no, d.vessel_name, d.registration_no, d.vessel_type, d.vessel_class,
-                             d.length_m or 0, d.deadweight_tons or 0, d.gross_tonnage or 0, direction,
-                             item.get("movement_type") or "", item.get("cargo_name") or "", tons, teu,
-                             float(item.get("empty_teu") or 0), d.last_port, d.working_port, d.destination_port,
-                             d.actual_arrival_at or d.eta, d.actual_departure_at or d.etd,
-                             d.company_name, f"{tons} tấn / {teu} TEU"])
-        title = "Phụ lục 3 — Cảng Sài Gòn-Cảng Tân Thuận"
+        rows = _appendix3_rows(db, decls)
 
-    xlsx_bytes = make_xlsx(title, headers, rows)
+    xlsx_bytes = make_report_xlsx(
+        kind,
+        rows,
+        appendix3_template=ROOT / "templates" / "Phụ lục 3.xlsx",
+    )
     filename = f"report_{kind}_{from_ or 'all'}_{to or 'all'}.xlsx"
     return Response(
         content=xlsx_bytes,

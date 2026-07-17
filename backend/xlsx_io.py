@@ -4,10 +4,16 @@ import io
 import re
 import unicodedata
 import zipfile
+from copy import copy
 from datetime import date, datetime
 from html import escape
+from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
+
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -619,6 +625,171 @@ def make_xlsx(title: str, headers: list[str], rows: list[list[Any]]) -> bytes:
         archive.writestr("xl/_rels/workbook.xml.rels", _workbook_rels())
         archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
     return output.getvalue()
+
+
+def _report_table_style(ws, header_rows: int, column_count: int, data_rows: int) -> None:
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for row in ws.iter_rows(min_row=1, max_row=header_rows, min_col=1, max_col=column_count):
+        for cell in row:
+            cell.font = Font(name="Times New Roman", size=10, bold=True)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = border
+            cell.fill = PatternFill(fill_type="solid", fgColor="F2F2F2")
+    for row in ws.iter_rows(
+        min_row=header_rows + 1,
+        max_row=header_rows + max(data_rows, 1),
+        min_col=1,
+        max_col=column_count,
+    ):
+        for cell in row:
+            cell.font = Font(name="Times New Roman", size=10)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = border
+    ws.sheet_view.showGridLines = False
+    ws.freeze_panes = f"A{header_rows + 1}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+
+def _make_appendix1_xlsx(rows: list[list[Any]]) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Phụ lục 1"
+    merges = (
+        "A1:A4", "B1:H1", "I1:O1", "P1:P4",
+        "B2:B4", "C2:C4", "D2:D4", "E2:E4", "F2:F4",
+        "G2:H3", "I2:J2", "K2:L2", "I3:I4", "J3:J4",
+        "K3:K4", "L3:L4", "M2:M4", "N2:N4", "O2:O4",
+    )
+    for cell_range in merges:
+        ws.merge_cells(cell_range)
+    values = {
+        "A1": "TT", "B1": "PHƯƠNG TIỆN", "I1": "HOẠT ĐỘNG",
+        "P1": "Tên và số điện thoại thuyền trưởng",
+        "B2": "Tên", "C2": "Số đăng ký", "D2": "Cấp phương tiện",
+        "E2": "Công dụng", "F2": "Ngày hết hạn GCNATKT & BVMT",
+        "G2": "Khả năng khai thác", "G4": "Lượng hàng (tấn/TEU)",
+        "H4": "Sức chở (khách)", "I2": "Đến", "I3": "Vị trí (Cảng/cầu)",
+        "J3": "Thời gian (ngày, giờ)", "K2": "Rời", "K3": "Vị trí (Cảng/cầu)",
+        "L3": "Thời gian (ngày, giờ)", "M2": "Hàng dỡ (loại, số lượng)",
+        "N2": "Hàng xếp (loại, số lượng)", "O2": "Số thuyền viên/Hành khách",
+    }
+    for address, value in values.items():
+        ws[address] = value
+    for row_number, row in enumerate(rows, start=5):
+        for column_number, value in enumerate(row, start=1):
+            ws.cell(row_number, column_number, value)
+    widths = [6, 18, 14, 16, 22, 16, 20, 12, 18, 18, 18, 18, 24, 24, 16, 24]
+    for index, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(index)].width = width
+    for row_number in range(1, 5):
+        ws.row_dimensions[row_number].height = 28
+    _report_table_style(ws, 4, 16, len(rows))
+    ws.print_area = f"A1:P{max(5, len(rows) + 4)}"
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
+
+
+def _make_appendix2_xlsx(rows: list[list[Any]]) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Phụ lục 2"
+    merges = (
+        "A1:A3", "B1:B3", "C1:F1", "G1:H1", "I1:J1", "K1:L1",
+        "M1:N1", "O1:P1", "C2:D2", "E2:F2",
+    )
+    for cell_range in merges:
+        ws.merge_cells(cell_range)
+    values = {
+        "A1": "STT", "B1": "Chỉ tiêu", "C1": "Container", "G1": "Hàng khô",
+        "I1": "Hàng lỏng", "K1": "Hàng XNK", "M1": "Lượt tàu", "O1": "Hành khách",
+        "C2": "Thực hiện kỳ báo cáo", "E2": "Lũy kế đến kỳ báo cáo",
+        "G2": "Thực hiện kỳ báo cáo", "H2": "Lũy kế đến kỳ báo cáo",
+        "I2": "Thực hiện kỳ báo cáo", "J2": "Lũy kế đến kỳ báo cáo",
+        "K2": "Thực hiện kỳ báo cáo", "L2": "Lũy kế đến kỳ báo cáo",
+        "M2": "Thực hiện kỳ báo cáo", "N2": "Lũy kế đến kỳ báo cáo",
+        "O2": "Lượt tàu khách", "P2": "Lượt khách",
+        "C3": "Tấn", "D3": "TEUs", "E3": "Tấn", "F3": "TEUs",
+        "G3": "Tấn", "H3": "Tấn", "I3": "Tấn", "J3": "Tấn",
+        "K3": "Tấn", "L3": "Tấn", "M3": "Lượt", "N3": "Lượt",
+        "O3": "Lượt", "P3": "Lượt",
+    }
+    for address, value in values.items():
+        ws[address] = value
+    ws.append(["A", "B", *range(1, 15)])
+    for row in rows:
+        ws.append(row)
+    widths = [6, 24, *([12] * 14)]
+    for index, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(index)].width = width
+    for row_number in range(1, 5):
+        ws.row_dimensions[row_number].height = 28
+    _report_table_style(ws, 4, 16, len(rows))
+    ws.print_area = f"A1:P{max(5, len(rows) + 4)}"
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
+
+
+def _make_appendix3_xlsx(rows: list[list[Any]], template_path: Path) -> bytes:
+    wb = load_workbook(template_path)
+    ws = wb.active
+    for cell_range in ("A15:E15", "O15:T15", "A16:E16", "O16:T16"):
+        if cell_range in {str(item) for item in ws.merged_cells.ranges}:
+            ws.unmerge_cells(cell_range)
+    ws.delete_rows(15, 2)
+    desired_rows = max(len(rows), 1)
+    if desired_rows > 5:
+        ws.insert_rows(15, amount=desired_rows - 5)
+    elif desired_rows < 5:
+        ws.delete_rows(10 + desired_rows, amount=5 - desired_rows)
+    source_row = 10
+    for target_row in range(10, 10 + desired_rows):
+        if target_row != source_row:
+            for column_number in range(1, 36):
+                source = ws.cell(source_row, column_number)
+                target = ws.cell(target_row, column_number)
+                target._style = copy(source._style)
+                target.number_format = source.number_format
+                target.alignment = copy(source.alignment)
+                target.border = copy(source.border)
+                target.fill = copy(source.fill)
+                target.font = copy(source.font)
+            ws.row_dimensions[target_row].height = ws.row_dimensions[source_row].height
+    for target_row in range(10, 10 + desired_rows):
+        for column_number in range(1, 36):
+            ws.cell(target_row, column_number).value = None
+    for row_number, row in enumerate(rows, start=10):
+        for column_number, value in enumerate(row, start=1):
+            ws.cell(row_number, column_number, value)
+    ws.sheet_view.showGridLines = False
+    ws.freeze_panes = "A10"
+    ws.print_area = f"A5:AI{9 + desired_rows}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
+
+
+def make_report_xlsx(
+    kind: str,
+    rows: list[list[Any]],
+    *,
+    appendix3_template: Path | None = None,
+) -> bytes:
+    """Create report workbooks with the approved appendix table structures."""
+    if kind == "appendix1":
+        return _make_appendix1_xlsx(rows)
+    if kind == "appendix2":
+        return _make_appendix2_xlsx(rows)
+    if kind == "appendix3" and appendix3_template:
+        return _make_appendix3_xlsx(rows, appendix3_template)
+    raise ValueError(f"Không có cấu trúc bảng cho báo cáo {kind}.")
 
 
 def _column_name(index: int) -> str:
