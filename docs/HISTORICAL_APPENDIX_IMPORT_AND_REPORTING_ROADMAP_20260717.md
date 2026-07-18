@@ -1,6 +1,6 @@
 # Roadmap — Historical Appendix Import and Reporting
 
-Status: BUILD — H1 CONTRACT APPROVED; H2 FOUNDATION AUTHORIZED
+Status: BUILD — H2 CLOSED/ACCEPTED (2026-07-18); H3 READY, NOT STARTED
 Date: 2026-07-17
 Updated: 2026-07-18
 Project: Khai-bao-Cang-vu-recovery-ux
@@ -395,24 +395,38 @@ Exit gate:
 
 ### H2 — Schema, migration and provenance foundation
 
-Status: IN PROGRESS — OWNER AUTHORIZED 2026-07-18
-Phase: BUILD
+Status: CLOSED / ACCEPTED — Codex review round 4 accepted; owner-authorized
+finalization and controlled DB reconciliation completed 2026-07-18
+Phase: REVIEW complete for local/pilot scope (production readiness not claimed)
 
-Actions:
+Role model (finalized 2026-07-18): `PLATFORM_ADMIN`, `PORT_STAFF`, `CUSTOMER`.
+There is no tenant-local ADMIN. PORT_STAFF operates a reporting unit only with
+FK-backed membership; PLATFORM_ADMIN carries product-wide authority and performs
+a tenant operation only with an explicit platform context; CUSTOMER stays
+customer-scoped. Legacy `ADMIN` accounts are migrated to `PLATFORM_ADMIN`.
 
-- Back up the database and add the approved historical import tables.
-- Add tenant/role controls, checksum idempotency, revision lineage and audit
-  events.
-- Rehearse upgrade and rollback on a database copy.
-- Ensure no migration changes existing declarations or canonical masters.
+Actions (done):
 
-Exit gate:
+- Distinct `ReportingUnit` tenant plus FK-backed `reporting_unit_users` and
+  `reporting_unit_organizations` memberships.
+- Six historical tables with composite tenant foreign keys, tenant-scoped
+  checksum idempotency, revision lineage, tenant-scoped audit and fail-closed
+  schema-drift verification.
+- SQLite `PRAGMA foreign_keys=ON` for app/alembic/test connections.
+- Fail-closed historical actor/reviewer/vessel-link service validators.
+- Legacy `ADMIN` -> `PLATFORM_ADMIN` role data migration (reversible).
+- Controlled operational DB reconciliation from the clean pre-m12 backup after
+  inventory, logical live-data equality, staging acceptance and test gates.
 
-- Upgrade/rollback, constraints, isolation, idempotency and audit tests pass.
+Exit gate (met):
+
+- Upgrade/rollback, constraints, isolation, idempotency and audit tests pass
+  (149 tests). Operational DB is reconciled to `m12f0f000012` with no live-data
+  change other than the approved role migration. See `docs/AGENT_HANDOFF.md`.
 
 ### H3 — Parser and import API
 
-Status: NOT STARTED
+Status: READY — NOT STARTED
 Phase: BUILD
 
 Actions:

@@ -660,7 +660,7 @@ def get_catalogs():
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/organizations")
-def get_organizations(db: Session = Depends(get_db), user: User = Depends(require_roles("ADMIN"))):
+def get_organizations(db: Session = Depends(get_db), user: User = Depends(require_roles("PLATFORM_ADMIN"))):
     orgs = db.query(Organization).order_by(Organization.name).all()
     return [
         {c.name: getattr(o, c.name) for c in o.__table__.columns}
@@ -670,7 +670,7 @@ def get_organizations(db: Session = Depends(get_db), user: User = Depends(requir
 
 @app.get("/api/admin/operations-summary")
 def admin_operations_summary(
-    db: Session = Depends(get_db), user: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db), user: User = Depends(require_roles("PLATFORM_ADMIN")),
 ):
     today = date.today()
     year_start = date(today.year, 1, 1).isoformat()
@@ -721,7 +721,7 @@ def _backup_record(path: Path) -> dict[str, Any]:
 
 
 @app.get("/api/admin/backups")
-def list_admin_backups(user: User = Depends(require_roles("ADMIN"))):
+def list_admin_backups(user: User = Depends(require_roles("PLATFORM_ADMIN"))):
     del user
     if not BACKUP_DIR.exists():
         return []
@@ -737,7 +737,7 @@ def list_admin_backups(user: User = Depends(require_roles("ADMIN"))):
 
 @app.post("/api/admin/backups")
 def create_admin_backup(
-    db: Session = Depends(get_db), user: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db), user: User = Depends(require_roles("PLATFORM_ADMIN")),
 ):
     database = engine.url.database
     if engine.url.get_backend_name() != "sqlite" or not database or database == ":memory:":
@@ -790,7 +790,7 @@ def remove_demo_data_for_real_input(
     """Remove sentinel-marked records before the first real input.
 
     A demo CUSTOMER keeps its organization binding, but the sentinel is cleared
-    and optional workbook metadata becomes the real profile. ADMIN imports may
+    and optional workbook metadata becomes the real profile. PLATFORM_ADMIN imports may
     remove the demo organization entirely.
     """
     demo_org = db.query(Organization).filter(
@@ -839,7 +839,7 @@ def _attention_queue(db: Session, user: User) -> dict[str, Any]:
     role_rules = {
         "CUSTOMER": (["DRAFT", "CHANGES_REQUESTED"], "Phiếu cần khách hàng hoàn tất hoặc bổ sung"),
         "PORT_STAFF": (["PENDING_REVIEW"], "Phiếu chờ nhân viên Cảng xem xét"),
-        "ADMIN": (["PENDING_REVIEW"], "Theo dõi các phiếu đang chờ Cảng xử lý"),
+        "PLATFORM_ADMIN": (["PENDING_REVIEW"], "Theo dõi các phiếu đang chờ Cảng xử lý"),
     }
     statuses, label = role_rules.get(user.role, ([], ""))
     if not statuses:
@@ -998,7 +998,7 @@ def _sync_vessel_operating_profiles(
 
 
 @app.get("/api/vessels")
-def get_vessels(db: Session = Depends(get_db), user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN"))):
+def get_vessels(db: Session = Depends(get_db), user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN"))):
     query = db.query(Vessel)
     if user.role == "CUSTOMER":
         query = query.filter(Vessel.organization_id == user.organization_id)
@@ -1019,7 +1019,7 @@ def _joined_profile_value(vessel: Vessel, field: str) -> Any:
 @app.get("/api/port-vessel-register")
 def get_port_vessel_register(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     vessels = (
         db.query(Vessel)
@@ -1064,7 +1064,7 @@ def get_port_vessel_register(
 @app.get("/api/port-vessel-register/export")
 def export_port_vessel_register(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     vessels = (
         db.query(Vessel)
@@ -1111,7 +1111,7 @@ def export_port_vessel_register(
 def remove_from_port_vessel_register(
     payload: PortRegisterRemoveRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     """Remove rows from the internal Port register without deleting master records."""
     vessels = (
@@ -1151,7 +1151,7 @@ def save_vessel(
     payload: VesselSaveRequest,
     port_register: bool = False,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     if port_register and user.role == "CUSTOMER":
         raise HTTPException(status_code=403, detail="Sổ theo dõi Salan chỉ dành cho Nhân viên Cảng và Admin.")
@@ -1159,7 +1159,7 @@ def save_vessel(
         # Force organization to the customer's bound organization
         org_id = user.organization_id
     else:
-        # ADMIN can specify organization name
+        # PLATFORM_ADMIN can specify organization name
         org_name = (
             (payload.organization or {}).get("name") if isinstance(payload.organization, dict)
             else payload.organization_name
@@ -1230,7 +1230,7 @@ def save_vessel(
 def verify_vessel_registry(
     vessel_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PLATFORM_ADMIN")),
 ):
     """
     Local-only registry date check. Does NOT call any external Maritime Authority API.
@@ -1274,7 +1274,7 @@ def _crew_dict(c: CrewMember, db: Session) -> dict:
 
 
 @app.get("/api/crew")
-def get_crew(db: Session = Depends(get_db), user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN"))):
+def get_crew(db: Session = Depends(get_db), user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN"))):
     if user.role == "CUSTOMER":
         crews = db.query(CrewMember).filter(CrewMember.organization_id == user.organization_id).order_by(CrewMember.full_name).all()
     else:
@@ -1286,7 +1286,7 @@ def get_crew(db: Session = Depends(get_db), user: User = Depends(require_roles("
 def save_crew(
     payload: CrewSaveRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PLATFORM_ADMIN")),
 ):
     data = payload.model_dump(exclude={"id", "version"})
     data["vessel_id"] = None
@@ -1303,7 +1303,7 @@ def save_crew(
             raise HTTPException(status_code=409, detail="Hồ sơ thuyền viên đã được cập nhật bởi người dùng khác.")
         verify_organization_ownership(user, member.organization_id)
 
-        # If user is ADMIN, organization_id can be updated, but for CUSTOMER we keep it same
+        # If user is PLATFORM_ADMIN, organization_id can be updated, but for CUSTOMER we keep it same
         if user.role == "CUSTOMER":
             data.pop("organization_id", None)
 
@@ -1356,7 +1356,7 @@ def get_declarations(
     sort: str = Query(default="updated_at"),
     direction: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     query = db.query(Declaration)
 
@@ -1416,7 +1416,7 @@ def save_declaration(
     payload: DeclarationSaveRequest,
     submit: bool = False,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PLATFORM_ADMIN")),
 ):
     if submit and user.role != "CUSTOMER":
         raise HTTPException(
@@ -1429,7 +1429,7 @@ def save_declaration(
         org_id = user.organization_id
         company_name = user.organization.name if user.organization else "N/A"
     else:
-        # ADMIN can specify organization name
+        # PLATFORM_ADMIN can specify organization name
         org = _get_or_create_org(db, payload.company_name)
         org_id = org.id if org else None
         company_name = payload.company_name
@@ -1586,7 +1586,7 @@ def save_declaration(
 def get_declaration_events(
     declaration_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     decl = db.query(Declaration).filter(Declaration.id == declaration_id).first()
     if not decl:
@@ -1661,7 +1661,7 @@ async def upload_attachment(
     filename: str,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PLATFORM_ADMIN")),
 ):
     decl = db.query(Declaration).filter(Declaration.id == declaration_id).first()
     if not decl:
@@ -1712,7 +1712,7 @@ _SUGGESTION_FIELDS = {
 def get_suggestions(
     field: str,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     col = _SUGGESTION_FIELDS.get(field)
     if not col:
@@ -1805,7 +1805,7 @@ async def import_vessels(
     preview: bool = False,
     overwrite_existing: bool = False,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     is_port_register = request.url.path.endswith("/port-vessel-register")
     if is_port_register and user.role == "CUSTOMER":
@@ -2064,7 +2064,7 @@ async def import_crew(
     request: Request,
     preview: bool = False,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     content = await request.body()
     if not content:
@@ -2223,7 +2223,7 @@ async def import_declaration(
     request: Request,
     preview: bool = False,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PLATFORM_ADMIN")),
 ):
     content = await request.body()
     if not content:
@@ -2263,7 +2263,7 @@ async def import_declaration(
         if not safe.get(required):
             safe[required] = "N/A"
 
-    # CUSTOMER imports stay tenant-bound. ADMIN may import a declaration sent by
+    # CUSTOMER imports stay tenant-bound. PLATFORM_ADMIN may import a declaration sent by
     # any customer and the workbook company name selects (or creates) its tenant.
     if user.role == "CUSTOMER":
         target_organization = user.organization
@@ -2510,7 +2510,7 @@ def report_analytics(
     period: str = "month",
     as_of: Optional[date] = None,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     if period not in ANALYTICS_PERIODS:
         raise HTTPException(status_code=422, detail="Kỳ thống kê phải là week, month, quarter hoặc year.")
@@ -2522,7 +2522,7 @@ def export_analytics(
     period: str = "month",
     as_of: Optional[date] = None,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     if period not in ANALYTICS_PERIODS:
         raise HTTPException(status_code=422, detail="Kỳ thống kê không hợp lệ.")
@@ -2836,7 +2836,7 @@ def _report_adjustment_totals(
 def list_appendix2_adjustments(
     report_month: Optional[str] = None,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     query = db.query(ReportAdjustment).filter(ReportAdjustment.report_kind == "appendix2")
     if report_month:
@@ -2855,7 +2855,7 @@ def list_appendix2_adjustments(
 def create_appendix2_adjustment(
     payload: ReportAdjustmentRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     if payload.organization_id is not None:
         organization = db.query(Organization).filter(Organization.id == payload.organization_id).first()
@@ -2888,7 +2888,7 @@ def export_report(
     from_: Optional[str] = Query(default=None, alias="from"),
     to: Optional[str] = None,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "ADMIN")),
+    user: User = Depends(require_roles("CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN")),
 ):
     if kind not in ("appendix1", "appendix2", "appendix3"):
         raise HTTPException(status_code=404, detail=f"Loại báo cáo '{kind}' không tồn tại.")
@@ -2992,7 +2992,7 @@ def _ensure_connector(db: Session) -> IntegrationConnector:
 @app.get("/api/integrations/maritime-authority")
 def get_integration_status(
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("ADMIN")),
+    user: User = Depends(require_roles("PLATFORM_ADMIN")),
 ):
     connector = _ensure_connector(db)
     jobs = (
@@ -3018,7 +3018,7 @@ def get_integration_status(
 async def prepare_sync(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("ADMIN")),
+    user: User = Depends(require_roles("PLATFORM_ADMIN")),
 ):
     """
     Prepare a sync payload (PREPARED status).

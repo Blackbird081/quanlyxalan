@@ -58,7 +58,7 @@ def test_role_dashboard_layout():
 
     assert "function roleLabel(role)" in app_js
     assert "const isCustomer = state.currentUser.role === 'CUSTOMER'" in app_js
-    assert "const isAdmin = state.currentUser.role === 'ADMIN'" in app_js
+    assert "const isAdmin = state.currentUser.role === 'PLATFORM_ADMIN'" in app_js
     assert "const isReviewer = state.currentUser.role === 'PORT_STAFF'" in app_js
     assert 'id="admin-operations"' in index_html
     assert 'id="integration-admin-actions"' in index_html

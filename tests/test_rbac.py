@@ -54,7 +54,7 @@ try:
 
     # 2. Seed Users
     users = [
-        User(username="admin", password_hash=get_password_hash("adminpass"), full_name="Admin User", role="ADMIN", is_active=1),
+        User(username="admin", password_hash=get_password_hash("adminpass"), full_name="Admin User", role="PLATFORM_ADMIN", is_active=1),
         User(username="cust_a", password_hash=get_password_hash("custpass"), full_name="Customer A", role="CUSTOMER", organization_id=org_a.id, is_active=1),
         User(username="cust_b", password_hash=get_password_hash("custpass"), full_name="Customer B", role="CUSTOMER", organization_id=org_b.id, is_active=1),
         User(username="cust_no_org", password_hash=get_password_hash("custpass"), full_name="No Org Cust", role="CUSTOMER", organization_id=None, is_active=1),

@@ -142,7 +142,7 @@ function pageName(route) {
 }
 
 function roleLabel(role) {
-  return ({CUSTOMER:'User', PORT_STAFF:'Port staff', ADMIN:'Admin'})[role] || role;
+  return ({CUSTOMER:'User', PORT_STAFF:'Port staff', PLATFORM_ADMIN:'Platform admin'})[role] || role;
 }
 
 function route() {
@@ -163,7 +163,7 @@ function route() {
   if (name === 'crew') loadCrew();
   if (name === 'reports') {
     loadReportAnalytics($('.period-switch button.active')?.dataset.period || 'month');
-    if (state.currentUser?.role === 'ADMIN') loadIntegration();
+    if (state.currentUser?.role === 'PLATFORM_ADMIN') loadIntegration();
   }
 }
 
@@ -184,7 +184,7 @@ async function loadDashboard(query = '') {
     renderNotificationPreferences(state.dashboardCertificateWarnings);
     renderAttentionQueue(data.attention);
     // Technical operations and database backup details remain available through
-    // protected APIs, but are not end-user dashboard content (including ADMIN).
+    // protected APIs, but are not end-user dashboard content (including PLATFORM_ADMIN).
     $('#admin-operations').hidden = true;
     $('#admin-backup').hidden = true;
     $('#recent-table').innerHTML = declarationTable(data.recent);
@@ -333,7 +333,7 @@ function renderCrew() {
   const strip = $('#crew-warning-strip');
   strip.classList.toggle('visible', messages.length > 0);
   strip.textContent = messages.join(' ');
-  const canEdit = ['CUSTOMER', 'ADMIN'].includes(state.currentUser?.role);
+  const canEdit = ['CUSTOMER', 'PLATFORM_ADMIN'].includes(state.currentUser?.role);
   $('#crew-table').innerHTML = items.length ? `<table class="data-table responsive-table record-table crew-record-table"><thead><tr><th>Họ tên</th><th>Chức danh</th><th>Ngày sinh</th><th>Chứng chỉ</th><th>Thời hạn</th><th>Trạng thái</th>${canEdit ? '<th aria-label="Thao tác"></th>' : ''}</tr></thead><tbody>${items.map(item => `<tr><td data-label="Họ tên"><strong>${esc(item.full_name)}</strong><br><small>${esc(item.phone || '')}</small></td><td data-label="Chức danh">${esc(item.crew_role)}</td><td data-label="Ngày sinh" class="date-cell">${fmtDate(item.birth_date)}</td><td data-label="Chứng chỉ">${esc(item.professional_certificate_type)}<br><small>${esc(item.professional_certificate_no)}</small></td><td data-label="Thời hạn" class="date-cell">${fmtDate(item.certificate_expiry_date)}</td><td data-label="Trạng thái"><span class="table-badge ${item.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(item.certificate_status)}</span></td>${canEdit ? `<td data-label="Thao tác" class="action-cell"><button class="table-icon-button" data-edit-crew="${item.id}" title="Chỉnh sửa ${esc(item.full_name)}" aria-label="Chỉnh sửa ${esc(item.full_name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></td>` : ''}</tr>`).join('')}</tbody></table>` : empty('Chưa có danh sách thuyền viên', 'Thêm thuyền trưởng hoặc thuyền viên cùng chứng chỉ chuyên môn.');
   $$('[data-edit-crew]').forEach(button => button.onclick = () => openCrew(Number(button.dataset.editCrew)));
 }
@@ -746,7 +746,7 @@ function reviewSummaryHtml(d) {
     ? $$('input[name="crew_ids"]:checked', crewContainer).length
     : 0;
   const crewTotal = isNew ? state.declarationNewCrew.length : (checkedCrew || (d.crew_ids || []).length);
-  const isAdmin = state.currentUser?.role === 'ADMIN';
+  const isAdmin = state.currentUser?.role === 'PLATFORM_ADMIN';
   return `<section class="form-section"><h3>F. ${isAdmin ? 'Xem lại & Lưu' : 'Xem lại & Gửi'}</h3><div class="section-grid">
     <div class="attachment-field wide-field"><strong>Phương tiện</strong><p>${esc(d.vessel_name || '')} — ${esc(d.registration_no || '')}${isNew ? ' (hồ sơ mới)' : ''}</p></div>
     <div class="attachment-field wide-field"><strong>Thuyền trưởng</strong><p>${captainName ? `${esc(captainName)}${captainPhone ? ` · ${esc(captainPhone)}` : ''}` : 'Chưa có thông tin'}</p></div>
@@ -1272,7 +1272,7 @@ async function confirmImport(overwriteExisting = false) {
     $('#import-crew').value = '';
     if ($('#import-port-register')) $('#import-port-register').value = '';
     const refreshes = [loadVessels(), loadDeclarations(), loadCrew(), loadDashboard()];
-    if (['PORT_STAFF', 'ADMIN'].includes(state.currentUser?.role)) refreshes.push(loadPortRegister());
+    if (['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role)) refreshes.push(loadPortRegister());
     await Promise.all(refreshes);
     if (state.importResultTarget === 'port-register' && $('#port-import-dialog').open) $('#port-import-dialog').close();
     state.importResultTarget = 'main';
@@ -1313,7 +1313,7 @@ async function exportReport(kind) {
 
 async function loadReportAdjustments() {
   const month = $('#report-month').value;
-  if (!month || !['PORT_STAFF', 'ADMIN'].includes(state.currentUser?.role)) return;
+  if (!month || !['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role)) return;
   const items = await api(`/api/reports/appendix2/adjustments?report_month=${encodeURIComponent(month)}`);
   $('#report-adjustment-history').innerHTML = items.length
     ? `<table class="data-table responsive-table"><thead><tr><th>Thời gian</th><th>Chỉ tiêu</th><th>Delta</th><th>Lý do</th></tr></thead><tbody>${items.map(item => `<tr><td data-label="Thời gian">${fmtDate(item.created_at)}</td><td data-label="Chỉ tiêu">${item.metric === 'calls' ? 'Lượt tàu' : 'Lượt tàu khách'}</td><td data-label="Delta">${item.delta > 0 ? '+' : ''}${item.delta}</td><td data-label="Lý do">${esc(item.reason)}</td></tr>`).join('')}</tbody></table>`
@@ -1470,7 +1470,7 @@ async function init() {
 
     // Role-based UI visibility constraints
     const isCustomer = state.currentUser.role === 'CUSTOMER';
-    const isAdmin = state.currentUser.role === 'ADMIN';
+    const isAdmin = state.currentUser.role === 'PLATFORM_ADMIN';
     const isReviewer = state.currentUser.role === 'PORT_STAFF';
 
     const canCreateDeclaration = isCustomer || isAdmin;
@@ -1585,7 +1585,7 @@ async function init() {
   const today = new Date(); $('#report-to').value = today.toISOString().slice(0,10); $('#report-from').value = `${today.getFullYear()}-01-01`;
   $('#report-month').value = today.toISOString().slice(0, 7);
   $('#report-adjustment-form').elements.report_month.value = $('#report-month').value;
-  if (['PORT_STAFF', 'ADMIN'].includes(state.currentUser?.role)) loadReportAdjustments().catch(error => toast(error.message, true));
+  if (['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role)) loadReportAdjustments().catch(error => toast(error.message, true));
   try {
     [state.catalogs, state.vessels, state.crew] = await Promise.all([api('/api/catalogs'), api('/api/vessels'), api('/api/crew')]);
     $('#api-state').className = 'state-badge ok'; $('#api-state').textContent = 'Đã kết nối';

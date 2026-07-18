@@ -65,7 +65,7 @@ def _seed_user() -> None:
 
         # Seed users
         user_data = [
-            ("testuser", "ADMIN", None),
+            ("testuser", "PLATFORM_ADMIN", None),
             ("customeruser", "CUSTOMER", org.id),
             ("portstaff", "PORT_STAFF", None),
         ]
@@ -221,8 +221,8 @@ def test_static_frontend(client):
     assert "loadReportAnalytics($('.period-switch button.active')?.dataset.period || 'month')" in app_js
     assert "CUSTOMER:'User'" in app_js
     assert "PORT_STAFF:'Port staff'" in app_js
-    assert "ADMIN:'Admin'" in app_js
-    assert "if (state.currentUser?.role === 'ADMIN') loadIntegration();" in app_js
+    assert "PLATFORM_ADMIN:'Platform admin'" in app_js
+    assert "if (state.currentUser?.role === 'PLATFORM_ADMIN') loadIntegration();" in app_js
     assert "btn.hidden = !canCreateDeclaration" in app_js
     assert "!['declarations', 'crew'].includes(link.dataset.route)" in app_js
     assert "$('#user-display').innerHTML = `<span class=\"role-pill\"" in app_js

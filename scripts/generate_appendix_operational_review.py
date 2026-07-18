@@ -33,9 +33,9 @@ OUTPUT_DIR = ROOT / "outputs" / "appendix-operational-review-20260717"
 def main() -> None:
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.role.in_(["PORT_STAFF", "ADMIN"])).order_by(User.id).first()
+        user = db.query(User).filter(User.role.in_(["PORT_STAFF", "PLATFORM_ADMIN"])).order_by(User.id).first()
         if not user:
-            raise RuntimeError("Không có PORT_STAFF/ADMIN để áp dụng đúng phạm vi báo cáo Cảng.")
+            raise RuntimeError("Không có PORT_STAFF/PLATFORM_ADMIN để áp dụng đúng phạm vi báo cáo Cảng.")
         anchor = date.today()
         period_start = date(anchor.year, 1, 1)
         month_start = date(anchor.year, anchor.month, 1)
