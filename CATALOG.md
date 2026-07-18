@@ -7,12 +7,12 @@
 
 ## 1. What this system is
 
-A FastAPI + vanilla-JS web app for **TAN THUAN PORT**: customers submit vessel
-arrival/departure declarations (crew, cargo, certificates); port staff review
-them through a fixed workflow (`CV → QLC → BP → ISSUE`) and produce the
-periodic Appendix 1/2/3 reports required by the Maritime Administration
-(Cảng vụ). Multi-tenant: many "reporting units" (ports), each with its own
-staff, customers, vessels and declarations.
+A FastAPI + vanilla-JS web app for multiple ports/reporting units. Customers
+submit vessel arrival/departure declarations; port staff either request changes
+or approve them and produce the periodic Appendix 1/2/3 reports required by
+the Maritime Administration (Cảng vụ). The same platform also imports audited
+historical TOS workbooks, reconciles Berth/cargo/legacy PL.03 sources and
+reconstructs PL.03 without mutating live declarations.
 
 ## 2. Runtime topology
 
@@ -39,10 +39,10 @@ Full detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | Migrations | Alembic | `alembic/versions/` — 15 revisions, T0→T6 progression |
 | Validation | Pydantic v2 | `backend/schemas.py` |
 | Auth | JWT bearer, local session | `backend/auth.py`, [docs/ADR-002-SESSION-DESIGN.md](docs/ADR-002-SESSION-DESIGN.md) |
-| Frontend | Vanilla JS, single file, no framework/build | `frontend/app.js` (2168 lines), [docs/ADR-003-FRONTEND-ARCHITECTURE.md](docs/ADR-003-FRONTEND-ARCHITECTURE.md) |
+| Frontend | Vanilla JS, single file, no framework/build | `frontend/app.js` (2299 lines), [docs/ADR-003-FRONTEND-ARCHITECTURE.md](docs/ADR-003-FRONTEND-ARCHITECTURE.md) |
 | File storage | Local disk or MinIO (env-toggled) | `backend/storage.py` |
 | XLSX import/export | Hand-rolled stdlib + openpyxl, zip-bomb guarded | `backend/xlsx_io.py`, `backend/historical_tos_parser.py` |
-| Tests | pytest + httpx TestClient | `tests/` (4378 lines total) |
+| Tests | pytest + httpx TestClient | `tests/` (4034 lines total) |
 | Governance | CVF framework (phase-gated, work orders) | `AGENTS.md`, `.cvf/`, `docs/WORK_ORDER_*.md` |
 
 ## 4. Repository map
@@ -68,9 +68,9 @@ Full detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 |---|---|---|
 | `app.py` | 3656 | FastAPI app instance + nearly all HTTP routes (see §6 for the route index) |
 | `models.py` | 678 | SQLAlchemy ORM models — every table (see §7) |
-| `xlsx_io.py` | 912 | XLSX read/write: vessel/crew/register import, Appendix 1/2/3 export, zip-bomb guards |
-| `historical_api.py` | 668 | `APIRouter` for historical/TOS workbook import (preview → confirm → link vessels); mounted into `app.py` |
-| `historical_tos_parser.py` | 425 | Memory-bounded, filename-independent parser for audited historical TOS workbooks; never mutates source, keeps cell-level provenance |
+| `xlsx_io.py` | 923 | XLSX read/write: vessel/crew/register import, Appendix 1/2/3 export, zip-bomb guards |
+| `historical_api.py` | 912 | `APIRouter` for historical/TOS preview, reconciliation, revision, confirmation, vessel links and synthesized PL.03 export |
+| `historical_tos_parser.py` | 457 | Memory-bounded, filename-independent parser for audited historical TOS workbooks; never mutates source, keeps cell-level provenance |
 | `tenant.py` | 185 | Shared tenant-scope guard (`CUSTOMER` vs `PORT` scope); every route resolving a reporting unit should depend on this instead of re-deriving checks |
 | `historical.py` | 177 | Fail-closed tenant validators specific to historical import (multi-hop checks Alembic FKs can't express alone) |
 | `schemas.py` | 134 | Pydantic request/response models |
@@ -121,11 +121,13 @@ whole file top to bottom.
 | Reports | `GET /api/reports/{kind}` — Appendix 1/2/3 export | 3456 |
 | Integrations | `GET /api/integrations/maritime-authority` | 3567 |
 | Integrations | `POST /api/integrations/prepare-sync` | 3597 |
-| **Historical import** (`backend/historical_api.py`) | `POST /preview` | 351 |
-| " | `GET ""`, `GET /{import_id}` | 409, 421 |
-| " | `GET /{import_id}/rows`, `/vessel-links` | 439, 484 |
-| " | `POST /{import_id}/cancel` `/confirm` | 528, 553 |
-| " | `POST /{import_id}/vessel-links/{link_id}/resolve` | 606 |
+| **Historical import** (`backend/historical_api.py`) | `POST /preview` | 377 |
+| " | `GET ""`, `GET /{import_id}` | 435, 665 |
+| " | `POST /reconcile` | 467 |
+| " | `GET /exports/pl03` | 637 |
+| " | `GET /{import_id}/rows`, `/vessel-links` | 683, 728 |
+| " | `POST /{import_id}/cancel` `/confirm` | 772, 797 |
+| " | `POST /{import_id}/vessel-links/{link_id}/resolve` | 850 |
 
 Full request/response shapes: [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
 
@@ -159,16 +161,19 @@ wins when data conflicts): [docs/DATA_INDEX.md](docs/DATA_INDEX.md),
   in `reporting_unit_users`; `PLATFORM_ADMIN` just needs the header. This is
   the dependency every new tenant-scoped route should use — don't hand-roll
   org/unit checks.
-- Platform-wide operations (backups, reporting-unit/membership management,
-  integrations) intentionally bypass this guard.
+- Platform-wide operations (backups, reporting-unit creation and integrations)
+  have separate `PLATFORM_ADMIN` gates. Tenant operations still require an
+  explicit reporting-unit context.
 - Threat model and boundary details:
   [docs/SECURITY_BOUNDARY.md](docs/SECURITY_BOUNDARY.md).
 
 ## 9. Reporting subsystem (Appendix 1/2/3)
 
-- Appendix 1: daily declaration plan rows. Appendix 2: monthly + YTD
-  aggregates by cargo category/calls/passengers. Appendix 3: one row per
-  submitted port call, split by movement type.
+- Appendix 1 and Appendix 3 start from the canonical Salan/register scope and
+  populate activity from approved declarations; Appendix 2 provides monthly
+  and YTD aggregates by cargo category, calls and passengers.
+- Appendix 2 adjustments are reasoned deltas with audit provenance; they do not
+  rewrite the source declaration.
 - Export logic lives in `backend/xlsx_io.py`; route is
   `GET /api/reports/{kind}` (`app.py:3456`).
 - Field-level mapping spec: [docs/REPORT_MAPPING_SPEC.md](docs/REPORT_MAPPING_SPEC.md).
@@ -177,22 +182,28 @@ wins when data conflicts): [docs/DATA_INDEX.md](docs/DATA_INDEX.md),
 
 ## 10. Historical / TOS import subsystem
 
-A separate, more recent subsystem for importing pre-existing (pre-system)
-port-call workbooks without touching live operational data:
+A separate subsystem for importing pre-existing port-call workbooks without
+touching live operational data:
 
 - `backend/historical_tos_parser.py` — parses the workbook, read-only, keeps
   per-cell provenance.
-- `backend/historical_api.py` — preview → confirm/cancel → vessel-link
-  resolution flow (routes in §6).
+- `backend/historical_api.py` — preview, confirm/cancel, order-independent
+  reconciliation, explicit revision decisions, vessel-link resolution and
+  synthesized PL.03 export (routes in §6).
 - `backend/historical.py` — fail-closed cross-tenant validators specific to
   this store.
-- Frontend: functions from `previewHistoricalImport` through
-  `loadHistoricalImportHistory` in `frontend/app.js` (~line 1519–1785).
+- Source authority is explicit: Berth owns ATB/ATD and berth; cargo detail owns
+  weight, TEU, movement and trade; legacy PL.03 is a static vessel-information
+  fallback and cannot overwrite TOS time.
+- Workbook type detection uses sheet/header structure, not the filename. Files
+  may be selected together or confirmed in any order; a later confirmation
+  triggers reconciliation of related imports in the same unit/period.
+- Frontend: historical import workspace in `frontend/app.js` (~1433–1901).
 - Audit trail of how this subsystem was scoped:
   [docs/HISTORICAL_TOS_WORKBOOK_AUDIT_20260717.md](docs/HISTORICAL_TOS_WORKBOOK_AUDIT_20260717.md),
   [docs/HISTORICAL_APPENDIX_IMPORT_AND_REPORTING_ROADMAP_20260717.md](docs/HISTORICAL_APPENDIX_IMPORT_AND_REPORTING_ROADMAP_20260717.md).
 
-## 11. Frontend (`frontend/app.js`, single file, 2168 lines)
+## 11. Frontend (`frontend/app.js`, single file, 2299 lines)
 
 No framework, no build step, no modules — one script loaded by
 `index.html`. Navigate by function name (`grep -n "^async function\|^function "`),
@@ -200,16 +211,14 @@ grouped roughly in this order:
 
 | Section (approx. lines) | Covers |
 |---|---|
-| 1–180 | `api()` fetch wrapper, toast, form helpers, login dialog |
-| 180–400 | Reporting-unit context load/save, `route()` dispatcher, dashboard |
-| 400–530 | Vessels list/render, crew list/render |
-| 530–765 | Vessel profile editor, cargo fields, crew checklist helpers |
-| 765–1000 | Declaration wizard: step validation, field errors, review summary |
-| 909–999 | Port vessel register (list, stats, remove) |
-| 999–1300 | Declaration wizard render, cargo calc, save/draft, workflow actions |
-| 1299–1785 | Live import preview/confirm + historical import workspace |
-| 1785–1985 | Report export, analytics dashboard, backup trigger, integration prepare-sync |
-| 1982 | `init()` — app bootstrap |
+| 1–314 | `api()` wrapper, session helpers, reporting-unit context and `route()` |
+| 315–672 | Dashboard, vessel/declaration/crew lists and shared form helpers |
+| 673–1298 | Declaration wizard, port register and workflow actions |
+| 1299–1432 | Live operational import preview/confirm |
+| 1433–1901 | Historical/TOS import workspace, reconciliation and revision UI |
+| 1915–2084 | Report export and analytics source modes |
+| 2085–2112 | Backup and integration controls |
+| 2113–2299 | App bootstrap and event bindings |
 
 `index.html` — page shell/layout; `styles.css` — all styling; `preview.html`
 — standalone design preview, not served in the real flow. Rationale for
@@ -242,12 +251,12 @@ against a real database on startup.
 
 | File | Lines | Covers |
 |---|---|---|
-| `test_backend.py` | 2339 | Broad API surface — the main regression suite |
+| `test_backend.py` | 2554 | Broad API surface — the main regression suite |
 | `test_historical_import.py` | 854 | Historical/TOS import flow end-to-end |
-| `test_rbac.py` | 764 | Role checks, tenant isolation, `require_roles` |
-| `test_frontend_ux.py` | 193 | Frontend structural/UX assertions |
+| `test_rbac.py` | 769 | Role checks, tenant isolation, `require_roles` |
+| `test_frontend_ux.py` | 204 | Frontend structural/UX assertions |
 | `test_reporting_unit_bootstrap.py` | 76 | `scripts/bootstrap_reporting_unit.py` |
-| `test_historical_tos_parser.py` | 67 | Parser unit tests |
+| `test_historical_tos_parser.py` | 111 | Parser unit tests |
 | `test_operations.py` | 35 | Ops/admin endpoints |
 | `test_integrations.py` | 27 | Integration adapter (manual mode) |
 | `test_storage.py` | 23 | Storage backend protocol |
@@ -316,7 +325,7 @@ the current state before relying on it.
 | Add/modify an API route | `backend/app.py` (§6 for nearest neighbor) + `backend/schemas.py` + update `docs/API_CONTRACT.md` |
 | Add a DB column/table | `backend/models.py` + new Alembic revision in `alembic/versions/` |
 | Change role/permission logic | `backend/rbac.py` (roles), `backend/tenant.py` (tenant scoping) |
-| Fix/extend the permit workflow (`CV→QLC→BP→ISSUE`) | `app.py` workflow route (`app.py:1889`) + `models.DeclarationEvent` |
+| Fix/extend declaration review (`PENDING_REVIEW → CHANGES_REQUESTED/APPROVED`) | `app.py` workflow route (`app.py:1889`) + `models.DeclarationEvent` |
 | Change an Appendix export | `backend/xlsx_io.py` + `docs/REPORT_MAPPING_SPEC.md` + matching `templates/*.xlsx` |
 | Historical import bug | `backend/historical_api.py` / `historical_tos_parser.py` / `historical.py` + frontend `*Historical*` functions |
 | Frontend page/view behavior | `frontend/app.js` — find via `route()` (~line 292) then the matching `render*`/`load*` function |
