@@ -1494,6 +1494,35 @@ function setImportMode(mode) {
   }
 }
 
+// Report period picker: two selects (Tháng / Năm) instead of the native month
+// input, to match the app's own control styling. Value is a "YYYY-MM" string.
+function pl03PeriodSelectsHtml() {
+  const now = new Date().getFullYear();
+  const years = Array.from({length: 7}, (_, i) => now - i);
+  const months = Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0'));
+  return `<label>Tháng<select id="historical-pl03-month"><option value="">—</option>${months.map(m => `<option value="${m}">${Number(m)}</option>`).join('')}</select></label>`
+    + `<label>Năm<select id="historical-pl03-year"><option value="">—</option>${years.map(y => `<option value="${y}">${y}</option>`).join('')}</select></label>`;
+}
+
+function pl03PeriodValue() {
+  const m = $('#historical-pl03-month')?.value;
+  const y = $('#historical-pl03-year')?.value;
+  return (m && y) ? `${y}-${m}` : '';
+}
+
+function setPl03Period(period) {
+  if (!period) return;
+  const [y, m] = period.split('-');
+  const monthSel = $('#historical-pl03-month');
+  const yearSel = $('#historical-pl03-year');
+  if (!monthSel || !yearSel) return;
+  if (y && !Array.from(yearSel.options).some(option => option.value === y)) {
+    yearSel.insertBefore(new Option(y, y), yearSel.options[1] || null);
+  }
+  monthSel.value = m;
+  yearSel.value = y;
+}
+
 function ensureHistoricalExportPanel() {
   if ($('#historical-pl03-export')) return;
   const historyPanel = $('.historical-history-panel');
@@ -1501,17 +1530,16 @@ function ensureHistoricalExportPanel() {
   const panel = document.createElement('section');
   panel.id = 'historical-pl03-export';
   panel.className = 'panel historical-export-panel';
-  panel.innerHTML = `<div><p class="eyebrow">KẾT QUẢ ĐỐI SOÁT</p><h2>PL.03 tổng hợp từ TOS</h2><p>ATB/ATD, TEU và tấn lấy từ Berth/Detail. PL.03 cũ chỉ bổ sung thông tin phương tiện còn thiếu.</p></div><div class="historical-export-actions"><label>Tháng báo cáo<input id="historical-pl03-period" type="month"></label><button id="export-historical-pl03" type="button" class="primary-button">Xuất PL.03 tổng hợp</button></div>`;
+  panel.innerHTML = `<div><p class="eyebrow">KẾT QUẢ ĐỐI SOÁT</p><h2>PL.03 tổng hợp từ TOS</h2></div><div class="historical-export-actions">${pl03PeriodSelectsHtml()}<button id="export-historical-pl03" type="button" class="primary-button">Xuất PL.03 tổng hợp</button></div>`;
   historyPanel.before(panel);
   $('#export-historical-pl03').onclick = exportHistoricalPl03;
 }
 
 async function exportHistoricalPl03() {
-  const input = $('#historical-pl03-period');
-  const reportingPeriod = input?.value;
+  const reportingPeriod = pl03PeriodValue();
   if (!reportingPeriod) {
     toast('Chọn tháng báo cáo trước khi xuất PL.03 tổng hợp.', true);
-    input?.focus();
+    $('#historical-pl03-month')?.focus();
     return;
   }
   const button = $('#export-historical-pl03');
@@ -1532,6 +1560,49 @@ function historicalStatusTone(status) {
   if (status === 'COMMITTED') return 'submitted';
   if (status === 'REJECTED') return 'danger';
   return 'draft';
+}
+
+// Result cell: colour carries the meaning (green = hợp lệ, cam = cần kiểm tra,
+// đỏ = từ chối). Zeros are omitted; only non-zero exceptions show. Titles keep
+// the words available for screen readers and hover without visual clutter.
+function historicalResultCell(item) {
+  const n = value => number(value).toLocaleString('vi-VN');
+  const parts = [`<b class="hres ok" title="${n(item.accepted)} hợp lệ">${n(item.accepted)}</b>`];
+  if (item.review) parts.push(`<b class="hres warn" title="${n(item.review)} cần kiểm tra">${n(item.review)}</b>`);
+  if (item.rejected) parts.push(`<b class="hres rej" title="${n(item.rejected)} từ chối">${n(item.rejected)}</b>`);
+  return `<span class="hres-cell">${parts.join('')}</span>`;
+}
+
+// Revision cell: rev 1 is the default, so keep it quiet; a superseding revision
+// (rev >= 2) or a superseded link is what actually needs attention.
+function historicalRevCell(item) {
+  const link = item.supersededByImportId ? `<br><small>→ #${item.supersededByImportId}</small>` : '';
+  const rev = item.revisionNo > 1
+    ? `<span class="rev-badge">rev ${item.revisionNo}</span>`
+    : `<span class="rev-muted">${item.revisionNo}</span>`;
+  return rev + link;
+}
+
+function historicalEffectivePeriod(item, activeBerthPeriods) {
+  if (item.reportingPeriod) return item.reportingPeriod;
+  if (item.sourceKind === 'reported_pl03' && activeBerthPeriods.length === 1) {
+    return activeBerthPeriods[0];
+  }
+  return 'Chưa xác định';
+}
+
+function renderHistoricalHistorySummary(summary = {}) {
+  const target = $('#historical-history-summary');
+  if (!target) return;
+  const accepted = number(summary.accepted);
+  const review = number(summary.review);
+  const rejected = number(summary.rejected);
+  const parts = [
+    `<span class="history-total-ok"><b>${accepted.toLocaleString('vi-VN')}</b> đạt</span>`,
+    `<span class="history-total-review"><b>${review.toLocaleString('vi-VN')}</b> cần kiểm tra</span>`,
+  ];
+  if (rejected) parts.push(`<span class="history-total-rejected"><b>${rejected.toLocaleString('vi-VN')}</b> bị loại</span>`);
+  target.innerHTML = parts.join('<span class="history-total-separator">·</span>');
 }
 
 function renderHistoricalPagination(container, result, attribute, callback) {
@@ -1821,12 +1892,13 @@ async function loadHistoricalImportHistory(page = state.historicalHistoryPage) {
     const result = await api(`/api/historical-imports?page=${page}&page_size=20`);
     state.historicalHistoryPage = result.page;
     state.historicalHistory = result.items || [];
-    const periodInput = $('#historical-pl03-period');
-    if (periodInput && !periodInput.value) {
-      periodInput.value = state.historicalHistory.find(item => item.sourceKind === 'tos_berth_call' && item.reportingPeriod)?.reportingPeriod || '';
+    const activeBerthPeriods = result.activeBerthPeriods || [];
+    renderHistoricalHistorySummary(result.summary);
+    if ($('#historical-pl03-month') && !pl03PeriodValue()) {
+      setPl03Period(state.historicalHistory.find(item => item.sourceKind === 'tos_berth_call' && item.reportingPeriod)?.reportingPeriod || '');
     }
     container.innerHTML = state.historicalHistory.length
-      ? `<table class="data-table responsive-table"><thead><tr><th>Mã</th><th>Nguồn</th><th>Kỳ</th><th>Kết quả</th><th>Revision</th><th>Trạng thái</th><th></th></tr></thead><tbody>${state.historicalHistory.map(item => `<tr><td data-label="Mã">#${item.id}<br><small>${fmtDate(item.createdAt)}</small></td><td data-label="Nguồn"><strong>${esc(HISTORICAL_SOURCE_LABELS[item.sourceKind] || item.sourceKind)}</strong><br><small title="${esc(item.sourceFilename)}">${esc(item.sourceFilename)}</small></td><td data-label="Kỳ">${esc(item.reportingPeriod || 'Chưa xác định')}</td><td data-label="Kết quả"><span class="up">${number(item.accepted).toLocaleString('vi-VN')} hợp lệ</span> · <span class="${item.review ? 'draft' : ''}">${number(item.review).toLocaleString('vi-VN')} kiểm tra</span> · ${number(item.rejected).toLocaleString('vi-VN')} từ chối</td><td data-label="Revision">${item.revisionNo}${item.supersededByImportId ? `<br><small>→ #${item.supersededByImportId}</small>` : ''}</td><td data-label="Trạng thái" class="historical-status"><span class="table-badge ${historicalStatusTone(item.status)}">${esc(HISTORICAL_STATUS_LABELS[item.status] || item.status)}</span></td><td data-label="Thao tác" class="historical-history-action"><button type="button" class="outline-button" data-open-historical-import="${item.id}">${item.status === 'PREVIEWED' ? 'Tiếp tục' : 'Xem'}</button></td></tr>`).join('')}</tbody></table>`
+      ? `<table class="data-table responsive-table"><thead><tr><th>Mã</th><th>Nguồn</th><th>Kỳ</th><th>Kết quả</th><th>Revision</th><th>Trạng thái</th><th></th></tr></thead><tbody>${state.historicalHistory.map(item => `<tr><td data-label="Mã">#${item.id}<br><small>${fmtDate(item.createdAt)}</small></td><td data-label="Nguồn"><strong>${esc(HISTORICAL_SOURCE_LABELS[item.sourceKind] || item.sourceKind)}</strong><br><small title="${esc(item.sourceFilename)}">${esc(item.sourceFilename)}</small></td><td data-label="Kỳ">${esc(historicalEffectivePeriod(item, activeBerthPeriods))}</td><td data-label="Kết quả">${historicalResultCell(item)}</td><td data-label="Revision">${historicalRevCell(item)}</td><td data-label="Trạng thái" class="historical-status"><span class="table-badge ${historicalStatusTone(item.status)}">${esc(HISTORICAL_STATUS_LABELS[item.status] || item.status)}</span></td><td data-label="Thao tác" class="historical-history-action"><button type="button" class="outline-button" data-open-historical-import="${item.id}">${item.status === 'PREVIEWED' ? 'Tiếp tục' : 'Xem'}</button></td></tr>`).join('')}</tbody></table>`
       : empty('Chưa có dữ liệu lịch sử', 'Chọn một file TOS hoặc PL.03 cũ để tạo preview đầu tiên.');
     $$('[data-open-historical-import]', container).forEach(button => button.onclick = () => openHistoricalImport(Number(button.dataset.openHistoricalImport)));
     renderHistoricalPagination($('#historical-history-pagination'), result, 'historical-history-page', loadHistoricalImportHistory);
@@ -1931,18 +2003,19 @@ function renderAnalyticsCoverage(data) {
   });
   const coveragePanel = $('#analytics-coverage');
   coveragePanel.hidden = data.source === 'live' && !internal;
-  $('#analytics-source-badge').textContent = (ANALYTICS_SOURCE_LABELS[data.source] || data.source).split(' · ')[0];
-  $('#analytics-source-badge').className = `table-badge ${coverage.status === 'BLOCKED' ? 'draft' : 'submitted'}`;
   $('#analytics-coverage-status').textContent = ANALYTICS_COVERAGE_LABELS[coverage.status] || coverage.status;
   $('#analytics-coverage-status').className = `table-badge ${coverage.status === 'COMPLETE' ? 'submitted' : 'draft'}`;
-  $('#analytics-coverage-title').textContent = `Độ phủ · ${ANALYTICS_SOURCE_LABELS[data.source] || data.source}`;
-  const baseMessage = data.source === 'live'
-    ? 'Chỉ tính phiếu đã duyệt trong đơn vị báo cáo đang chọn.'
-    : data.source === 'historical'
-      ? 'Tính từ TOS đã xác nhận; thời gian theo ATB/ATD, không dùng ETA cũ trong PL.03.'
-      : 'Chỉ cộng khi từng tháng không chồng lấn giữa LIVE và LỊCH SỬ.';
-  $('#analytics-coverage-message').textContent = [baseMessage, ...(coverage.warnings || [])].join(' ');
-  $('#analytics-coverage-periods').innerHTML = (coverage.periods || []).map(item => `<article class="coverage-period ${item.overlap ? 'overlap' : ''}"><strong>${esc(item.month)}</strong><span>LIVE: ${number(item.liveApproved).toLocaleString('vi-VN')}</span><span>TOS: ${number(item.historicalCalls).toLocaleString('vi-VN')} lượt</span><span>Chi tiết: ${number(item.historicalCargoRows).toLocaleString('vi-VN')} dòng</span>${item.overlap ? '<b>CẦN ĐỐI SOÁT</b>' : ''}</article>`).join('');
+  $('#analytics-coverage-title').textContent = (ANALYTICS_SOURCE_LABELS[data.source] || data.source).split(' · ')[0];
+  coveragePanel.title = (coverage.warnings || []).join(' ');
+  $('#analytics-coverage-periods').innerHTML = (coverage.periods || [])
+    .filter(item => item.overlap || number(item.liveApproved) || number(item.historicalCalls) || number(item.historicalCargoRows))
+    .map(item => {
+      const facts = [];
+      if (number(item.liveApproved)) facts.push(`LIVE ${number(item.liveApproved).toLocaleString('vi-VN')}`);
+      if (number(item.historicalCalls)) facts.push(`TOS ${number(item.historicalCalls).toLocaleString('vi-VN')} lượt`);
+      if (number(item.historicalCargoRows)) facts.push(`${number(item.historicalCargoRows).toLocaleString('vi-VN')} dòng`);
+      return `<span class="coverage-period ${item.overlap ? 'overlap' : ''}"><strong>${esc(item.month)}</strong><span>${facts.join(' · ')}</span>${item.overlap ? '<b>ĐỐI SOÁT</b>' : ''}</span>`;
+    }).join('');
 }
 
 async function loadReportAnalytics(period = 'month', source = state.analyticsSource) {

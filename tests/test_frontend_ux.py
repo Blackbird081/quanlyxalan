@@ -141,6 +141,9 @@ def test_historical_import_is_visually_and_semantically_separate_from_live_impor
     assert "/api/historical-imports/reconcile" in app_js
     assert "Xác nhận Berth & ghép Detail" in app_js
     assert "Xuất PL.03 tổng hợp" in app_js
+    assert "ATB/ATD, TEU và tấn lấy từ Berth/Detail" not in app_js
+    assert "function historicalEffectivePeriod(" in app_js
+    assert "function renderHistoricalHistorySummary(" in app_js
     assert "Lý do / xử lý" in app_js
     assert "status=${status}" in app_js
     assert "function loadHistoricalImportHistory(" in app_js
@@ -163,6 +166,9 @@ def test_report_dashboard_makes_source_coverage_and_overlap_explicit():
     assert "data.combinedAllowed === false" in app_js
     assert "Chưa đủ độ phủ để tính" in app_js
     assert ".coverage-period.overlap" in styles_css
+    assert "Chọn rõ nguồn trước khi đọc hoặc xuất tổng" not in index_html
+    assert "Thống kê luôn ghi rõ nguồn" not in index_html
+    assert "Tính từ TOS đã xác nhận" not in app_js
 
 
 def test_wizard_step_order_customer_friendly():

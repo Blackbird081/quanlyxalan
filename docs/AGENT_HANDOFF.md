@@ -1834,3 +1834,15 @@ unload E 682/1,189/2,415.78 t; unload F 81/142/2,143.28 t.
   Berth calls. Compilation and `git diff --check` pass; full regression is 173
   passed with one retained openpyxl warning. Raw workbooks, runtime databases
   and backups remain outside Git; nothing is pushed.
+
+### H4F UI consolidation
+
+- Historical import controls now share one typography/alignment scale. Legacy
+  PL.03 displays the single active Berth period as its effective reporting
+  period without changing source provenance; history totals come from all
+  active receipts rather than the current page only.
+- Reporting UI was reduced to operational labels, selectors, compact coverage,
+  KPI and charts. Persistent instructional copy moved out of the working view;
+  only action-blocking states remain visible.
+- Frontend cache version is `1.6.3`. Full regression: 173 passed with one
+  retained openpyxl warning. Raw TOS workbooks remain ignored and outside Git.

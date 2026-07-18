@@ -441,7 +441,27 @@ def list_historical_imports(
     query = db.query(HistoricalReportImport).filter_by(reporting_unit_id=scope.reporting_unit_id)
     total = query.count()
     items = query.order_by(HistoricalReportImport.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
-    return {"items": [_import_json(item) for item in items], "page": page, "pageSize": page_size, "total": total}
+    current = query.filter(HistoricalReportImport.status.in_(("PREVIEWED", "COMMITTED", "REVIEW")))
+    summary = current.with_entities(
+        func.coalesce(func.sum(HistoricalReportImport.accepted_count), 0),
+        func.coalesce(func.sum(HistoricalReportImport.review_count), 0),
+        func.coalesce(func.sum(HistoricalReportImport.rejected_count), 0),
+    ).one()
+    berth_periods = sorted({period for period, in current.with_entities(
+        HistoricalReportImport.reporting_period,
+    ).filter(
+        HistoricalReportImport.source_kind == "tos_berth_call",
+        HistoricalReportImport.reporting_period.isnot(None),
+    ).all() if period})
+    return {
+        "items": [_import_json(item) for item in items],
+        "page": page, "pageSize": page_size, "total": total,
+        "summary": {
+            "accepted": int(summary[0]), "review": int(summary[1]),
+            "rejected": int(summary[2]),
+        },
+        "activeBerthPeriods": berth_periods,
+    }
 
 
 @router.post("/reconcile")

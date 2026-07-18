@@ -278,8 +278,8 @@ def test_static_frontend(client):
     assert 'id="certificate-reminder"' in res.text
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
-    assert '/styles.css?v=1.6.0' in res.text
-    assert '/app.js?v=1.6.0' in res.text
+    assert '/styles.css?v=1.6.3' in res.text
+    assert '/app.js?v=1.6.3' in res.text
     assert 'id="analytics-source-controls"' in res.text
     assert 'data-source="historical"' in res.text
     assert 'id="analytics-coverage"' in res.text
@@ -2367,6 +2367,12 @@ def test_historical_batch_order_rechecks_pending_cargo_after_berth_confirmation(
     )
     assert confirmed_cargo.status_code == 200
     assert confirmed_cargo.json()["status"] == "COMMITTED"
+
+    history = client.get("/api/historical-imports?page=1&page_size=20", headers=auth_headers)
+    assert history.status_code == 200
+    assert history.json()["summary"]["accepted"] >= 2
+    assert set(history.json()["summary"]) == {"accepted", "review", "rejected"}
+    assert "2088-07" in history.json()["activeBerthPeriods"]
 
     db = SessionLocal()
     try:
