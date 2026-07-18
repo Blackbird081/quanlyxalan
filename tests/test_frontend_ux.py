@@ -126,10 +126,18 @@ def test_historical_import_is_visually_and_semantically_separate_from_live_impor
     assert 'role="tabpanel" aria-labelledby="historical-import-tab"' in index_html
     assert "Không sửa phiếu khai báo gốc" in index_html
     assert "không dựa vào tên file" in index_html
+    assert 'id="import-historical" accept=".xlsx" multiple' in index_html
+    assert 'id="historical-batch"' in index_html
+    assert 'data-historical-row-filter="review"' in index_html
+    assert 'id="historical-review-guide"' in index_html
     assert "Giữ bản đang dùng" in index_html
     assert "Dùng file mới · tạo revision" in app_js
     assert "function setImportMode(" in app_js
     assert "function previewHistoricalImport(" in app_js
+    assert "function renderHistoricalBatch(" in app_js
+    assert "function historicalWarnings(" in app_js
+    assert "Lý do / xử lý" in app_js
+    assert "status=${status}" in app_js
     assert "function loadHistoricalImportHistory(" in app_js
     assert ".historical-import-steps" in styles_css
     assert "@media (max-width: 760px)" in styles_css

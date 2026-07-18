@@ -287,7 +287,7 @@ def _reconcile_active_cargo_links(db: Session, unit_id: int, actor_user_id: int)
         db.query(HistoricalReportImport).filter(
             HistoricalReportImport.reporting_unit_id == unit_id,
             HistoricalReportImport.source_kind == "tos_cargo_detail",
-            HistoricalReportImport.status.in_(("COMMITTED", "REVIEW")),
+            HistoricalReportImport.status.in_(("PREVIEWED", "COMMITTED", "REVIEW")),
         ).all()
     )
     for cargo_import in cargo_imports:
@@ -439,6 +439,9 @@ def historical_import_detail(
 @router.get("/{import_id}/rows")
 def historical_import_rows(
     import_id: int, page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    status_filter: Literal["VALID", "REVIEW", "REJECTED"] | None = Query(
+        default=None, alias="status"
+    ),
     db: Session = Depends(get_db), scope: Scope = Depends(require_port_scope),
 ):
     _authorize(db, scope)
@@ -448,6 +451,8 @@ def historical_import_rows(
     model = {"tos_berth_call": HistoricalPortCall, "tos_cargo_detail": HistoricalCargoRow,
              "reported_pl03": HistoricalReportRow}[item.source_kind]
     query = db.query(model).filter_by(import_id=item.id, reporting_unit_id=scope.reporting_unit_id)
+    if status_filter:
+        query = query.filter(model.validation_status == status_filter)
     total = query.count()
     rows = query.order_by(model.source_row).offset((page - 1) * page_size).limit(page_size).all()
     if model is HistoricalPortCall:
@@ -456,6 +461,7 @@ def historical_import_rows(
                     "berth": row.source_berth_raw, "atb": row.actual_berthing_at_raw,
                     "atd": row.actual_departure_at_raw, "reportingMonth": row.reporting_month,
                     "validationStatus": row.validation_status, "ambiguityStatus": row.ambiguity_status,
+                    "warnings": json.loads(row.provenance_json or "{}").get("warnings", []),
                     "provenance": json.loads(row.provenance_json)} for row in rows]
     elif model is HistoricalCargoRow:
         payload = [{"id": row.id, "sourceRow": row.source_row, "sourceCallKey": row.source_call_key_raw,
@@ -464,13 +470,15 @@ def historical_import_rows(
                     "method": row.movement_method_raw, "direction": row.derived_direction,
                     "weightTonnes": row.weight_tonnes, "weightState": row.weight_state,
                     "matchStatus": row.match_status, "validationStatus": row.validation_status,
+                    "warnings": json.loads(row.provenance_json or "{}").get("warnings", []),
                     "provenance": json.loads(row.provenance_json)} for row in rows]
     else:
         payload = [{"id": row.id, "sourceRow": row.source_row, "appendixRowNo": row.appendix_row_no,
                     "dimensions": json.loads(row.mapped_dimensions_json),
                     "validationStatus": row.validation_status, "warnings": json.loads(row.warning_json),
                     "provenance": json.loads(row.provenance_json)} for row in rows]
-    return {"items": payload, "page": page, "pageSize": page_size, "total": total}
+    return {"items": payload, "page": page, "pageSize": page_size, "total": total,
+            "status": status_filter}
 
 
 @router.get("/{import_id}/vessel-links")

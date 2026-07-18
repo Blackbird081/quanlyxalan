@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=1.4.3">
+  <link rel="stylesheet" href="/styles.css?v=1.5.0">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Bỏ qua điều hướng, đến nội dung chính</a>
@@ -124,21 +124,24 @@
           </section>
 
           <section id="historical-import-panel" role="tabpanel" aria-labelledby="historical-import-tab" hidden>
-            <div class="import-boundary-note historical"><strong>Báo cáo lịch sử</strong><span>Tạo nguồn dữ liệu lịch sử riêng theo Cảng. Không sửa phiếu khai báo gốc, hồ sơ phương tiện, thuyền viên hoặc dữ liệu vận hành hiện tại.</span></div>
+            <div class="import-boundary-note historical"><strong>Báo cáo lịch sử</strong><span>Không sửa phiếu khai báo gốc.</span></div>
             <ol class="historical-import-steps" aria-label="Quy trình import lịch sử">
               <li class="active"><span>1</span><div><strong>Chọn file</strong><small>Berth, chi tiết xếp dỡ hoặc PL.03 cũ</small></div></li>
-              <li><span>2</span><div><strong>Kiểm tra</strong><small>Loại nguồn, kỳ ATB và từng dòng</small></div></li>
+              <li><span>2</span><div><strong>Xử lý cảnh báo</strong><small>Xem lý do và thao tác theo từng dòng</small></div></li>
               <li><span>3</span><div><strong>Xử lý trùng</strong><small>Giữ bản đang dùng hoặc tạo revision</small></div></li>
               <li><span>4</span><div><strong>Xác nhận</strong><small>Chỉ dòng hợp lệ được kích hoạt</small></div></li>
             </ol>
             <section class="panel historical-upload-panel">
-              <div><p class="eyebrow">NGUỒN LỊCH SỬ</p><h2>Chọn một file Excel</h2><p>Hệ thống nhận diện theo cấu trúc sheet và tên cột, không dựa vào tên file. Mỗi lần chỉ xử lý dữ liệu của Cảng đang chọn.</p><div class="source-kind-list"><span>TOS Berth · ATB/ATD</span><span>Chi tiết container · TEU/tấn</span><span>PL.03 cũ · dữ liệu đã báo cáo</span></div></div>
-              <label class="primary-button historical-file-button">Chọn file lịch sử<input type="file" id="import-historical" accept=".xlsx"></label>
+              <div><p class="eyebrow">NGUỒN</p><h2>Chọn các file Excel</h2><p>Chọn Berth, chi tiết container và PL.03 cùng một lần. Hệ thống nhận diện theo cấu trúc sheet và tên cột, không dựa vào tên file; mỗi file vẫn có một phiếu import riêng để lưu dấu vết.</p><div class="source-kind-list"><span>TOS Berth · ATB/ATD</span><span>Chi tiết container · TEU/tấn</span><span>PL.03 cũ · dữ liệu đã báo cáo</span></div></div>
+              <label class="primary-button historical-file-button">Chọn các file<input type="file" id="import-historical" accept=".xlsx" multiple></label>
             </section>
+            <section id="historical-batch" class="panel historical-batch" aria-live="polite" hidden><div class="panel-header"><div><p class="eyebrow">ĐỢT UPLOAD</p><h2 id="historical-batch-title">Các file vừa chọn</h2></div></div><div id="historical-batch-list"></div></section>
             <section id="historical-preview" class="panel historical-preview" aria-live="polite" hidden>
               <div class="panel-header historical-preview-head"><div><p class="eyebrow">PREVIEW CÓ DẤU VẾT</p><h2 id="historical-preview-title">Kết quả nhận diện</h2><p id="historical-preview-subtitle" class="muted"></p></div><button id="close-historical-preview" class="ghost-button" type="button">Đóng preview</button></div>
               <div id="historical-preview-summary" class="historical-summary-grid"></div>
               <div id="historical-conflict-notice" class="historical-conflict-notice" hidden></div>
+              <div id="historical-review-guide" class="historical-review-guide" role="status" hidden></div>
+              <div id="historical-row-filters" class="historical-row-filters" role="group" aria-label="Lọc dòng preview"><button type="button" data-historical-row-filter="all" class="active">Tất cả</button><button type="button" data-historical-row-filter="review">Cần xử lý</button><button type="button" data-historical-row-filter="rejected">Bị loại</button></div>
               <div id="historical-preview-table" class="table-wrap"></div>
               <div id="historical-preview-pagination" class="pagination" aria-label="Phân trang preview lịch sử"></div>
               <section id="historical-link-review" class="historical-link-review" hidden><div class="panel-header"><div><p class="eyebrow">LIÊN KẾT CẦN KIỂM TRA</p><h3>Tên phương tiện trong TOS</h3><p>Chỉ xác nhận khi đúng phương tiện trong Sổ theo dõi của Cảng.</p></div></div><div id="historical-link-list"></div></section>
@@ -211,6 +214,6 @@
   </dialog>
 
   <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script src="/app.js?v=1.4.3" defer></script>
+  <script src="/app.js?v=1.5.0" defer></script>
 </body>
 </html>

@@ -4,6 +4,7 @@ const state = {
   wizardStep: 1, wizardMaxStep: 1, declarationVesselMode: 'existing', declarationNewCrew: [],
   pendingImport: null, importResultTarget: 'main',
   importMode: 'operational', historicalImport: null, historicalPreviewPage: 1,
+  historicalRowFilter: 'all', historicalBatch: [],
   historicalHistoryPage: 1, historicalHistory: [], historicalRegisterItems: [],
   portRegisterItems: [], portRegisterStats: {}, portRegisterPage: 1, portRegisterPageSize: 15,
   portRegisterSelected: new Set(), vesselSaveContext: 'customer-record',
@@ -1438,6 +1439,41 @@ const HISTORICAL_STATUS_LABELS = {
   PREVIEWED: 'Chờ xác nhận', COMMITTED: 'Đang dùng', REVIEW: 'Chờ kiểm tra',
   REJECTED: 'Đã hủy / giữ bản cũ', SUPERSEDED: 'Đã được thay bằng revision mới',
 };
+const HISTORICAL_WARNING_LABELS = {
+  INVALID_CALL_IDENTITY: 'Thiếu hoặc sai tên phương tiện, năm hay số chuyến.',
+  ATB_BLANK: 'Thiếu ATB. Bổ sung trong file Berth rồi upload lại.',
+  ATB_INVALID: 'ATB không đúng định dạng ngày giờ. Sửa file Berth rồi upload lại.',
+  ATD_BLANK: 'Thiếu ATD. Bổ sung trong file Berth rồi upload lại.',
+  ATD_INVALID: 'ATD không đúng định dạng ngày giờ. Sửa file Berth rồi upload lại.',
+  DUPLICATE_CALL_KEY: 'Trùng tên phương tiện, năm và chuyến trong file Berth.',
+  UNSUPPORTED_CONTAINER_SIZE: 'Kích cỡ container không phải 20/40 feet.',
+  UNKNOWN_FULL_EMPTY: 'F/E phải là F hoặc E.',
+  UNKNOWN_TRADE_SCOPE: 'Không nhận diện được Hàng nội/Hàng ngoại.',
+  UNKNOWN_MOVEMENT_METHOD: 'Không nhận diện được phương án xếp dỡ.',
+  WEIGHT_BLANK: 'Thiếu trọng lượng container.',
+  WEIGHT_INVALID: 'Trọng lượng không phải số.',
+  UNMATCHED_VESSEL: 'Chưa có phương tiện tương ứng trong Sổ theo dõi. Xử lý tại mục Liên kết phương tiện bên dưới.',
+  AMBIGUOUS_VESSEL: 'Có nhiều phương tiện có thể trùng. Chọn đúng phương tiện tại mục Liên kết bên dưới.',
+  REVIEW_NORMALIZED_VESSEL_LINK: 'Tên chỉ khớp sau chuẩn hóa. Xác nhận tại mục Liên kết phương tiện bên dưới.',
+};
+
+function historicalWarnings(row) {
+  const codes = [...(row.warnings || row.provenance?.warnings || [])];
+  if (row.matchStatus === 'UNMATCHED' && !codes.includes('UNMATCHED_CALL')) codes.push('UNMATCHED_CALL');
+  if (row.matchStatus === 'AMBIGUOUS' && !codes.includes('AMBIGUOUS_CALL')) codes.push('AMBIGUOUS_CALL');
+  return [...new Set(codes)].map(code => {
+    if (code === 'UNMATCHED_CALL') return 'Chưa ghép được lượt Berth. Xác nhận file Berth trong cùng đợt rồi mở lại file này.';
+    if (code === 'AMBIGUOUS_CALL') return 'Có nhiều lượt Berth trùng khóa chuyến; cần kiểm tra file Berth.';
+    const metric = /^INVALID_METRIC_([A-Z]+)$/.exec(code);
+    if (metric) return `Cột ${metric[1]} không phải số. Sửa ô tương ứng trong file PL.03 rồi upload lại.`;
+    return HISTORICAL_WARNING_LABELS[code] || code.replaceAll('_', ' ').toLowerCase();
+  });
+}
+
+function historicalWarningCell(row) {
+  const warnings = historicalWarnings(row);
+  return warnings.length ? `<ul class="historical-warning-list">${warnings.map(item => `<li>${esc(item)}</li>`).join('')}</ul>` : '<span class="muted">—</span>';
+}
 
 function setImportMode(mode) {
   state.importMode = mode === 'historical' ? 'historical' : 'operational';
@@ -1481,38 +1517,81 @@ function updateHistoricalSteps(item) {
 }
 
 async function previewHistoricalImport(input) {
-  const file = input.files[0];
-  if (!file) return;
+  const files = [...input.files];
+  if (!files.length) return;
   const panel = $('#historical-preview');
-  panel.hidden = false;
-  $('#historical-preview-title').textContent = 'Đang đọc và nhận diện file…';
-  $('#historical-preview-subtitle').textContent = 'Không đóng trang trong khi hệ thống kiểm tra cấu trúc.';
-  $('#historical-preview-summary').innerHTML = '';
-  $('#historical-preview-table').innerHTML = '<div class="empty-state">Đang chuẩn bị preview…</div>';
-  panel.scrollIntoView({behavior: 'smooth', block: 'start'});
-  try {
-    const result = await api('/api/historical-imports/preview', {
-      method: 'POST',
-      headers: {...IMPORT_FILE_HEADERS, 'X-Source-Filename': encodeURIComponent(file.name)},
-      body: file,
-    });
-    state.historicalImport = result;
-    state.historicalPreviewPage = 1;
-    await renderHistoricalImportWorkspace();
-    await loadHistoricalImportHistory();
-    toast(result.idempotent ? 'File này đã có trong lịch sử import; không tạo bản trùng.' : 'Đã tạo preview. Chưa có dữ liệu nào được kích hoạt.');
-  } catch (error) {
-    panel.hidden = true;
-    toast(error.message, true);
-  } finally {
-    input.value = '';
+  panel.hidden = true;
+  const batchPanel = $('#historical-batch');
+  batchPanel.hidden = false;
+  state.historicalBatch = files.map(file => ({filename: file.name, loading: true}));
+  renderHistoricalBatch();
+  batchPanel.scrollIntoView({behavior: 'smooth', block: 'start'});
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    try {
+      const result = await api('/api/historical-imports/preview', {
+        method: 'POST',
+        headers: {...IMPORT_FILE_HEADERS, 'X-Source-Filename': encodeURIComponent(file.name)},
+        body: file,
+      });
+      state.historicalBatch[index] = {filename: file.name, result};
+    } catch (error) {
+      state.historicalBatch[index] = {filename: file.name, error: error.message};
+    }
+    renderHistoricalBatch();
   }
+  input.value = '';
+  const successful = state.historicalBatch.filter(item => item.result);
+  if (!successful.length) {
+    toast('Không file nào tạo được preview.', true);
+    return;
+  }
+  const first = successful.sort((a, b) => {
+    const priority = {tos_berth_call: 0, tos_cargo_detail: 1, reported_pl03: 2};
+    return (priority[a.result.sourceKind] ?? 9) - (priority[b.result.sourceKind] ?? 9);
+  })[0].result;
+  state.historicalImport = first;
+  state.historicalPreviewPage = 1;
+  state.historicalRowFilter = first.review ? 'review' : (first.rejected ? 'rejected' : 'all');
+  await renderHistoricalImportWorkspace();
+  await loadHistoricalImportHistory();
+  toast(`Đã tạo preview cho ${successful.length}/${files.length} file. Chưa có dữ liệu nào được kích hoạt.`);
+}
+
+function renderHistoricalBatch() {
+  const panel = $('#historical-batch');
+  panel.hidden = !state.historicalBatch.length;
+  if (panel.hidden) return;
+  const complete = state.historicalBatch.filter(item => !item.loading).length;
+  $('#historical-batch-title').textContent = complete < state.historicalBatch.length
+    ? `Đang đọc ${complete}/${state.historicalBatch.length} file`
+    : `${state.historicalBatch.length} file trong đợt upload`;
+  $('#historical-batch-list').innerHTML = state.historicalBatch.map(item => {
+    if (item.loading) return `<article class="historical-batch-row"><div><strong>${esc(item.filename)}</strong><small>Đang nhận diện cấu trúc…</small></div><span class="table-badge draft">Đang đọc</span></article>`;
+    if (item.error) return `<article class="historical-batch-row error"><div><strong>${esc(item.filename)}</strong><small>${esc(item.error)}</small></div><span class="table-badge danger">Không đọc được</span></article>`;
+    const result = item.result;
+    return `<article class="historical-batch-row"><div><strong>${esc(item.filename)}</strong><small>${esc(HISTORICAL_SOURCE_LABELS[result.sourceKind] || result.sourceKind)} · ${number(result.accepted)} hợp lệ · ${number(result.review)} cần xử lý · ${number(result.rejected)} bị loại</small></div><button type="button" class="outline-button" data-open-batch-import="${result.id}">Mở kiểm tra</button></article>`;
+  }).join('');
+  $$('[data-open-batch-import]', panel).forEach(button => button.onclick = () => openHistoricalImport(Number(button.dataset.openBatchImport)));
+}
+
+async function refreshHistoricalBatch() {
+  if (!state.historicalBatch.length) return;
+  await Promise.all(state.historicalBatch.map(async entry => {
+    if (!entry.result) return;
+    try { entry.result = await api(`/api/historical-imports/${entry.result.id}`); }
+    catch (_) { /* Keep the last visible receipt if one refresh fails. */ }
+  }));
+  renderHistoricalBatch();
 }
 
 async function openHistoricalImport(importId) {
   try {
     state.historicalImport = await api(`/api/historical-imports/${importId}`);
     state.historicalPreviewPage = 1;
+    state.historicalRowFilter = state.historicalImport.review ? 'review' : (state.historicalImport.rejected ? 'rejected' : 'all');
+    const batchEntry = state.historicalBatch.find(entry => entry.result?.id === importId);
+    if (batchEntry) { batchEntry.result = state.historicalImport; renderHistoricalBatch(); }
     await renderHistoricalImportWorkspace();
     $('#historical-preview').scrollIntoView({behavior: 'smooth', block: 'start'});
   } catch (error) { toast(error.message, true); }
@@ -1528,18 +1607,39 @@ async function renderHistoricalImportWorkspace() {
     <article class="historical-summary-card"><small>Kỳ báo cáo</small><strong>${esc(item.reportingPeriod || 'Chưa xác định')}</strong></article>
     <article class="historical-summary-card"><small>Trạng thái</small><strong>${esc(HISTORICAL_STATUS_LABELS[item.status] || item.status)}</strong></article>
     <article class="historical-summary-card valid"><small>Hợp lệ</small><strong>${number(item.accepted).toLocaleString('vi-VN')}</strong></article>
-    <article class="historical-summary-card review"><small>Chờ kiểm tra</small><strong>${number(item.review).toLocaleString('vi-VN')}</strong></article>
-    <article class="historical-summary-card rejected"><small>Từ chối</small><strong>${number(item.rejected).toLocaleString('vi-VN')}</strong></article>`;
+    <article class="historical-summary-card review"><small>Cần xử lý</small><strong>${number(item.review).toLocaleString('vi-VN')}</strong></article>
+    <article class="historical-summary-card rejected"><small>Bị loại</small><strong>${number(item.rejected).toLocaleString('vi-VN')}</strong></article>`;
   const conflicts = item.conflictingImportIds || [];
   const conflictNotice = $('#historical-conflict-notice');
   conflictNotice.hidden = !conflicts.length;
   conflictNotice.innerHTML = conflicts.length
     ? `<strong>Phát hiện dữ liệu cùng nguồn và cùng kỳ đang được sử dụng</strong>File hiện tại chưa thay bản cũ. Chọn “Giữ bản đang dùng” hoặc ghi lý do và chọn “Dùng file mới · tạo revision”. Lượt liên quan: ${conflicts.map(id => `#${esc(id)}`).join(', ')}.` : '';
+  const reviewGuide = $('#historical-review-guide');
+  reviewGuide.hidden = !item.review && !item.rejected;
+  if (!reviewGuide.hidden) {
+    const location = item.sourceKind === 'tos_berth_call'
+      ? 'Lỗi liên kết phương tiện xử lý tại mục “Liên kết phương tiện” ngay dưới bảng.'
+      : item.sourceKind === 'tos_cargo_detail'
+        ? 'Nếu chưa ghép lượt, hãy xác nhận file Berth trong đợt upload; hệ thống sẽ tự kiểm tra lại file này.'
+        : 'Lỗi giá trị phải sửa đúng ô trong file PL.03 nguồn rồi upload lại.';
+    reviewGuide.innerHTML = `<strong>Kiểm tra ở đâu?</strong><span>Màn hình đang ưu tiên các dòng cần xử lý. Cột “Lý do / xử lý” ghi rõ lỗi và cách xử lý. ${esc(location)}</span>`;
+  }
   const isPreview = item.status === 'PREVIEWED';
   $('.historical-confirm-area').hidden = !isPreview;
   $('#keep-historical-existing').hidden = !conflicts.length;
   $('#historical-revision-reason').hidden = !conflicts.length;
   $('#confirm-historical-import').textContent = conflicts.length ? 'Dùng file mới · tạo revision' : 'Xác nhận import';
+  const filters = {all: `Tất cả (${number(item.accepted) + number(item.review) + number(item.rejected)})`, review: `Cần xử lý (${number(item.review)})`, rejected: `Bị loại (${number(item.rejected)})`};
+  $$('[data-historical-row-filter]').forEach(button => {
+    button.textContent = filters[button.dataset.historicalRowFilter];
+    button.classList.toggle('active', button.dataset.historicalRowFilter === state.historicalRowFilter);
+    button.disabled = button.dataset.historicalRowFilter === 'review' ? !item.review : button.dataset.historicalRowFilter === 'rejected' ? !item.rejected : false;
+    button.onclick = () => {
+      state.historicalRowFilter = button.dataset.historicalRowFilter;
+      state.historicalPreviewPage = 1;
+      renderHistoricalImportWorkspace();
+    };
+  });
   updateHistoricalSteps(item);
   await Promise.all([loadHistoricalPreviewRows(state.historicalPreviewPage), loadHistoricalVesselLinks()]);
 }
@@ -1548,20 +1648,21 @@ async function loadHistoricalPreviewRows(page = 1) {
   const item = state.historicalImport;
   if (!item) return;
   try {
-    const result = await api(`/api/historical-imports/${item.id}/rows?page=${page}&page_size=50`);
+    const status = state.historicalRowFilter === 'review' ? 'REVIEW' : state.historicalRowFilter === 'rejected' ? 'REJECTED' : '';
+    const result = await api(`/api/historical-imports/${item.id}/rows?page=${page}&page_size=50${status ? `&status=${status}` : ''}`);
     state.historicalPreviewPage = result.page;
     const rows = result.items || [];
     let headers;
     let body;
     if (item.sourceKind === 'tos_berth_call') {
-      headers = '<th>Dòng</th><th>Phương tiện / chuyến</th><th>Bến đến & rời</th><th>ATB</th><th>ATD</th><th>Kiểm tra</th>';
-      body = rows.map(row => `<tr><td data-label="Dòng">${row.sourceRow}</td><td data-label="Phương tiện / chuyến"><strong>${esc(row.vesselName)}</strong><br><small>${esc(row.year)} · chuyến ${esc(row.voyage)}</small></td><td data-label="Bến đến & rời">${esc(row.berth || '—')}</td><td data-label="ATB">${esc(row.atb || '—')}</td><td data-label="ATD">${esc(row.atd || '—')}</td><td data-label="Kiểm tra"><span class="table-badge ${row.validationStatus === 'VALID' ? 'submitted' : 'draft'}">${row.validationStatus === 'VALID' ? 'Hợp lệ' : 'Cần kiểm tra'}</span></td></tr>`).join('');
+      headers = '<th>Dòng</th><th>Phương tiện / chuyến</th><th>Bến đến & rời</th><th>ATB</th><th>ATD</th><th>Kết quả</th><th>Lý do / xử lý</th>';
+      body = rows.map(row => `<tr><td data-label="Dòng">${row.sourceRow}</td><td data-label="Phương tiện / chuyến"><strong>${esc(row.vesselName)}</strong><br><small>${esc(row.year)} · chuyến ${esc(row.voyage)}</small></td><td data-label="Bến đến & rời">${esc(row.berth || '—')}</td><td data-label="ATB">${esc(row.atb || '—')}</td><td data-label="ATD">${esc(row.atd || '—')}</td><td data-label="Kết quả"><span class="table-badge ${row.validationStatus === 'VALID' ? 'submitted' : row.validationStatus === 'REJECTED' ? 'danger' : 'draft'}">${row.validationStatus === 'VALID' ? 'Hợp lệ' : row.validationStatus === 'REJECTED' ? 'Bị loại' : 'Cần xử lý'}</span></td><td data-label="Lý do / xử lý">${historicalWarningCell(row)}</td></tr>`).join('');
     } else if (item.sourceKind === 'tos_cargo_detail') {
-      headers = '<th>Dòng</th><th>Khóa chuyến</th><th>Container</th><th>Luồng hàng</th><th>Trọng lượng</th><th>Ghép lượt</th><th>Kiểm tra</th>';
-      body = rows.map(row => `<tr><td data-label="Dòng">${row.sourceRow}</td><td data-label="Khóa chuyến">${esc(row.sourceCallKey)}</td><td data-label="Container">${esc(row.size)} · ${esc(row.fullEmpty)} · ${row.teuFactor || '—'} TEU</td><td data-label="Luồng hàng">${esc(row.trade || '—')} · ${esc(row.direction || '—')}</td><td data-label="Trọng lượng">${row.weightTonnes == null ? '—' : `${number(row.weightTonnes).toLocaleString('vi-VN')} tấn`}</td><td data-label="Ghép lượt"><span class="table-badge ${row.matchStatus === 'MATCHED' ? 'submitted' : 'draft'}">${row.matchStatus === 'MATCHED' ? 'Đã ghép' : 'Cần kiểm tra'}</span></td><td data-label="Kiểm tra">${row.validationStatus === 'VALID' ? 'Hợp lệ' : 'Cần kiểm tra'}</td></tr>`).join('');
+      headers = '<th>Dòng</th><th>Khóa chuyến</th><th>Container</th><th>Luồng hàng</th><th>Trọng lượng</th><th>Ghép lượt</th><th>Kết quả</th><th>Lý do / xử lý</th>';
+      body = rows.map(row => `<tr><td data-label="Dòng">${row.sourceRow}</td><td data-label="Khóa chuyến">${esc(row.sourceCallKey)}</td><td data-label="Container">${esc(row.size)} · ${esc(row.fullEmpty)} · ${row.teuFactor || '—'} TEU</td><td data-label="Luồng hàng">${esc(row.trade || '—')} · ${esc(row.direction || '—')}</td><td data-label="Trọng lượng">${row.weightTonnes == null ? '—' : `${number(row.weightTonnes).toLocaleString('vi-VN')} tấn`}</td><td data-label="Ghép lượt"><span class="table-badge ${row.matchStatus === 'MATCHED' ? 'submitted' : 'draft'}">${row.matchStatus === 'MATCHED' ? 'Đã ghép' : 'Chưa ghép'}</span></td><td data-label="Kết quả"><span class="table-badge ${row.validationStatus === 'VALID' ? 'submitted' : row.validationStatus === 'REJECTED' ? 'danger' : 'draft'}">${row.validationStatus === 'VALID' ? 'Hợp lệ' : row.validationStatus === 'REJECTED' ? 'Bị loại' : 'Cần xử lý'}</span></td><td data-label="Lý do / xử lý">${historicalWarningCell(row)}</td></tr>`).join('');
     } else {
-      headers = '<th>Dòng</th><th>STT báo cáo</th><th>Phương tiện</th><th>Số đăng ký</th><th>Kiểm tra</th>';
-      body = rows.map(row => `<tr><td data-label="Dòng">${row.sourceRow}</td><td data-label="STT báo cáo">${row.appendixRowNo}</td><td data-label="Phương tiện">${esc(row.dimensions?.vesselNameRaw || '—')}</td><td data-label="Số đăng ký">${esc(row.dimensions?.registrationRaw || '—')}</td><td data-label="Kiểm tra"><span class="table-badge ${row.validationStatus === 'VALID' ? 'submitted' : 'draft'}">${row.validationStatus === 'VALID' ? 'Hợp lệ' : 'Cần kiểm tra'}</span></td></tr>`).join('');
+      headers = '<th>Dòng</th><th>STT báo cáo</th><th>Phương tiện</th><th>Số đăng ký</th><th>Kết quả</th><th>Lý do / xử lý</th>';
+      body = rows.map(row => `<tr><td data-label="Dòng">${row.sourceRow}</td><td data-label="STT báo cáo">${row.appendixRowNo}</td><td data-label="Phương tiện">${esc(row.dimensions?.vesselNameRaw || '—')}</td><td data-label="Số đăng ký">${esc(row.dimensions?.registrationRaw || '—')}</td><td data-label="Kết quả"><span class="table-badge ${row.validationStatus === 'VALID' ? 'submitted' : 'draft'}">${row.validationStatus === 'VALID' ? 'Hợp lệ' : 'Cần xử lý'}</span></td><td data-label="Lý do / xử lý">${historicalWarningCell(row)}</td></tr>`).join('');
     }
     $('#historical-preview-table').innerHTML = rows.length
       ? `<table class="data-table responsive-table historical-preview-table"><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table>`
@@ -1605,6 +1706,9 @@ async function resolveHistoricalVesselLink(linkId, decision, candidateVesselId =
       body: JSON.stringify({decision, candidate_vessel_id: candidateVesselId, reason: decision === 'ACCEPT' ? 'Nhân viên Cảng xác nhận trên preview.' : 'Nhân viên Cảng xác nhận không đúng phương tiện.'}),
     });
     state.historicalImport = await api(`/api/historical-imports/${state.historicalImport.id}`);
+    const batchEntry = state.historicalBatch.find(entry => entry.result?.id === state.historicalImport.id);
+    if (batchEntry) batchEntry.result = state.historicalImport;
+    renderHistoricalBatch();
     await renderHistoricalImportWorkspace();
     await loadHistoricalImportHistory();
     toast(decision === 'ACCEPT' ? 'Đã xác nhận liên kết phương tiện.' : 'Đã từ chối liên kết phương tiện.');
@@ -1630,6 +1734,7 @@ async function confirmHistoricalImport(action = null) {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
     });
     state.historicalImport = await api(`/api/historical-imports/${result.id}`);
+    await refreshHistoricalBatch();
     await renderHistoricalImportWorkspace();
     await loadHistoricalImportHistory();
     toast(result.status === 'REVIEW' ? 'Đã ghi nhận; các dòng cần kiểm tra vẫn chưa được đưa vào báo cáo.' : result.status === 'REJECTED' ? 'Đã giữ bản đang dùng; file preview không được kích hoạt.' : 'Đã kích hoạt dữ liệu lịch sử.');
@@ -1645,6 +1750,7 @@ async function cancelHistoricalImport() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({reason: 'Người dùng hủy sau khi xem preview.'}),
     });
+    await refreshHistoricalBatch();
     state.historicalImport = null;
     $('#historical-preview').hidden = true;
     updateHistoricalSteps(null);

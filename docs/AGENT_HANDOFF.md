@@ -1766,3 +1766,23 @@ unload E 682/1,189/2,415.78 t; unload F 81/142/2,143.28 t.
   and owner UAT are not claimed.
 - Raw workbooks remain untracked and untouched; no database/backup is committed
   and nothing is pushed.
+
+---
+
+## Historical TOS H4C — actionable batch import — 2026-07-18
+
+- **Status**: IMPLEMENTED / VERIFIED locally; owner visual UAT remains open.
+- **Phase/Risk**: BUILD / R2. No deployment or production-readiness claim.
+- The historical picker accepts multiple workbooks in one user action. Each
+  workbook retains a separate checksum-backed import receipt and revision chain.
+- Review/rejected row filters, warning reasons and explicit correction locations
+  replace the former unexplained orange counts. Vessel matches are resolved in
+  the link queue below the table; workbook value errors require source repair
+  and re-upload.
+- Berth confirmation reconciles pending PREVIEWED Detail receipts and refreshes
+  their counts, preventing upload-order-only unmatched warnings.
+- New API behavior: row preview supports `status=VALID|REVIEW|REJECTED` and Berth
+  and Detail rows expose warning codes alongside provenance.
+- Regression: 169 passed with one retained openpyxl warning. Raw workbooks
+  remain untracked; do not include them, databases or backups in Git. Next move
+  is owner visual UAT; commit remains local only.

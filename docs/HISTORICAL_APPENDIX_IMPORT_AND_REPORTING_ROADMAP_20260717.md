@@ -638,3 +638,23 @@ does not block the bounded TOS path. Unsupported labels, foreign cargo, sizes
 and invalid-value paths remain fail-closed until covered by a real sample or
 sanitized golden fixture. This approval does not authorize production rollout,
 external transmission or bypass of REVIEW/FREEZE gates.
+
+### H4C — batch selection and actionable preview — 2026-07-18
+
+Status: IMPLEMENTED / VERIFIED locally; owner visual UAT remains open.
+
+- Historical upload accepts Berth, Detail and PL.03 files in one selection.
+  Files are processed as an ordered batch for usability while retaining one
+  checksum/mapping/revision receipt per workbook for audit and rollback.
+- The preview opens the review subset by default and provides explicit filters
+  for all, review and rejected rows. Every supported row response includes its
+  warning codes; the UI translates them into a visible reason and next action.
+- Berth vessel-link warnings point to the link-review section immediately below
+  the row table. Structural/value errors point back to the exact source type to
+  correct and re-upload; source evidence is never edited inline.
+- Confirming Berth now re-runs the join for active and PREVIEWED Detail imports
+  in the reporting unit. A Detail file selected before Berth no longer leaves
+  all rows as false unmatched warnings; its counts and rows refresh in place.
+- Targeted backend and frontend regression: 15 passed. Full application suite:
+  169 passed with one retained openpyxl warning; raw workbooks remain outside
+  Git.

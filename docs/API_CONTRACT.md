@@ -152,11 +152,18 @@ unit. `CUSTOMER` is denied.
 | POST | `/api/historical-imports/preview` | XLSX body; optional `X-Source-Filename` provenance | detected source, checksum, mapping receipt, counts, conflicts |
 | GET | `/api/historical-imports` | `page`, `page_size` | tenant-scoped import history |
 | GET | `/api/historical-imports/{id}` | — | import detail, conflicts and mapping receipt |
-| GET | `/api/historical-imports/{id}/rows` | `page`, `page_size` | cell-provenance preview rows |
+| GET | `/api/historical-imports/{id}/rows` | `page`, `page_size`, optional `status=VALID|REVIEW|REJECTED` | cell-provenance preview rows with warning codes |
 | GET | `/api/historical-imports/{id}/vessel-links` | optional status, pagination | vessel-link review queue |
 | POST | `/api/historical-imports/{id}/confirm` | optional conflict action/reason | committed, review, rejected or superseded revision state |
 | POST | `/api/historical-imports/{id}/cancel` | reason | cancel a PREVIEWED import without activating facts |
 | POST | `/api/historical-imports/{id}/vessel-links/{link_id}/resolve` | accept/reject candidate | audited link decision |
+
+The browser may select several historical workbooks in one upload action. Each
+workbook still creates or reuses its own checksum-backed import receipt; this is
+not a merged opaque upload. After a Berth import is confirmed, the server
+reconciles both active and still-PREVIEWED cargo-detail imports in the same
+reporting unit, updates their row match/validation states and refreshes their
+counts. The UI can then reopen the cargo receipt without uploading it again.
 
 Detection is based on approved sheet/header/structure signatures, not the file
 name. A repeated checksum is idempotent. Overlap never overwrites silently:

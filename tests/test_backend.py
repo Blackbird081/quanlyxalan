@@ -262,8 +262,8 @@ def test_static_frontend(client):
     assert 'id="certificate-reminder"' in res.text
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
-    assert '/styles.css?v=1.4.3' in res.text
-    assert '/app.js?v=1.4.3' in res.text
+    assert '/styles.css?v=1.5.0' in res.text
+    assert '/app.js?v=1.5.0' in res.text
     assert 'id="analytics-source-controls"' in res.text
     assert 'data-source="historical"' in res.text
     assert 'id="analytics-coverage"' in res.text
@@ -2265,3 +2265,75 @@ def test_historical_tos_preview_cross_import_join_and_revision(
         "X-Reporting-Unit-ID": str(second_unit_id),
     }
     assert client.get("/api/historical-imports", headers=no_membership).status_code == 403
+
+
+def test_historical_batch_order_rechecks_pending_cargo_after_berth_confirmation(
+    client, auth_headers,
+):
+    """Files may be selected together: cargo preview is repaired after Berth activates."""
+    vessel_name = f"BATCH BARGE {uuid.uuid4().hex[:8]}"
+    _seed_historical_registered_vessel(vessel_name)
+    cargo = _historical_fixture(
+        {3: "Kích cỡ", 5: "F/E", 17: "Tên sà lan | Năm | Chuyến", 18: "Trọng lượng",
+         20: "Hàng nội/ ngoại", 23: "Phương án"},
+        [{3: "40HC", 5: "E", 17: f"{vessel_name} | 2088 | 0001", 18: "4.00",
+          20: "Hàng nội", 23: "Hạ bãi"}],
+    )
+    cargo_preview = client.post(
+        "/api/historical-imports/preview", content=cargo,
+        headers={**auth_headers, "X-Source-Filename": "cargo-first.xlsx"},
+    )
+    assert cargo_preview.status_code == 200, cargo_preview.text
+    cargo_id = cargo_preview.json()["id"]
+    assert cargo_preview.json()["review"] == 1
+
+    berth = _historical_fixture(
+        {2: "Năm", 3: "Chuyến", 5: "Tên tàu", 8: "Mã bến", 20: "ATB", 23: "ATD"},
+        [{2: "2088", 3: "0001", 5: vessel_name, 8: "K12",
+          20: "18/07/2088 08:30:00", 23: "18/07/2088 13:00:00"}],
+    )
+    berth_preview = client.post(
+        "/api/historical-imports/preview", content=berth,
+        headers={**auth_headers, "X-Source-Filename": "berth-second.xlsx"},
+    )
+    assert berth_preview.status_code == 200, berth_preview.text
+    berth_id = berth_preview.json()["id"]
+    confirmed_berth = client.post(
+        f"/api/historical-imports/{berth_id}/confirm", json={}, headers=auth_headers,
+    )
+    assert confirmed_berth.status_code == 200
+    assert confirmed_berth.json()["status"] == "COMMITTED"
+
+    refreshed = client.get(f"/api/historical-imports/{cargo_id}", headers=auth_headers)
+    assert refreshed.status_code == 200
+    assert refreshed.json()["status"] == "PREVIEWED"
+    assert refreshed.json()["accepted"] == 1
+    assert refreshed.json()["review"] == 0
+    valid_rows = client.get(
+        f"/api/historical-imports/{cargo_id}/rows?status=VALID", headers=auth_headers,
+    )
+    assert valid_rows.status_code == 200
+    assert valid_rows.json()["status"] == "VALID"
+    assert valid_rows.json()["total"] == 1
+    assert valid_rows.json()["items"][0]["warnings"] == []
+    review_rows = client.get(
+        f"/api/historical-imports/{cargo_id}/rows?status=REVIEW", headers=auth_headers,
+    )
+    assert review_rows.status_code == 200
+    assert review_rows.json()["total"] == 0
+    confirmed_cargo = client.post(
+        f"/api/historical-imports/{cargo_id}/confirm", json={}, headers=auth_headers,
+    )
+    assert confirmed_cargo.status_code == 200
+    assert confirmed_cargo.json()["status"] == "COMMITTED"
+
+    db = SessionLocal()
+    try:
+        db.query(HistoricalReportImport).filter(
+            HistoricalReportImport.id.in_([cargo_id, berth_id])
+        ).delete(synchronize_session=False)
+        vessel = db.query(Vessel).filter_by(name=vessel_name).one()
+        db.delete(vessel)
+        db.commit()
+    finally:
+        db.close()
