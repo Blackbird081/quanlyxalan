@@ -673,8 +673,10 @@ def test_unknown_role_and_expired_token_fail_closed(client):
 
 def test_fail_fast_outside_test_mode():
     """Verify that auth module triggers fail-fast check outside local test/db mode."""
-    # Temporarily unset TEST_DATABASE_URL to trigger fail-fast condition
+    # CI supplies both variables globally. Remove both so this test actually
+    # exercises the unsafe production-default branch, then restore them exactly.
     original_db_url = os.environ.pop("TEST_DATABASE_URL", None)
+    original_secret = os.environ.pop("SECRET_KEY", None)
     try:
         # Reloading auth inside try-except should fail with SystemExit
         import importlib
@@ -685,6 +687,9 @@ def test_fail_fast_outside_test_mode():
         # Restore environment variable
         if original_db_url:
             os.environ["TEST_DATABASE_URL"] = original_db_url
+        if original_secret:
+            os.environ["SECRET_KEY"] = original_secret
+        importlib.reload(backend.auth)
 
 
 def test_alembic_t1_upgrade_and_downgrade_rehearsal(monkeypatch, tmp_path):

@@ -1846,3 +1846,7 @@ unload E 682/1,189/2,415.78 t; unload F 81/142/2,143.28 t.
   only action-blocking states remain visible.
 - Frontend cache version is `1.6.3`. Full regression: 173 passed with one
   retained openpyxl warning. Raw TOS workbooks remain ignored and outside Git.
+- CI follow-up: `test_fail_fast_outside_test_mode` now removes and restores both
+  `TEST_DATABASE_URL` and the workflow-provided `SECRET_KEY`, so it exercises
+  the intended unsafe-default branch under the same environment as GitHub
+  Actions. Exact CI environment regression: 173 passed.
