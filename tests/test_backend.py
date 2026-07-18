@@ -29,7 +29,11 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 import backend.app as app_module
 
-from backend.models import AuditEvent, Base, Declaration, ImportJob, ReportAdjustment, User, Organization, Vessel, VesselOperatingProfile
+from backend.models import (
+    AuditEvent, Base, Declaration, ImportJob, ReportAdjustment, User, Organization, Vessel,
+    VesselOperatingProfile, ReportingUnit, ReportingUnitOrganization, ReportingUnitUser,
+    ReportingUnitVessel,
+)
 from backend.database import engine, SessionLocal, now_iso
 from backend.auth import get_password_hash
 from backend.app import app, get_db, DEMO_ORGANIZATION_TAX_CODE, remove_demo_data_for_real_input
@@ -81,10 +85,39 @@ def _seed_user() -> None:
                     created_at=now_iso(),
                 ))
         db.commit()
+
+        # R4: seed the single ReportingUnit this legacy test suite operates against,
+        # link Test Org to it and give portstaff membership so the tenant-context
+        # guard does not lock out pre-existing role-only test fixtures.
+        unit = db.query(ReportingUnit).filter(ReportingUnit.code == "TEST-UNIT").first()
+        if not unit:
+            unit = ReportingUnit(
+                name="Test Reporting Unit", code="TEST-UNIT", is_active=1,
+                created_at=now_iso(), updated_at=now_iso(),
+            )
+            db.add(unit)
+            db.commit()
+            db.refresh(unit)
+        if not db.query(ReportingUnitOrganization).filter_by(reporting_unit_id=unit.id, organization_id=org.id).first():
+            db.add(ReportingUnitOrganization(
+                reporting_unit_id=unit.id, organization_id=org.id, created_at=now_iso(),
+            ))
+        port_user = db.query(User).filter(User.username == "portstaff").first()
+        if port_user and not db.query(ReportingUnitUser).filter_by(reporting_unit_id=unit.id, user_id=port_user.id).first():
+            db.add(ReportingUnitUser(
+                reporting_unit_id=unit.id, user_id=port_user.id, created_at=now_iso(),
+            ))
+        db.commit()
+        global TEST_REPORTING_UNIT_ID
+        TEST_REPORTING_UNIT_ID = unit.id
+        global TEST_ORGANIZATION_ID
+        TEST_ORGANIZATION_ID = org.id
     finally:
         db.close()
 
 
+TEST_REPORTING_UNIT_ID: int | None = None
+TEST_ORGANIZATION_ID: int | None = None
 _seed_user()
 
 
@@ -100,7 +133,10 @@ def auth_headers(client):
     res = client.post("/api/auth/login", json={"username": "testuser", "password": "testpass"})
     assert res.status_code == 200, f"Login failed: {res.text}"
     token = res.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    # R4: PLATFORM_ADMIN must supply an explicit ReportingUnit context for
+    # tenant-bound operations; pre-existing tests operate against the single
+    # seeded Test Reporting Unit.
+    return {"Authorization": f"Bearer {token}", "X-Reporting-Unit-ID": str(TEST_REPORTING_UNIT_ID)}
 
 
 @pytest.fixture(scope="module")
@@ -116,7 +152,7 @@ def port_staff_headers(client):
     res = client.post("/api/auth/login", json={"username": "portstaff", "password": "testpass"})
     assert res.status_code == 200, f"Login failed: {res.text}"
     token = res.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {token}", "X-Reporting-Unit-ID": str(TEST_REPORTING_UNIT_ID)}
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -192,8 +228,10 @@ def test_static_frontend(client):
     assert 'id="certificate-reminder"' in res.text
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
-    assert '/styles.css?v=1.1.9' in res.text
-    assert '/app.js?v=1.2.0' in res.text
+    assert '/styles.css?v=1.2.0' in res.text
+    assert '/app.js?v=1.2.1' in res.text
+    assert 'id="reporting-unit-select"' in res.text
+    assert 'id="reporting-unit-required"' in res.text
     assert 'data-page="port-register"' in res.text
     assert 'id="export-port-register"' in res.text
     assert 'id="import-port-register"' in res.text
@@ -222,6 +260,9 @@ def test_static_frontend(client):
     assert "CUSTOMER:'User'" in app_js
     assert "PORT_STAFF:'Port staff'" in app_js
     assert "PLATFORM_ADMIN:'Platform admin'" in app_js
+    assert "'X-Reporting-Unit-ID': String(state.activeReportingUnitId)" in app_js
+    assert "async function loadReportingUnitContext()" in app_js
+    assert "Hệ thống không có chế độ xem gộp nhiều cảng" in app_js
     assert "if (state.currentUser?.role === 'PLATFORM_ADMIN') loadIntegration();" in app_js
     assert "btn.hidden = !canCreateDeclaration" in app_js
     assert "!['declarations', 'crew'].includes(link.dataset.route)" in app_js
@@ -405,6 +446,7 @@ def test_vessel_update(client, auth_headers):
         "registration_no": reg_no,
         "vessel_type": "Tàu hàng khô",
         "vessel_class": "VR-SI",
+        "organization_name": "Test Org",
     }, headers=auth_headers)
     assert res.status_code == 200
     vid = res.json()["id"]
@@ -427,6 +469,7 @@ def test_vessel_stale_version_rejected(client, auth_headers):
         "registration_no": reg_no,
         "vessel_type": "Tàu hàng khô",
         "vessel_class": "VR-SI",
+        "organization_name": "Test Org",
     }, headers=auth_headers)
     assert created.status_code == 200
     vessel = created.json()
@@ -482,6 +525,7 @@ def test_vessel_verify_registry(client, auth_headers):
         "registration_no": _reg(),
         "vessel_type": "Tàu hàng khô",
         "vessel_class": "VR-SI",
+        "organization_name": "Test Org",
     }, headers=auth_headers)
     assert res.status_code == 200
     vid = res.json()["id"]
@@ -499,7 +543,7 @@ def test_vessel_verify_registry(client, auth_headers):
 
 def test_crew_create(client, auth_headers):
     payload = {
-        "vessel_id": 999999,
+        "organization_id": TEST_ORGANIZATION_ID,
         "full_name": "Nguyễn Văn Thuyền",
         "crew_role": "Thuyền trưởng",
         "birth_date": "1985-04-12",
@@ -516,14 +560,14 @@ def test_crew_create(client, auth_headers):
     assert data["vessel_id"] is None
 
 
-def test_port_staff_cannot_manually_assign_or_edit_crew(client, port_staff_headers):
+def test_port_staff_crew_create_requires_target_organization(client, port_staff_headers):
     response = client.post("/api/crew", json={
         "full_name": "Không được tạo thủ công",
         "crew_role": "Thuyền viên",
         "professional_certificate_type": "Chứng chỉ",
         "professional_certificate_no": "PORT-MANUAL-DENIED",
     }, headers=port_staff_headers)
-    assert response.status_code == 403
+    assert response.status_code == 422
 
 
 def test_crew_role_catalog_rejects_unapproved_role(client, customer_headers):
@@ -544,6 +588,7 @@ def test_crew_list(client, auth_headers):
 
 def test_crew_update(client, auth_headers):
     res = client.post("/api/crew", json={
+        "organization_id": TEST_ORGANIZATION_ID,
         "full_name": "Trần Máy Trưởng",
         "crew_role": "Máy trưởng",
         "professional_certificate_type": "Bằng máy trưởng",
@@ -639,17 +684,10 @@ def test_port_employee_can_approve_directly_or_request_changes(
     )
     declaration_id = approved_source.json()["id"]
 
-    denied = client.post(
-        f"/api/declarations/{declaration_id}/workflow",
-        json={"action": "PORT_APPROVE"},
-        headers=auth_headers,
-    )
-    assert denied.status_code == 403
-
     approved = client.post(
         f"/api/declarations/{declaration_id}/workflow",
-        json={"action": "PORT_APPROVE", "note": "Thông tin phù hợp"},
-        headers=port_staff_headers,
+        json={"action": "PORT_APPROVE", "note": "Hỗ trợ trong ngữ cảnh Cảng"},
+        headers=auth_headers,
     )
     assert approved.status_code == 200
     assert approved.json()["workflow_status"] == "APPROVED"
@@ -842,8 +880,9 @@ def test_attachment_invalid_pdf_signature(client, auth_headers):
 
 
 def test_attachment_unknown_extension_rejected(client, auth_headers):
+    decl_id = _make_draft(client, auth_headers)
     res = client.post(
-        "/api/declarations/1/attachments?filename=payload.exe",
+        f"/api/declarations/{decl_id}/attachments?filename=payload.exe",
         headers=auth_headers,
         content=b"MZ",
     )
@@ -971,6 +1010,12 @@ def test_static_only_port_salan_remains_in_pl01_and_pl03_with_blank_activity(
         is_port_tracked=1,
     )
     db.add(vessel)
+    db.flush()
+    db.add(ReportingUnitVessel(
+        reporting_unit_id=TEST_REPORTING_UNIT_ID,
+        vessel_id=vessel.id,
+        created_at=now_iso(),
+    ))
     db.commit()
     vessel_id = vessel.id
     db.close()

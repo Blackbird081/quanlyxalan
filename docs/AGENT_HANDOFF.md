@@ -824,7 +824,8 @@ Owner confirmations:
   separate analytical reporting dashboard.
 - PL.03 produces one row per canonical Salan/vessel, aggregating eligible
   customer declarations instead of expanding one row per cargo item.
-- PL.02 calls are counted by operating arrival. PORT_STAFF/ADMIN may apply a
+- PL.02 calls are counted by operating arrival. PORT_STAFF or PLATFORM_ADMIN in
+  explicit port context may apply a
   controlled, reasoned and audited manual adjustment.
 - PL.03 AE is working/cargo-working port; AF is next destination.
 - PL.03/AI keeps `Đại lý PTND` and reports the customer-declared approved
@@ -868,7 +869,8 @@ Implemented in the working tree:
 
 - T1 canonical README, index, field catalog, inheritance rules and machine-readable manifest.
 - Declaration snapshots `departure_berth`, `agent_ptnd_name`, `is_passenger_call`.
-- Append-only PL.02 call-adjustment model/API with PORT_STAFF/ADMIN role control, reason and audit event.
+- Append-only PL.02 call-adjustment model/API with PORT_STAFF or explicit-context
+  PLATFORM_ADMIN control, reason and audit event.
 - Official operating-date filter (ATA→ETA / ATD→ETD); `declaration_date` removed from report-period fallback.
 - PL.02 calendar-month + January-to-month aggregation and blank-when-absent behavior.
 - PL.03 one row per canonical vessel, additive numeric aggregation and distinct chronological text aggregation.
@@ -1014,7 +1016,8 @@ declarations must not remove the 47 known Salan rows from PL.01/PL.03.
   TOS parser design on 73-versus-40 row reproduction. Reporting month uses ATB;
   matched TOS wins actual time/berth/cargo while live retains declaration-only
   facts and the call counts once.
-- Overlapping updated TOS imports require an explicit PORT_STAFF/ADMIN revision
+- Overlapping updated TOS imports require an explicit PORT_STAFF or
+  explicit-context PLATFORM_ADMIN revision
   choice. Historical data/provenance/source receipt retention is at least five
   years, with user export as an additional copy channel.
 - Owner closed HDEC-02 with a multi-port product decision. Cảng Tân Thuận is
@@ -1555,3 +1558,79 @@ audit_events 8 → 8. Alembic before/after (schema identity): rejected old `m12`
 - Only `data/cang_vu.db` was replaced. No backup, workbook, staging/review DB,
   render, CVF-core or out-of-repo file was modified. Databases and workbooks
   remain untracked/gitignored. Nothing pushed.
+
+---
+
+## Historical TOS H2 correction R4 — live tenant context — 2026-07-18
+
+- **Status**: CLOSED / ACCEPTED for local/pilot scope after independent Codex
+  completion and verification. This section supersedes the earlier statement
+  that live operational endpoints merely allowed PLATFORM_ADMIN by role.
+- **Phase**: BUILD → REVIEW complete. Production readiness / FREEZE not claimed.
+- **Risk**: R2; database reconciliation was explicitly authorized by the owner.
+- **Order**: `docs/CLAUDE_H2_CORRECTION_ORDER_R4_TENANT_CONTEXT_20260718.md`.
+
+### Implemented boundary
+
+- `backend/tenant.py` is the shared fail-closed live-operation guard.
+  `PORT_STAFF` needs an FK-backed membership in the explicit active unit;
+  `PLATFORM_ADMIN` must provide explicit `X-Reporting-Unit-ID`; CUSTOMER remains
+  Organization-scoped. Missing, malformed, unknown and inactive contexts fail.
+- Live vessel, crew, declaration, workflow, import/export, dashboard, reports,
+  report adjustments and prepared integration payloads are scoped server-side.
+  Platform backup/tenant-management operations remain platform-wide.
+- Forward migration `n13f0f000013` adds `reporting_unit_vessels` and tenant
+  provenance to report adjustments, import jobs and sync jobs. The legacy
+  `vessels.is_port_tracked` field is compatibility-only, not a tenant boundary.
+- `frontend/app.js` sends the selected unit on tenant calls. PORT_STAFF may use
+  only membership units; PLATFORM_ADMIN deliberately selects one. The UI has no
+  implicit all-ports tenant view and reloads/clears stale state on context change.
+- `scripts/bootstrap_reporting_unit.py` is argument-driven, idempotent and
+  dry-run by default. It aborts on ambiguous identity/membership and never
+  hard-codes usernames or a commercial port into the reusable migration.
+
+### Staging and operational reconciliation evidence
+
+Staging was made through SQLite backup API from the m12 operational database.
+Upgrade to n13 plus dry-run/apply bootstrap passed: `integrity_check=ok`, runtime
+`foreign_keys=1`, `foreign_key_check` empty, 59 vessels retained, one unit, one
+PORT_STAFF membership, two Organization links, 59 register links and four scoped
+existing import jobs. The disposable staging DB and manifest were removed after
+evidence capture.
+
+Fresh pre-R4 operational backup (gitignored):
+
+- `data/backups/cang_vu-20260718-123933-pre-r4-tenant-context.db`
+- SHA-256 `f01e0e2aa4ea865fc09b1ca1ac670b836f5987510bfe35d745bb11dc3ff46d33`
+- revision `m12f0f000012`; 59 vessels; 0 declarations; 8 audit events;
+  integrity `ok`; FK check clean.
+
+Operational database after accepted staging gates and bootstrap:
+
+- SHA-256 `f2baa3f283706d0680a797b5b192ffdfb83cf62c15d11004d9fb11d13342c822`
+- revision `n13f0f000013`; runtime `foreign_keys=1`; integrity `ok`; FK check clean;
+- 59 vessels, 0 declarations and 9 audit events (one explicit bootstrap audit);
+- Cảng Tân Thuận unit `TAN-THUAN`: one `nhanviencang` PORT_STAFF membership,
+  two Organization links and 59 register links;
+- all four existing import jobs mapped to the unit;
+- `admin` remains active PLATFORM_ADMIN; password hashes were not read or changed.
+
+Before → after business counts: vessels 59 → 59; declarations 0 → 0. The only
+new audit row records the controlled legacy-unit bootstrap.
+
+### Verification
+
+- `python -m pytest -q`: **158 passed**, one retained openpyxl warning.
+- Two-unit HTTP tests prove membership rejection, explicit platform context,
+  inactive/malformed context rejection, list/export/dashboard isolation,
+  cross-unit mutation/workflow denial, independent port registers, correct
+  tenant audit and CUSTOMER denial from internal port operations.
+- Bootstrap dry-run/apply/idempotency has an automated regression test.
+- Python compile checks and `git diff --check`: pass; Alembic has one head.
+
+### Boundary and next move
+
+- No raw TOS workbook was modified, imported or committed. Databases/backups are
+  gitignored. The four raw `templates/*.xlsx` files remain intentionally
+  untracked.
+- H3 parser/import API and H4 historical dashboard UI remain not started.

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=1.1.9">
+  <link rel="stylesheet" href="/styles.css?v=1.2.0">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Bỏ qua điều hướng, đến nội dung chính</a>
@@ -45,6 +45,11 @@
         <button id="menu-toggle" class="icon-button mobile-only" aria-label="Mở menu">☰</button>
         <div><span class="eyebrow">CỔNG THÔNG TIN KHÁCH HÀNG</span><strong id="page-context" role="status" aria-live="polite">Tổng quan</strong></div>
         <div class="topbar-actions">
+          <div class="reporting-unit-context">
+            <span id="active-reporting-unit" class="muted">Chưa chọn cảng</span>
+            <label class="sr-only" for="reporting-unit-select">Cảng / đơn vị báo cáo đang thao tác</label>
+            <select id="reporting-unit-select" aria-label="Cảng / đơn vị báo cáo đang thao tác" hidden></select>
+          </div>
           <span id="api-state" class="state-badge pending">Đang kết nối</span>
           <button id="theme-toggle" class="icon-button theme-btn" type="button" aria-label="Toggle theme" title="Chuyển giao diện">
             <svg class="sun-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
@@ -54,6 +59,11 @@
       </header>
 
       <main id="main-content" tabindex="-1" aria-busy="false">
+        <section id="reporting-unit-required" class="panel tenant-context-notice" role="status" hidden>
+          <p class="eyebrow">PHẠM VI VẬN HÀNH</p>
+          <h2>Chọn cảng trước khi làm việc</h2>
+          <p>Chọn một cảng ở thanh trên để mở dữ liệu vận hành.</p>
+        </section>
         <section class="page active" data-page="dashboard">
           <div class="page-heading"><div><p class="eyebrow">TÌNH HÌNH HÔM NAY</p><p>Trạng thái hồ sơ phương tiện và các lượt Salan dự kiến.</p></div></div>
           <section class="dashboard-search panel"><label class="search"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M20 20l-4.8-4.8"></path></svg></span><input id="dashboard-vessel-search" placeholder="Lọc nhanh theo số hiệu Salan"></label><span class="muted">Nhập ít nhất 2 ký tự</span></section>
@@ -76,7 +86,7 @@
         </section>
 
         <section class="page" data-page="port-register">
-          <div class="page-heading"><div><p class="eyebrow">THEO DÕI NỘI BỘ CỦA CẢNG</p><p>Dữ liệu vận hành riêng do Nhân viên Cảng/Admin cập nhật, không thay thế hồ sơ khách hàng khai báo.</p></div><div class="panel-actions"><label class="file-button port-import-button">Import<input type="file" id="import-port-register" accept=".xlsx"></label><button class="outline-button" id="export-port-register">Export</button><button class="primary-button" id="add-port-vessel">+ Thêm Salan</button></div></div>
+          <div class="page-heading"><div><p class="eyebrow">THEO DÕI NỘI BỘ CỦA CẢNG</p><p>Dữ liệu vận hành riêng do Nhân viên Cảng hoặc Platform Admin trong đúng ngữ cảnh cảng cập nhật, không thay thế hồ sơ khách hàng khai báo.</p></div><div class="panel-actions"><label class="file-button port-import-button">Import<input type="file" id="import-port-register" accept=".xlsx"></label><button class="outline-button" id="export-port-register">Export</button><button class="primary-button" id="add-port-vessel">+ Thêm Salan</button></div></div>
           <div id="port-register-stats" class="stat-grid port-register-stats"></div>
           <div class="port-register-dashboard"><section class="panel"><div class="panel-header"><div><p class="eyebrow">PHÂN BỔ VÙNG HOẠT ĐỘNG</p><h2>Số Salan theo vùng</h2></div></div><div id="port-register-by-area" class="summary-bars"></div></section><section class="panel"><div class="panel-header"><div><p class="eyebrow">CƠ CẤU PHƯƠNG TIỆN</p><h2>Số Salan theo công dụng</h2></div></div><div id="port-register-by-type" class="summary-bars"></div></section></div>
           <section class="panel"><div class="filter-bar"><label class="search"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M20 20l-4.8-4.8"></path></svg></span><input id="port-register-search" placeholder="Tìm tên Salan, số đăng ký hoặc thuyền trưởng"></label><div class="port-register-list-meta"><span id="port-register-selection" class="muted" hidden></span><button id="remove-selected-port-vessels" class="table-icon-button danger-icon" type="button" title="Gỡ các dòng đã chọn khỏi sổ theo dõi" aria-label="Gỡ các dòng đã chọn khỏi sổ theo dõi" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5M14 11v5"></path></svg></button><span id="port-register-count" class="muted"></span></div></div><div id="port-register-table" class="table-wrap port-register-wrap"></div><div id="port-register-pagination" class="pagination" aria-label="Phân trang sổ theo dõi Salan"></div></section>
@@ -160,6 +170,6 @@
   </dialog>
 
   <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script src="/app.js?v=1.2.0" defer></script>
+  <script src="/app.js?v=1.2.1" defer></script>
 </body>
 </html>

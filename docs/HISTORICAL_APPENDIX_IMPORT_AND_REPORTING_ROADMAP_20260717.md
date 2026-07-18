@@ -93,12 +93,12 @@ Out of scope unless separately approved:
 | HDEC-01 | Sample inventory | Provide representative historical PL.01/PL.02 variants when available | DEFERRED; supplied TOS/PL.03 audit is sufficient for bounded TOS DESIGN |
 | HDEC-02 | Reporting tenant/unit | Multi-port product: Cảng Tân Thuận is the first tenant, not a hardcoded product boundary. Every import/report belongs to exactly one authenticated reporting unit; mixed-unit content must be split or reviewed before commit | CLOSED — owner confirmed 2026-07-18 |
 | HDEC-03 | Period source | Use TOS ATB to assign a call/reporting month; blank ATB enters review rather than falling back to filename, ATA or ATD | CLOSED — owner confirmed 2026-07-18 |
-| HDEC-04 | Revision rule | A corrected/new TOS file creates a revision; on duplicate/overlap PORT_STAFF or ADMIN must choose whether to replace the active revision | CLOSED — owner confirmed 2026-07-18 |
+| HDEC-04 | Revision rule | A corrected/new TOS file creates a revision; on duplicate/overlap PORT_STAFF or PLATFORM_ADMIN acting in explicit port context must choose whether to replace the active revision | CLOSED — owner confirmed 2026-07-18 |
 | HDEC-05 | Overlap rule | Matched TOS wins for actual ATB/ATD, berth and cargo; live retains declaration-only facts; one call counts once; uncertain matches enter review | CLOSED — owner confirmed 2026-07-18 |
 | HDEC-06 | PL.01 meaning | Confirm old PL.01 planned/actual semantics when historical PL.01 files are supplied | DEFERRED with PL.01 samples |
 | HDEC-07 | PL.02 baseline | Monthly values drive trends and reported YTD remains a non-additive reconciliation snapshot | CLOSED for canonical contract; historical variant audit deferred |
 | HDEC-08 | PL.03 identity | Controlled normalized candidates plus manual review for missing/ambiguous vessel links | CLOSED — owner confirmed |
-| HDEC-09 | Access and retention | PORT_STAFF/ADMIN may upload, review and choose replacement; CUSTOMER has no TOS access; retain historical data/source receipt at least five years | BASELINE CLOSED; post-five-year purge/storage mechanics remain DESIGN details |
+| HDEC-09 | Access and retention | PORT_STAFF or PLATFORM_ADMIN acting in explicit port context may upload, review and choose replacement; CUSTOMER has no TOS access; retain historical data/source receipt at least five years | BASELINE CLOSED; post-five-year purge/storage mechanics remain DESIGN details |
 
 Unanswered items remain `NEEDS CONFIRMATION`; the implementation must not infer
 them from a single workbook.
@@ -115,7 +115,7 @@ the explicit open decisions below remain outside the verified boundary.
 | HTOS-01 | Source families | Berth contains port-call/berth timing facts; CHI TIET contains container/cargo handling facts; historical PL workbooks are reported facts/reconciliation sources | CONFIRMED AND AUDITED for supplied variants |
 | HTOS-02 | Vessel identity | TOS vessel name links to the canonical Salan register through controlled normalization and manual review when missing or ambiguous; historical import never overwrites the master | CONFIRMED; sample audit found 10 exact, 26 normalized, 4 unmatched and 0 ambiguous Berth links |
 | HTOS-03 | PL.03 vessel column | Vessel name maps to PL.03 column B, `Tên PTTND`; PL.03/AI remains `Đại lý PTND` | CONFIRMED AND AUDITED |
-| HTOS-04 | Berth default | When one TOS berth code is available, initialize both arrival and departure berth from it; PORT_STAFF/ADMIN may correct the rare berth-shift case with audit provenance | CONFIRMED AND AUDITED for the one-berth sample |
+| HTOS-04 | Berth default | When one TOS berth code is available, initialize both arrival and departure berth from it; PORT_STAFF or PLATFORM_ADMIN in explicit port context may correct the rare berth-shift case with audit provenance | CONFIRMED AND AUDITED for the one-berth sample |
 | HTOS-05 | TOS operating time | ATB and ATA are distinct. Historical TOS reports use authoritative TOS ATB for PL.01/J and PL.03/AG, and TOS ATD for PL.01/L and PL.03/AH. Do not rename imported ATB to ATA | CONFIRMED AND AUDITED; legacy PL.03 used inaccurate ETA-derived time |
 | HTOS-06 | Candidate join | Berth-to-detail joining uses vessel identity, year and voyage. Exact raw-component match is primary; normalized candidates fail closed when ambiguous | CONFIRMED AND AUDITED; 1,067/1,067 detail rows matched 38 Berth calls exactly; 2 Berth calls had no cargo |
 | HTOS-07 | Cargo dimensions | Detail/R is tonnes per container. All weight, including empty-container shell weight, contributes to report tonnes; F/E independently directs TEU to full or empty columns. Size, trade and movement remain separate dimensions | CONFIRMED BY OWNER 2026-07-18; closes `TOS-WEIGHT-01` and empty-weight treatment |
@@ -129,7 +129,7 @@ the explicit open decisions below remain outside the verified boundary.
 | HTOS-15 | Legacy PL.03 authority | The supplied PL.03 is a manual staff summary and is not the authoritative derivation target. Preserve it for provenance/comparison; code-derived database reports are the future baseline and end-user feedback remains an acceptance input | CONFIRMED BY OWNER 2026-07-18; closes `TOS-PL03-SCOPE-01` as a reproduction blocker |
 | HTOS-16 | Period membership | Assign TOS call/reporting month by ATB. Missing ATB enters review; filename, ATA and ATD do not silently replace it | CONFIRMED BY OWNER 2026-07-18 |
 | HTOS-17 | Live/TOS merge | TOS supplies actual time, berth and cargo; live supplies declaration-only facts. A matched call counts once and uncertain matching blocks automatic combination | CONFIRMED BY OWNER 2026-07-18 |
-| HTOS-18 | Duplicate/revision UX | When a newer TOS file overlaps stored data, PORT_STAFF/ADMIN must explicitly keep existing data, activate the new revision or cancel; no silent overwrite | CONFIRMED BY OWNER 2026-07-18 |
+| HTOS-18 | Duplicate/revision UX | When a newer TOS file overlaps stored data, PORT_STAFF or PLATFORM_ADMIN in explicit port context must explicitly keep existing data, activate the new revision or cancel; no silent overwrite | CONFIRMED BY OWNER 2026-07-18 |
 | HTOS-19 | Retention | Retain historical records, provenance and controlled source receipt for at least five years; users may additionally export and retain manual copies | CONFIRMED BY OWNER 2026-07-18 |
 | HTOS-20 | Multi-port tenancy | Use one canonical regulatory report model and versioned PL templates for all ports. Scope every source, import, fact, revision, report and export to one tenant/reporting unit. Cảng Tân Thuận is the first deployment; port/TOS-specific differences belong in tenant configuration or versioned source adapters, never in a forked report model | CONFIRMED BY OWNER 2026-07-18; closes HDEC-02 |
 
@@ -305,7 +305,7 @@ total without its source and coverage status is not acceptable evidence.
   multiple units, block commit and require separate batches or explicit review;
   never mix their facts in one tenant dataset.
 - Tenant switching is explicit and limited to authorized platform-level
-  administration. A port's ADMIN/PORT_STAFF cannot inspect or mutate another
+  administration. A port's PORT_STAFF cannot inspect or mutate another
   port's imports, files, reports or revisions.
 - The Import area separates `Dữ liệu đang vận hành` from `Dữ liệu lịch sử từ
   TOS`; explanatory copy states what each workflow changes and explicitly says
@@ -323,10 +323,12 @@ total without its source and coverage status is not acceptable evidence.
 - Import history shows source metadata, mapping version, period, actor,
   accepted/rejected counts, revision/supersession and receipt.
 - Duplicate/overlapping TOS data presents explicit `Giữ dữ liệu hiện có`,
-  `Dùng bản mới` and `Hủy` actions to PORT_STAFF/ADMIN; no default overwrite.
+  `Dùng bản mới` and `Hủy` actions to PORT_STAFF or PLATFORM_ADMIN in explicit
+  port context; no default overwrite.
 - Source badges include text (`LIVE`, `LỊCH SỬ`, `KẾT HỢP`, `CẦN KIỂM TRA`) and
   do not rely on color alone.
-- CUSTOMER cannot access internal TOS import. PORT_STAFF/ADMIN may upload,
+- CUSTOMER cannot access internal TOS import. PORT_STAFF or PLATFORM_ADMIN in
+  explicit port context may upload,
   preview, commit and resolve revisions within their own reporting unit. The
   post-five-year deletion/purge policy remains a DESIGN detail; authorization
   must be visible before an action, not only after a 403.
@@ -417,12 +419,21 @@ Actions (done):
 - Legacy `ADMIN` -> `PLATFORM_ADMIN` role data migration (reversible).
 - Controlled operational DB reconciliation from the clean pre-m12 backup after
   inventory, logical live-data equality, staging acceptance and test gates.
+- Live-operation tenant context enforced through `X-Reporting-Unit-ID`:
+  PORT_STAFF requires FK-backed membership and PLATFORM_ADMIN must explicitly
+  select one active unit. Reads, mutations, exports, workflow, dashboard,
+  reports and prepared integration payloads are scoped server-side.
+- Per-port `reporting_unit_vessels` replaces the legacy global tracking flag as
+  the Sổ theo dõi tenant boundary. The first unit was bootstrapped by an
+  idempotent dry-run/apply command; the UI displays and changes active port
+  context without an implicit all-ports view.
 
 Exit gate (met):
 
 - Upgrade/rollback, constraints, isolation, idempotency and audit tests pass
-  (149 tests). Operational DB is reconciled to `m12f0f000012` with no live-data
-  change other than the approved role migration. See `docs/AGENT_HANDOFF.md`.
+  (158 tests). Operational DB is reconciled to `n13f0f000013`: 59 vessels are
+  retained, Cảng Tân Thuận has one PORT_STAFF membership, two Organization
+  links and 59 port-register links. See `docs/AGENT_HANDOFF.md`.
 
 ### H3 — Parser and import API
 

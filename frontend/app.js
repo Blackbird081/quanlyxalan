@@ -6,6 +6,7 @@ const state = {
   portRegisterItems: [], portRegisterStats: {}, portRegisterPage: 1, portRegisterPageSize: 15,
   portRegisterSelected: new Set(), vesselSaveContext: 'customer-record',
   dashboardSearchSequence: 0,
+  reportingUnits: [], activeReportingUnitId: null, reportingUnitOrganizations: [],
 };
 const CREW_ROLES = ['Thuyền trưởng', 'Máy trưởng', 'Thuyền viên', 'Thuyền phó'];
 
@@ -19,6 +20,9 @@ async function api(path, options = {}) {
   const token = localStorage.getItem('token');
   if (token) {
     options.headers = { ...options.headers, 'Authorization': `Bearer ${token}` };
+  }
+  if (state.activeReportingUnitId && ['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role)) {
+    options.headers = { ...options.headers, 'X-Reporting-Unit-ID': String(state.activeReportingUnitId) };
   }
   const response = await fetch(path, options);
   if (response.status === 401 && path !== '/api/auth/login') {
@@ -92,6 +96,7 @@ function bindLoginForm() {
         body: JSON.stringify(values(form)),
       });
       localStorage.setItem('token', result.access_token);
+      state.activeReportingUnitId = null;
       $('#login-dialog').close();
       toast('Đăng nhập thành công.');
       init();
@@ -143,6 +148,60 @@ function pageName(route) {
 
 function roleLabel(role) {
   return ({CUSTOMER:'User', PORT_STAFF:'Port staff', PLATFORM_ADMIN:'Platform admin'})[role] || role;
+}
+
+function reportingUnitStorageKey() {
+  return `reporting-unit:${state.currentUser?.username || 'anonymous'}`;
+}
+
+async function loadReportingUnitContext() {
+  const selector = $('#reporting-unit-select');
+  const notice = $('#reporting-unit-required');
+  const needsUnit = ['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role);
+  selector.closest('.reporting-unit-context').hidden = !needsUnit;
+  selector.hidden = !needsUnit;
+  notice.hidden = true;
+  document.body.classList.remove('tenant-context-blocked');
+  if (!needsUnit) return true;
+
+  const response = await api('/api/reporting-units');
+  state.reportingUnits = response.items || [];
+  const saved = Number(localStorage.getItem(reportingUnitStorageKey()) || 0);
+  const validSaved = state.reportingUnits.some(item => item.id === saved);
+  if (validSaved) state.activeReportingUnitId = saved;
+  else if (state.currentUser.role === 'PORT_STAFF' && state.reportingUnits.length === 1) {
+    state.activeReportingUnitId = state.reportingUnits[0].id;
+    localStorage.setItem(reportingUnitStorageKey(), String(state.activeReportingUnitId));
+  } else {
+    state.activeReportingUnitId = null;
+    localStorage.removeItem(reportingUnitStorageKey());
+  }
+
+  selector.innerHTML = `<option value="">Chọn cảng / đơn vị báo cáo</option>${state.reportingUnits.map(unit =>
+    `<option value="${unit.id}" ${unit.id === state.activeReportingUnitId ? 'selected' : ''}>${esc(unit.name)}${unit.code ? ` (${esc(unit.code)})` : ''}</option>`
+  ).join('')}`;
+  selector.onchange = () => {
+    const next = Number(selector.value || 0);
+    state.portRegisterSelected.clear();
+    state.editingVessel = state.editingDeclaration = state.editingCrew = null;
+    if (next) localStorage.setItem(reportingUnitStorageKey(), String(next));
+    else localStorage.removeItem(reportingUnitStorageKey());
+    location.reload();
+  };
+
+  const active = state.reportingUnits.find(unit => unit.id === state.activeReportingUnitId);
+  $('#active-reporting-unit').textContent = active ? active.name : 'Chưa chọn cảng';
+  if (!active) {
+    notice.hidden = false;
+    notice.querySelector('p:last-child').textContent = state.reportingUnits.length
+      ? 'Chọn một cảng ở thanh trên để mở dữ liệu vận hành. Hệ thống không có chế độ xem gộp nhiều cảng.'
+      : 'Tài khoản chưa có đơn vị báo cáo hoạt động. Liên hệ Platform Admin để cấp membership.';
+    document.body.classList.add('tenant-context-blocked');
+    $('#api-state').className = 'state-badge pending';
+    $('#api-state').textContent = 'Chọn cảng';
+    return false;
+  }
+  return true;
 }
 
 function route() {
@@ -333,7 +392,7 @@ function renderCrew() {
   const strip = $('#crew-warning-strip');
   strip.classList.toggle('visible', messages.length > 0);
   strip.textContent = messages.join(' ');
-  const canEdit = ['CUSTOMER', 'PLATFORM_ADMIN'].includes(state.currentUser?.role);
+  const canEdit = ['CUSTOMER', 'PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role);
   $('#crew-table').innerHTML = items.length ? `<table class="data-table responsive-table record-table crew-record-table"><thead><tr><th>Họ tên</th><th>Chức danh</th><th>Ngày sinh</th><th>Chứng chỉ</th><th>Thời hạn</th><th>Trạng thái</th>${canEdit ? '<th aria-label="Thao tác"></th>' : ''}</tr></thead><tbody>${items.map(item => `<tr><td data-label="Họ tên"><strong>${esc(item.full_name)}</strong><br><small>${esc(item.phone || '')}</small></td><td data-label="Chức danh">${esc(item.crew_role)}</td><td data-label="Ngày sinh" class="date-cell">${fmtDate(item.birth_date)}</td><td data-label="Chứng chỉ">${esc(item.professional_certificate_type)}<br><small>${esc(item.professional_certificate_no)}</small></td><td data-label="Thời hạn" class="date-cell">${fmtDate(item.certificate_expiry_date)}</td><td data-label="Trạng thái"><span class="table-badge ${item.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(item.certificate_status)}</span></td>${canEdit ? `<td data-label="Thao tác" class="action-cell"><button class="table-icon-button" data-edit-crew="${item.id}" title="Chỉnh sửa ${esc(item.full_name)}" aria-label="Chỉnh sửa ${esc(item.full_name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></td>` : ''}</tr>`).join('')}</tbody></table>` : empty('Chưa có danh sách thuyền viên', 'Thêm thuyền trưởng hoặc thuyền viên cùng chứng chỉ chuyên môn.');
   $$('[data-edit-crew]').forEach(button => button.onclick = () => openCrew(Number(button.dataset.editCrew)));
 }
@@ -341,7 +400,10 @@ function renderCrew() {
 function openCrew(id = null) {
   const item = id ? state.crew.find(row => row.id === id) : {};
   state.editingCrew = item || {};
+  const needsOrganization = ['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role);
+  const organizationField = needsOrganization ? `<label>* Doanh nghiệp<select name="organization_id" required><option value="">Chọn doanh nghiệp</option>${state.reportingUnitOrganizations.map(org => `<option value="${org.id}" ${Number(item.organization_id) === org.id ? 'selected' : ''}>${esc(org.name)}</option>`).join('')}</select></label>` : '';
   $('#crew-fields').innerHTML = `
+    ${organizationField}
     ${field('full_name','Họ và tên',item.full_name,'text','required')}
     ${selectField('crew_role','Chức danh',CREW_ROLES,item.crew_role,'required')}
     ${field('birth_date','Ngày sinh (không bắt buộc)',item.birth_date,'date')}
@@ -1458,6 +1520,7 @@ async function init() {
       await api('/api/auth/logout', { method: 'POST' });
     } catch (_) {}
     localStorage.removeItem('token');
+    if (state.currentUser?.username) localStorage.removeItem(reportingUnitStorageKey());
     state.currentUser = null;
     location.reload();
   };
@@ -1485,7 +1548,7 @@ async function init() {
     const addVesselBtn = $('#add-vessel');
     if (addVesselBtn) addVesselBtn.hidden = isReviewer || isCustomer;
     const addCrewBtn = $('#add-crew');
-    if (addCrewBtn) addCrewBtn.hidden = isReviewer;
+    if (addCrewBtn) addCrewBtn.hidden = false;
 
     if (isCustomer) {
       $$('nav a[data-route]').forEach(link => {
@@ -1524,6 +1587,15 @@ async function init() {
     $('#user-display').innerHTML = '';
     $('#logout-button').style.display = 'none';
     showLoginDialog();
+    return;
+  }
+
+  try {
+    if (!await loadReportingUnitContext()) return;
+  } catch (error) {
+    $('#api-state').className = 'state-badge pending';
+    $('#api-state').textContent = 'Lỗi phạm vi';
+    toast(error.message, true);
     return;
   }
 
@@ -1587,7 +1659,15 @@ async function init() {
   $('#report-adjustment-form').elements.report_month.value = $('#report-month').value;
   if (['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role)) loadReportAdjustments().catch(error => toast(error.message, true));
   try {
-    [state.catalogs, state.vessels, state.crew] = await Promise.all([api('/api/catalogs'), api('/api/vessels'), api('/api/crew')]);
+    const organizationRequest = ['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role)
+      ? api('/api/reporting-unit/organizations') : Promise.resolve({items: []});
+    const [catalogs, vessels, crew, organizations] = await Promise.all([
+      api('/api/catalogs'), api('/api/vessels'), api('/api/crew'), organizationRequest,
+    ]);
+    state.catalogs = catalogs;
+    state.vessels = vessels;
+    state.crew = crew;
+    state.reportingUnitOrganizations = organizations.items || [];
     $('#api-state').className = 'state-badge ok'; $('#api-state').textContent = 'Đã kết nối';
   } catch (error) { $('#api-state').className = 'state-badge pending'; $('#api-state').textContent = 'Mất kết nối'; toast(error.message, true); }
   route();

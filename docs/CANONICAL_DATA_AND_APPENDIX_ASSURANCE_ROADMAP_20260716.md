@@ -155,7 +155,7 @@ Deliverables:
   or weakening its source, blank and conflict rules.
 - Define PL.03 aggregation for multiple declarations per vessel, especially
   cargo names, dates, ports and agents that cannot be numerically summed.
-- Define the audited PORT_STAFF/ADMIN manual-adjustment record and workflow for
+- Define the audited PORT_STAFF or explicit-context PLATFORM_ADMIN manual-adjustment record and workflow for
   PL.02 call counts.
 - Define the analytical dashboard projections separately from the official
   PL.01/PL.02/PL.03 exports.

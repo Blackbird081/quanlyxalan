@@ -502,7 +502,8 @@ Missing values must never become numeric zero.
 - For matched live/TOS calls, TOS wins for actual time, berth and cargo; live
   retains declaration-only facts. Count the call once and review uncertain
   matches.
-- New/updated overlapping TOS files require an explicit PORT_STAFF/ADMIN
+- New/updated overlapping TOS files require an explicit PORT_STAFF or
+  explicit-context PLATFORM_ADMIN
   keep-existing or activate-new-revision choice. Never silently overwrite.
 - Retain historical data, provenance and controlled source receipt at least
   five years; user-exported copies are an additional retention channel.
@@ -523,7 +524,8 @@ Missing values must never become numeric zero.
   content must be split into separate batches or held for explicit review.
 - TOS layouts may differ by port or vendor. Detect them through versioned
   structural adapters while mapping into the same canonical reporting model.
-- PORT_STAFF/ADMIN access remains tenant-local. Any cross-port operation needs
+- PORT_STAFF access remains tenant-local; PLATFORM_ADMIN must select an explicit
+  port context. Any cross-port operation needs
   a separate, explicit platform-level authorization and tenant switch.
 
 ## 12. Proposed parser contract and golden fixtures

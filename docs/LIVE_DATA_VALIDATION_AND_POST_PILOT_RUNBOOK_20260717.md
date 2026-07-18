@@ -21,7 +21,7 @@ until the source declaration, workflow status and operating date are checked.
 
 | ID | What remains unproven | Evidence required | Possible owner |
 |---|---|---|---|
-| LIVE-01 | Real customer declarations enter the correct tenant and reach `APPROVED` | Declaration id, tenant, workflow history and approval timestamp | PORT_STAFF/ADMIN |
+| LIVE-01 | Real customer declarations enter the correct tenant and reach `APPROVED` | Declaration id, tenant, workflow history and approval timestamp | PORT_STAFF or explicit-context PLATFORM_ADMIN |
 | LIVE-02 | Vessel, crew and static fields inherit correctly without overwriting approved activity snapshots | Before/after master values plus approved declaration snapshot | PORT_STAFF |
 | LIVE-03 | ATA/ATD or ETA/ETD select the correct reporting month, including cross-month arrival/departure | Source dates and expected inclusion for PL.01/PL.02/PL.03 | Port operations owner |
 | LIVE-04 | Real cargo descriptions classify into the intended export/import/domestic/transshipment/transit columns | Original cargo item, expected category and exported cells | Reporting owner |

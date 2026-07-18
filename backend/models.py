@@ -163,6 +163,7 @@ class ReportAdjustment(Base):
     delta = Column(Float, nullable=False)
     reason = Column(Text, nullable=False)
     organization_id = Column(Integer, ForeignKey("organizations.id"))
+    reporting_unit_id = Column(Integer, ForeignKey("reporting_units.id"), nullable=True, index=True)
     actor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(String, nullable=False, default=now_iso)
 
@@ -258,6 +259,7 @@ class SyncJob(Base):
     __tablename__ = "sync_jobs"
     id = Column(Integer, primary_key=True, autoincrement=True)
     connector_key = Column(String, nullable=False)
+    reporting_unit_id = Column(Integer, ForeignKey("reporting_units.id"), nullable=True, index=True)
     report_from = Column(String, nullable=False)
     report_to = Column(String, nullable=False)
     status = Column(String, nullable=False, default="PREPARED")
@@ -274,6 +276,7 @@ class ImportJob(Base):
     )
     id = Column(Integer, primary_key=True, autoincrement=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    reporting_unit_id = Column(Integer, ForeignKey("reporting_units.id"), nullable=True, index=True)
     import_kind = Column(String, nullable=False)
     source_checksum = Column(String, nullable=False)
     mapping_version = Column(String, nullable=False)
@@ -385,6 +388,24 @@ class ReportingUnitOrganization(Base):
     organization_id = Column(
         Integer, ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
     )
+    created_at = Column(String, nullable=False, default=now_iso)
+
+
+class ReportingUnitVessel(Base):
+    """FK-backed per-port vessel register membership (many-to-many).
+
+    The internal Port register is tenant-scoped: the same physical Vessel may be
+    tracked by reporting unit A and not by reporting unit B. This association is
+    the authorization and tenant boundary for the register; the legacy global
+    ``vessels.is_port_tracked`` boolean is retained only for backward
+    compatibility and is deprecated as a tenant/authorization signal.
+    """
+    __tablename__ = "reporting_unit_vessels"
+    reporting_unit_id = Column(
+        Integer, ForeignKey("reporting_units.id", ondelete="CASCADE"), primary_key=True
+    )
+    vessel_id = Column(Integer, ForeignKey("vessels.id", ondelete="CASCADE"), primary_key=True)
+    added_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(String, nullable=False, default=now_iso)
 
 
