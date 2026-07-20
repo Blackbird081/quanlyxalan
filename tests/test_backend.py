@@ -278,8 +278,8 @@ def test_static_frontend(client):
     assert 'id="certificate-reminder"' in res.text
     assert 'id="demo-data-notice"' in res.text
     assert 'id="login-dialog" class="modal login-dialog"' in res.text
-    assert '/styles.css?v=1.6.9' in res.text
-    assert '/app.js?v=1.6.9' in res.text
+    assert '/styles.css?v=1.8.2' in res.text
+    assert '/app.js?v=1.8.2' in res.text
     assert 'id="analytics-source-controls"' in res.text
     assert 'data-source="historical"' in res.text
     assert 'id="analytics-coverage"' in res.text
@@ -327,7 +327,7 @@ def test_static_frontend(client):
     assert "!['declarations', 'crew'].includes(link.dataset.route)" in app_js
     assert "$('#user-display').innerHTML = `<span class=\"role-pill\"" in app_js
     assert "const crewContainer = $('#declaration-crew-container');" in app_js
-    assert "? $$('input[name=\"crew_ids\"]:checked', crewContainer).length" in app_js
+    assert "name=\"crew_onboard_count\"" in app_js
     assert "node.setAttribute('role', error ? 'alert' : 'status')" in app_js
     assert "Không thể nhập dòng này. Hãy kiểm tra định dạng số, ngày hoặc mã đăng ký trùng." in Path(__file__).resolve().parents[1].joinpath("backend", "app.py").read_text(encoding="utf-8")
     assert "File đã được nhập trước đó" in app_js
@@ -546,6 +546,63 @@ def test_vessel_list(client, auth_headers):
     assert isinstance(res.json(), list)
 
 
+def test_platform_admin_can_delete_vessel_with_no_dependents(client, auth_headers):
+    created = client.post("/api/vessels", json={
+        "name": "TT DELETE ME", "registration_no": _reg(),
+        "vessel_type": "Tàu container", "vessel_class": "VR-SI",
+        "organization_name": "Test Org A",
+    }, headers=auth_headers)
+    assert created.status_code == 200
+    vessel_id = created.json()["id"]
+
+    res = client.delete(f"/api/vessels/{vessel_id}", headers=auth_headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["deleted"] == vessel_id
+
+    listed = client.get("/api/vessels", headers=auth_headers)
+    assert all(item["id"] != vessel_id for item in listed.json())
+
+
+def test_port_staff_cannot_delete_vessel(client, auth_headers, port_staff_headers):
+    created = client.post("/api/vessels", json={
+        "name": "TT NOT MINE TO DELETE", "registration_no": _reg(),
+        "vessel_type": "Tàu container", "vessel_class": "VR-SI",
+        "organization_name": "Test Org A",
+    }, headers=auth_headers)
+    vessel_id = created.json()["id"]
+
+    res = client.delete(f"/api/vessels/{vessel_id}", headers=port_staff_headers)
+    assert res.status_code == 403
+
+    # cleanup
+    client.delete(f"/api/vessels/{vessel_id}", headers=auth_headers)
+
+
+def test_platform_admin_cannot_delete_vessel_with_declarations(client, auth_headers):
+    created = client.post("/api/vessels", json={
+        "name": "TT HAS DECLARATIONS", "registration_no": _reg(),
+        "vessel_type": "Tàu container", "vessel_class": "VR-SI",
+        "organization_name": "KHÁCH HÀNG IMPORT",
+    }, headers=auth_headers)
+    vessel = created.json()
+    vessel_id = vessel["id"]
+
+    decl = client.post(
+        "/api/declarations",
+        json=_minimal_declaration(
+            company_name="KHÁCH HÀNG IMPORT",
+            vessel_id=vessel_id,
+            vessel_name=vessel["name"],
+            registration_no=vessel["registration_no"],
+        ),
+        headers=auth_headers,
+    )
+    assert decl.status_code == 200, decl.text
+
+    res = client.delete(f"/api/vessels/{vessel_id}", headers=auth_headers)
+    assert res.status_code == 409
+
+
 def test_vessel_lists_use_the_same_order(client, port_staff_headers):
     vessels = client.get("/api/vessels", headers=port_staff_headers)
     port_register = client.get("/api/port-vessel-register", headers=port_staff_headers)
@@ -743,6 +800,61 @@ def test_declaration_draft_create(client, auth_headers):
     assert "reference_no" in data
 
 
+def test_platform_admin_can_delete_draft_declaration(client, auth_headers):
+    created = client.post("/api/declarations", json=_minimal_declaration(), headers=auth_headers)
+    declaration_id = created.json()["id"]
+
+    res = client.delete(f"/api/declarations/{declaration_id}", headers=auth_headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["deleted"] == declaration_id
+
+    listed = client.get("/api/declarations?page=1", headers=auth_headers)
+    assert all(item["id"] != declaration_id for item in listed.json()["items"])
+
+
+def test_port_staff_cannot_delete_declaration(client, auth_headers, port_staff_headers):
+    created = client.post("/api/declarations", json=_minimal_declaration(), headers=auth_headers)
+    declaration_id = created.json()["id"]
+
+    res = client.delete(f"/api/declarations/{declaration_id}", headers=port_staff_headers)
+    assert res.status_code == 403
+
+    client.delete(f"/api/declarations/{declaration_id}", headers=auth_headers)  # cleanup
+
+
+def test_platform_admin_cannot_delete_submitted_declaration(client, auth_headers):
+    created = client.post(
+        "/api/declarations?submit=true",
+        json=_minimal_declaration(company_name="KHÁCH HÀNG IMPORT"),
+        headers=auth_headers,
+    )
+    declaration_id = created.json()["id"]
+    assert created.json()["workflow_status"] == "PENDING_REVIEW"
+
+    res = client.delete(f"/api/declarations/{declaration_id}", headers=auth_headers)
+    assert res.status_code == 409
+
+
+def test_platform_admin_sees_its_own_drafts(client, auth_headers):
+    # PLATFORM_ADMIN's "Lưu phiếu" flow creates a DRAFT declaration it must be
+    # able to find again — both endpoints previously hid every DRAFT from any
+    # non-CUSTOMER scope (a PORT_STAFF-only rule that leaked onto the admin),
+    # so an admin-created draft was created successfully but then invisible in
+    # both the declarations list and the dashboard counters.
+    created = client.post("/api/declarations", json=_minimal_declaration(), headers=auth_headers)
+    assert created.status_code == 200
+    reference_no = created.json()["reference_no"]
+
+    listed = client.get("/api/declarations?page=1", headers=auth_headers)
+    assert listed.status_code == 200
+    assert any(item["reference_no"] == reference_no for item in listed.json()["items"])
+
+    dashboard = client.get("/api/dashboard", headers=auth_headers)
+    assert dashboard.status_code == 200
+    assert dashboard.json()["stats"]["drafts"] >= 1
+    assert any(item["reference_no"] == reference_no for item in dashboard.json()["recent"])
+
+
 def test_declaration_submit(client, customer_headers):
     res = client.post(
         "/api/declarations?submit=true",
@@ -753,6 +865,30 @@ def test_declaration_submit(client, customer_headers):
     data = res.json()
     assert data["workflow_status"] == "PENDING_REVIEW"
     assert data["status"] == "SUBMITTED"
+
+
+def test_platform_admin_can_submit_on_customers_behalf(client, auth_headers):
+    # PLATFORM_ADMIN has full authority and may submit a declaration on a
+    # customer's behalf without logging into the customer's own account.
+    # PORT_STAFF must still be refused (submission is CUSTOMER or ADMIN only).
+    res = client.post(
+        "/api/declarations?submit=true",
+        json=_minimal_declaration(company_name="KHÁCH HÀNG IMPORT"),
+        headers=auth_headers,
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["workflow_status"] == "PENDING_REVIEW"
+    assert data["status"] == "SUBMITTED"
+
+
+def test_port_staff_cannot_submit_declarations(client, port_staff_headers):
+    res = client.post(
+        "/api/declarations?submit=true",
+        json=_minimal_declaration(company_name="KHÁCH HÀNG IMPORT"),
+        headers=port_staff_headers,
+    )
+    assert res.status_code == 403
 
 
 def test_declaration_validation_rejects_negative_count_and_invalid_movement(client, customer_headers):

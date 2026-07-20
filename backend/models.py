@@ -123,7 +123,8 @@ class Declaration(Base):
     deadweight_tons = Column(Float)
     gross_tonnage = Column(Float)
     certificate_expiry_date = Column(String)
-    crew_count = Column(Integer, nullable=False, default=0)
+    crew_count = Column(Integer, nullable=False, default=0)  # số thuyền viên tối thiểu theo GCN, khóa từ hồ sơ phương tiện
+    crew_onboard_count = Column(Integer, nullable=False, default=0)  # số thuyền viên thực tế đi theo lượt này
     passenger_count = Column(Integer, nullable=False, default=0)
     last_port = Column(String, nullable=False)
     working_port = Column(String, nullable=False)

@@ -414,7 +414,7 @@ class DeclarationSaveRequest(BaseModel):
     id: Optional[int] = None
     version: Optional[int] = None
     vessel_id: Optional[int] = None
-    company_name: str
+    company_name: str = ""
     declaration_date: str
     vessel_name: str
     registration_no: str
@@ -425,6 +425,7 @@ class DeclarationSaveRequest(BaseModel):
     gross_tonnage: Optional[float] = None
     certificate_expiry_date: Optional[str] = None
     crew_count: int = 0
+    crew_onboard_count: int = 0
     passenger_count: int = 0
     last_port: str
     working_port: str
@@ -445,7 +446,7 @@ class DeclarationSaveRequest(BaseModel):
     load: CargoPayload = CargoPayload()
     crew_ids: List[int] = []
 
-    @field_validator("crew_count", "passenger_count")
+    @field_validator("crew_count", "crew_onboard_count", "passenger_count")
     @classmethod
     def non_negative_counts(cls, value: int) -> int:
         if value < 0:
@@ -460,7 +461,7 @@ class DeclarationSaveRequest(BaseModel):
         return value
 
     @field_validator(
-        "company_name", "vessel_name", "registration_no", "vessel_type", "vessel_class",
+        "vessel_name", "registration_no", "vessel_type", "vessel_class",
         "last_port", "working_port", "master_name", "master_phone",
     )
     @classmethod
@@ -469,6 +470,14 @@ class DeclarationSaveRequest(BaseModel):
         if not value:
             raise ValueError("Trường này là bắt buộc.")
         return value
+
+    @field_validator("company_name")
+    @classmethod
+    def optional_company_name(cls, value: str) -> str:
+        # Doanh nghiệp/Chủ phương tiện không bắt buộc — khách hàng có thể để
+        # trống và bổ sung sau; giá trị của CUSTOMER luôn bị ghi đè bằng tên
+        # tổ chức của họ khi lưu, xem save_declaration().
+        return value.strip()
 
     @model_validator(mode="after")
     def eta_before_etd(self) -> "DeclarationSaveRequest":
@@ -993,9 +1002,16 @@ def get_dashboard(
         warnings_q = warnings_q.filter(Vessel.organization_id.in_(org_filter))
         recent_q = recent_q.filter(Declaration.organization_id.in_(org_filter))
         vessel_search_q = vessel_search_q.filter(Vessel.organization_id.in_(org_filter))
-        # Port employees see all non-draft declarations within scope.
-        drafts_q = drafts_q.filter(Declaration.id == -1)  # Drafts count is 0
-        recent_q = recent_q.filter(Declaration.workflow_status != "DRAFT")
+        if scope.user.role == "PLATFORM_ADMIN":
+            # PLATFORM_ADMIN creates its own drafts via "Lưu phiếu" and must be
+            # able to find them again — see get_declarations() for the matching
+            # exemption on the list endpoint.
+            drafts_q = drafts_q.filter(Declaration.organization_id.in_(org_filter))
+        else:
+            # PORT_STAFF reviews submitted work only; a CUSTOMER's un-submitted
+            # draft isn't theirs to see yet.
+            drafts_q = drafts_q.filter(Declaration.id == -1)  # Drafts count is 0
+            recent_q = recent_q.filter(Declaration.workflow_status != "DRAFT")
 
     # Counts
     vessels_count = vessels_q.with_entities(func.count(Vessel.id)).scalar()
@@ -1213,13 +1229,26 @@ def get_port_vessel_register(
         for vessel in vessels
     )
     teu_capacity = sum(vessel.container_capacity_teu or 0 for vessel in vessels)
+    # Cộng theo từng dòng operating_profiles (không phải vessel.cargo_capacity_tons,
+    # vốn chỉ giữ giá trị của vùng đầu tiên) để không bỏ sót năng lực vùng thứ hai
+    # của Salan hoạt động cả VR-SI lẫn VR-SII.
+    tonnage_capacity = sum(
+        profile.cargo_capacity_tons or 0
+        for vessel in vessels
+        for profile in vessel.operating_profiles
+    )
     area_counts: dict[str, int] = {}
     type_counts: dict[str, int] = {}
     for vessel in vessels:
         type_counts[vessel.vessel_type] = type_counts.get(vessel.vessel_type, 0) + 1
-        areas = {profile.activity_area for profile in vessel.operating_profiles if profile.activity_area}
-        for area in areas:
-            area_counts[area] = area_counts.get(area, 0) + 1
+        # Mỗi Salan tính đúng một lần: vùng đơn giữ nguyên nhãn, vùng kép gộp
+        # thành một dòng riêng (vd "VR-SI / VR-SII") thay vì cộng trùng vào cả
+        # hai thanh — nếu không tổng các thanh sẽ vượt quá tổng số Salan.
+        areas = sorted({profile.activity_area for profile in vessel.operating_profiles if profile.activity_area})
+        if not areas:
+            continue
+        label = " / ".join(areas)
+        area_counts[label] = area_counts.get(label, 0) + 1
     return {
         "items": [_vessel_dict(vessel) for vessel in vessels],
         "stats": {
@@ -1228,6 +1257,7 @@ def get_port_vessel_register(
             "multiAreaVessels": multi_area_count,
             "certificateWarnings": certificate_warnings,
             "teuCapacity": teu_capacity,
+            "tonnageCapacity": tonnage_capacity,
         },
         "byArea": [
             {"label": label, "value": value}
@@ -1479,6 +1509,52 @@ def save_vessel(
     return _vessel_dict(vessel)
 
 
+@app.delete("/api/vessels/{vessel_id}")
+def delete_vessel(
+    vessel_id: int,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(require_port_scope),
+):
+    # Deletion is PLATFORM_ADMIN-only: PORT_STAFF keeps edit rights (fix wrong
+    # fields) but a hard delete of a master vessel record is an admin action.
+    if scope.user.role != "PLATFORM_ADMIN":
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ Platform admin mới có quyền xóa hồ sơ phương tiện.",
+        )
+    vessel = db.query(Vessel).filter(Vessel.id == vessel_id).first()
+    if not vessel:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện.")
+    require_vessel_in_scope(db, scope, vessel)
+
+    declaration_count = db.query(Declaration).filter(Declaration.vessel_id == vessel_id).count()
+    if declaration_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Không thể xóa: phương tiện đang gắn với {declaration_count} phiếu khai báo. "
+                   "Xóa các phiếu liên quan trước nếu chắc chắn cần xóa hồ sơ này.",
+        )
+    crew_count = db.query(CrewMember).filter(CrewMember.vessel_id == vessel_id).count()
+    if crew_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Không thể xóa: phương tiện đang gắn với {crew_count} thuyền viên trong Danh sách thuyền viên. "
+                   "Bỏ gán thuyền viên khỏi phương tiện này trước khi xóa.",
+        )
+
+    identity = f"{vessel.name} / {vessel.registration_no}"
+    organization_id = vessel.organization_id
+    audit_unit_id = scope.reporting_unit_id if scope.is_port else None
+    db.delete(vessel)
+    audit(
+        db, "VESSEL", vessel_id, "DELETE", identity,
+        actor_user_id=scope.user.id, organization_id=organization_id,
+        reporting_unit_id=audit_unit_id,
+    )
+    db.commit()
+    return {"deleted": vessel_id}
+
+
 @app.post("/api/vessels/{vessel_id}/verify-registry")
 def verify_vessel_registry(
     vessel_id: int,
@@ -1649,10 +1725,15 @@ def get_declarations(
     if scope.is_customer:
         query = query.filter(Declaration.organization_id == scope.organization_id)
     else:
-        # PORT: only Organizations linked to the resolved unit, and no drafts.
+        # PORT: only Organizations linked to the resolved unit.
         org_ids = scope.member_org_ids
         query = query.filter(Declaration.organization_id.in_(org_ids)) if org_ids else query.filter(sql_false())
-        query = query.filter(Declaration.workflow_status != "DRAFT")
+        if scope.user.role != "PLATFORM_ADMIN":
+            # PORT_STAFF reviews submitted work only — a CUSTOMER's un-submitted
+            # draft isn't theirs to see yet. PLATFORM_ADMIN is exempt: drafts it
+            # creates itself (see review-strip "Lưu phiếu" flow) must remain
+            # visible to the admin who made them, or they're unreachable.
+            query = query.filter(Declaration.workflow_status != "DRAFT")
 
     if q:
         search = f"%{q}%"
@@ -1707,10 +1788,14 @@ def save_declaration(
     scope: Scope = Depends(resolve_scope),
 ):
     user = scope.user
-    if submit and not scope.is_customer:
+    # PLATFORM_ADMIN has full authority and may submit on a customer's behalf
+    # without logging into their account; the audit trail below still records
+    # the admin as the real actor, so the customer's own submissions (through
+    # their own login) remain the ordinary, unambiguous legal record.
+    if submit and not (scope.is_customer or user.role == "PLATFORM_ADMIN"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Chỉ khách hàng/chủ phương tiện (CUSTOMER) mới có quyền xác nhận gửi phiếu khai báo."
+            detail="Chỉ khách hàng/chủ phương tiện (CUSTOMER) hoặc Platform admin mới có quyền xác nhận gửi phiếu khai báo."
         )
 
     if scope.is_customer:
@@ -1761,7 +1846,7 @@ def save_declaration(
         for field_name in (
             "declaration_date", "vessel_name", "registration_no",
             "vessel_type", "vessel_class", "length_m", "deadweight_tons", "gross_tonnage",
-            "certificate_expiry_date", "crew_count", "passenger_count", "last_port",
+            "certificate_expiry_date", "crew_count", "crew_onboard_count", "passenger_count", "last_port",
             "working_port", "departure_berth", "destination_port", "agent_ptnd_name",
             "is_passenger_call", "eta", "etd", "master_name", "master_phone",
             "movement_type", "purpose", "cargo_description",
@@ -1794,6 +1879,7 @@ def save_declaration(
             gross_tonnage=payload.gross_tonnage,
             certificate_expiry_date=payload.certificate_expiry_date,
             crew_count=payload.crew_count,
+            crew_onboard_count=payload.crew_onboard_count,
             passenger_count=payload.passenger_count,
             last_port=payload.last_port,
             working_port=payload.working_port,
@@ -1849,7 +1935,11 @@ def save_declaration(
             actor_role=user.role,
             actor_user_id=user.id,
             correlation_id=correlation_id.get(),
-            note="Khách hàng xác nhận gửi phiếu khai báo.",
+            note=(
+                "Khách hàng xác nhận gửi phiếu khai báo."
+                if scope.is_customer
+                else f"{user.full_name or user.username} (Platform admin) xác nhận gửi phiếu thay mặt khách hàng."
+            ),
             created_at=now_iso(),
         )
         db.add(event)
@@ -1868,6 +1958,48 @@ def save_declaration(
     result["id"] = decl.id
     result["status"] = decl.status
     return result
+
+
+@app.delete("/api/declarations/{declaration_id}")
+def delete_declaration(
+    declaration_id: int,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(require_port_scope),
+):
+    # PLATFORM_ADMIN-only, and only for declarations the Cảng has not yet acted
+    # on (DRAFT / CHANGES_REQUESTED). Once a declaration reaches PENDING_REVIEW
+    # it has been formally submitted and may already be under Cảng review;
+    # APPROVED is a closed record. Both must be kept, not deleted — this
+    # endpoint exists for admin/test cleanup of drafts, not for erasing a real
+    # port-call history.
+    if scope.user.role != "PLATFORM_ADMIN":
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ Platform admin mới có quyền xóa phiếu khai báo.",
+        )
+    decl = db.query(Declaration).filter(Declaration.id == declaration_id).first()
+    if not decl:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiếu.")
+    scope.require_org(decl.organization_id)
+
+    if decl.workflow_status not in ("DRAFT", "CHANGES_REQUESTED"):
+        raise HTTPException(
+            status_code=409,
+            detail="Chỉ có thể xóa phiếu ở trạng thái Nháp hoặc Yêu cầu bổ sung. "
+                   "Phiếu đã gửi cho Cảng xem xét (hoặc đã duyệt) phải được giữ lại làm hồ sơ.",
+        )
+
+    identity = decl.reference_no
+    organization_id = decl.organization_id
+    audit_unit_id = scope.reporting_unit_id if scope.is_port else None
+    db.delete(decl)
+    audit(
+        db, "DECLARATION", declaration_id, "DELETE", identity,
+        actor_user_id=scope.user.id, organization_id=organization_id,
+        reporting_unit_id=audit_unit_id,
+    )
+    db.commit()
+    return {"deleted": declaration_id}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
