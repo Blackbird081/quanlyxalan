@@ -1,10 +1,12 @@
 # Roadmap: Xử lý tại cảng (Bảo vệ / Giao nhận / Hủy phiếu)
 
-> Trạng thái: đã qua đánh giá độc lập luồng dữ liệu, **chưa triển khai** (trừ
-> phần thuật ngữ ETB/ETD·ATB/ATD đã áp dụng ở nhãn hiển thị). Tài liệu này tổng
-> hợp các quyết định nghiệp vụ đã chốt qua trao đổi, làm cơ sở cho việc implement
-> sau này. Không đổi database/report đang chạy ở giai đoạn 1; các giai đoạn sau
-> chỉ **thêm** cột/endpoint, không sửa hành vi hiện có.
+> **Trạng thái: ĐÃ TRIỂN KHAI đầy đủ 4/4 giai đoạn** (PR
+> [Blackbird081/quanlyxalan#... → hoangnmr/quanlyxalan#5](https://github.com/hoangnmr/quanlyxalan/pull/5)).
+> Tài liệu này giữ nguyên làm hồ sơ quyết định nghiệp vụ đã chốt trước khi code —
+> mọi mục "Giai đoạn 1-4" bên dưới mô tả **kế hoạch gốc**, đã được implement đúng
+> như vậy trừ khi có ghi chú "✅ Đã làm" / thay đổi trong mục **"Nhật ký triển
+> khai & điều chỉnh sau khi implement"** ở cuối file. Đọc mục đó trước nếu chỉ
+> quan tâm trạng thái hiện tại, không cần đọc lại toàn bộ kế hoạch.
 
 ## Findings đánh giá độc lập (đã xử lý trong tài liệu)
 
@@ -186,3 +188,50 @@ tránh mất dấu phiếu đang hoạt động.
 Bốn giai đoạn độc lập theo thứ tự nền tảng trước, tính năng sau — mỗi giai
 đoạn merge riêng, không giai đoạn nào chặn giai đoạn kế nếu cần dừng giữa
 chừng để đánh giá.
+
+## Nhật ký triển khai & điều chỉnh sau khi implement
+
+**Cả 4 giai đoạn đã code, test và merge đúng như kế hoạch mô tả ở trên.**
+43 test mới trong `tests/test_port_operations.py`, kiểm chứng UI thật qua
+Playwright cho từng giai đoạn (không chỉ dựa vào test suite). Migration:
+`alembic/versions/u20f0f000020_port_operations_phase1.py`.
+
+**Xác nhận lại các quyết định gây tranh cãi trong quá trình tự test UI** —
+không phải bug, giữ nguyên theo đúng kế hoạch gốc:
+- "Cổng cứng" Giao nhận chỉ xác nhận được **sau khi** Bảo vệ xác nhận thu phí
+  cầu bến (không có chiều ngược lại) — đúng chủ đích, xem "Quyết định đã chốt"
+  dòng 57-58 và Giai đoạn 2. Đã hỏi lại trực tiếp và được xác nhận giữ nguyên.
+
+**Các điều chỉnh UI/UX phát sinh ngoài kế hoạch gốc**, sau khi user tự test
+giao diện thật và phản hồi từng vòng — không đổi luồng nghiệp vụ, chỉ đổi cách
+trình bày:
+- Bỏ hẳn nhãn "Vào cảng"/"Rời cảng" khỏi mọi nơi hiển thị (bảng danh sách, tab
+  Kế hoạch làm hàng, form tạo phiếu, chi tiết phiếu) — làm rõ **không có khái
+  niệm "2 loại phiếu"**, chỉ có 1 loại phiếu khai báo ghi cả 2 mốc đến/rời.
+  `Declaration.movement_type` (ARRIVAL/DEPARTURE) vẫn giữ trong DB (dùng cho
+  báo cáo Phụ lục 2 và `_declaration_operating_date()`) nhưng không còn lộ ra
+  giao diện — cân nhắc dọn kỹ thuật nhưng quyết định giữ nguyên vì rủi ro dọn
+  cao hơn giá trị mang lại, miễn không hiện trên UI là đạt yêu cầu.
+- Đổi nhãn trạng thái "Chờ Cảng xử lý" → "Chờ duyệt".
+- Bỏ bộ lọc "Loại phiếu" khỏi thanh filter (ẩn, không xóa hẳn — JS còn tham
+  chiếu), mở rộng ô "Thuyền trưởng".
+- Lỗi validate 422 hiện rõ tên field thay vì chỉ "Field required" chung chung.
+- `master_phone` không còn bị bắt buộc khi để trống (thiếu default khiến
+  Pydantic coi là field bị thiếu thay vì chuỗi rỗng).
+- Log "Hoạt động tại cảng" format ngày giờ theo chuẩn Việt Nam
+  (`dd/mm/yyyy hh:mm`) thay vì in nguyên chuỗi ISO thô.
+- Tách nút "Lưu ATB/ATD" gộp chung thành 2 nút độc lập ("Lưu ATB" / "Lưu ATD")
+  — ATB và ATD thường cách nhau nhiều ngày, gộp chung dễ hiểu lầm phải điền đủ
+  cả hai mới lưu được. Layout 2 field xếp ngang hàng thay vì xếp dọc chiếm hết
+  chiều rộng dialog.
+- Sửa màu badge "Tiến trình" (approval dot) từ xám nhạt gần như vô hình sang
+  tông vàng cảnh báo, đồng bộ với badge "Chờ duyệt"; khối "Bảo vệ"/"Giao nhận"
+  trong dialog chi tiết phiếu thêm viền để tách bạch thay vì nhòe vào nhau.
+- Sửa lỗi CSS Grid khiến nút "Ghi nhận thao tác" bị đè lên khung ghi chú khi
+  người dùng kéo giãn tay ô textarea (`grid-auto-rows: min-content`).
+
+**Nợ kỹ thuật đã biết, cố ý không xử lý ngay**: migration `u20f0f000020`
+idempotent và an toàn chạy lại, nhưng **chưa từng được chạy trên DB `cangvu`
+thật** — chỉ chạy trên Postgres throwaway dùng để test trong nhánh này. Người
+merge PR cần chạy `alembic upgrade head` trên bản backup/staging của DB thật
+trước, xác nhận ổn rồi mới áp dụng production.
