@@ -30,6 +30,11 @@ class User(Base):
     # platform administrator may have no membership at all. See ReportingUnitUser.
     is_active = Column(Integer, nullable=False, default=1)  # 0/1 integer flag (legacy boolean encoding)
     notification_preferences_json = Column(Text, nullable=False, default='{"in_app_certificate_reminders": true}')
+    # Mốc lần đổi mật khẩu gần nhất — JWT phát hành TRƯỚC mốc này bị coi là hết
+    # hạn ngay lập tức, dù chưa tới exp. Không có cột này, đổi/reset mật khẩu
+    # (vd. nghi ngờ lộ mật khẩu, máy bị mất) không thu hồi được token cũ đang
+    # sống tới 24h — xem get_current_user và _issue_token_for_user trong app.py.
+    password_changed_at = Column(String, nullable=False, default=now_iso)
     created_at = Column(String, default=now_iso)
 
     organization = relationship("Organization", back_populates="users", lazy="select")

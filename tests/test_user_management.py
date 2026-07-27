@@ -236,6 +236,44 @@ def test_change_own_password_then_login_with_it(client, self_service_user):
     assert client.post("/api/auth/login", json={"username": self_service_user, "password": "brandnew123"}).status_code == 200
 
 
+def test_change_password_revokes_tokens_issued_before_the_change(client, self_service_user):
+    """Trước đây đổi mật khẩu không thu hồi token JWT đã phát hành — một token
+    cũ (vd. bị lộ trên thiết bị khác, chính là lý do người dùng đổi mật khẩu)
+    vẫn dùng được tới hết hạn 24h. Token phải mất hiệu lực ngay sau khi đổi."""
+    old_token_headers = _auth(client, self_service_user, "origpass1")
+    # Token cũ dùng được trước khi đổi.
+    assert client.get("/api/auth/me", headers=old_token_headers).status_code == 200
+
+    res = client.post(
+        "/api/me/password", headers=old_token_headers,
+        json={"current_password": "origpass1", "new_password": "brandnew123"},
+    )
+    assert res.status_code == 200, res.text
+
+    # Token cũ (phát hành trước khi đổi) không còn dùng được, dù chưa hết hạn.
+    assert client.get("/api/auth/me", headers=old_token_headers).status_code == 401
+
+    # Token MỚI (đăng nhập lại bằng mật khẩu mới) hoạt động bình thường.
+    new_token_headers = _auth(client, self_service_user, "brandnew123")
+    assert client.get("/api/auth/me", headers=new_token_headers).status_code == 200
+
+
+def test_admin_reset_also_revokes_existing_tokens(client, self_service_user):
+    old_token_headers = _auth(client, self_service_user, "origpass1")
+    assert client.get("/api/auth/me", headers=old_token_headers).status_code == 200
+
+    admin_headers = _auth(client, "admin_um", "adminpass")
+    users = client.get("/api/admin/users", headers=admin_headers).json()["items"]
+    target_id = next(u["id"] for u in users if u["username"] == self_service_user)
+    res = client.post(
+        f"/api/admin/users/{target_id}/reset-password", headers=admin_headers,
+        json={"password": "adminset456"},
+    )
+    assert res.status_code == 200, res.text
+
+    assert client.get("/api/auth/me", headers=old_token_headers).status_code == 401
+
+
 def test_change_password_rejects_wrong_current_password(client, self_service_user):
     headers = _auth(client, self_service_user, "origpass1")
     res = client.post(

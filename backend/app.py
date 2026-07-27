@@ -893,11 +893,16 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         db.delete(tracker)
     _purge_stale_login_attempts(db, now)
 
-    # Generate token containing username (sub), role, and org_id
+    # Generate token containing username (sub), role, org_id, and the password
+    # timestamp at issuance (pwd_ts) — get_current_user compares this against
+    # the current value on every request so a later password change/reset
+    # revokes tokens issued before it, instead of leaving them valid for up to
+    # ACCESS_TOKEN_EXPIRE_MINUTES.
     token = create_access_token(data={
         "sub": user.username,
         "role": user.role,
-        "org_id": user.organization_id
+        "org_id": user.organization_id,
+        "pwd_ts": user.password_changed_at,
     })
 
     # Audit success
@@ -1033,6 +1038,9 @@ def change_my_password(
     if verify_password(payload.new_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Mật khẩu mới phải khác mật khẩu hiện tại.")
     current_user.password_hash = get_password_hash(payload.new_password)
+    # Thu hồi mọi token đã phát hành trước đó (kể cả trên thiết bị khác) —
+    # xem so sánh pwd_ts trong get_current_user (backend/auth.py).
+    current_user.password_changed_at = now_iso()
     audit(
         db, "USER", current_user.id, "PASSWORD_SELF_CHANGE",
         f"{current_user.username} tự đổi mật khẩu",
@@ -1468,6 +1476,10 @@ def reset_user_password(
     if not target:
         raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
     target.password_hash = get_password_hash(payload.password)
+    # Thu hồi mọi token của tài khoản này đang sống — Admin thường reset vì
+    # nghi ngờ mật khẩu bị lộ hoặc thiết bị bị mất, nên token cũ phải mất hiệu
+    # lực ngay, không chờ tới hạn (xem so sánh pwd_ts trong get_current_user).
+    target.password_changed_at = now_iso()
     audit(
         db, "USER", target.id, "RESET_PASSWORD",
         f"Đặt lại mật khẩu cho {target.username}",
