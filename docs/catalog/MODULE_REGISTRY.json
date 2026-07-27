@@ -1,0 +1,24 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "projectName":  "quanlyxalan",
+    "updatedAt":  "2026-07-27",
+    "claimBoundary":  "Registers only source-verified modules. Statuses describe current implementation and executable evidence, not roadmap intent.",
+    "modules":  [
+                    {
+                        "id":  "user-management-api",
+                        "name":  "User Management API",
+                        "path":  "backend/user_management_api.py",
+                        "status":  "ENFORCED",
+                        "description":  "Platform-admin user, operations-summary, and local-backup API routes extracted from app.py.",
+                        "evidence":  "docs/reviews/APP_ROUTE_EXTRACTION_REVIEW_20260727.md; tests/test_user_management.py; tests/test_backend.py"
+                    },
+                    {
+                        "id":  "vessels-api",
+                        "name":  "Vessels API",
+                        "path":  "backend/vessels_api.py",
+                        "status":  "ENFORCED",
+                        "description":  "Reporting-unit, port-register, and vessel API routes extracted from app.py.",
+                        "evidence":  "docs/reviews/APP_ROUTE_EXTRACTION_REVIEW_20260727.md; tests/test_backend.py; tests/test_rbac.py; tests/test_port_operations.py"
+                    }
+                ]
+}

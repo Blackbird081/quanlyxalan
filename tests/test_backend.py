@@ -31,6 +31,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 import backend.app as app_module
+import backend.user_management_api as user_management_module
 
 from backend.models import (
     AuditEvent, Base, Declaration, ImportJob, ReportAdjustment, User, Organization, Vessel,
@@ -2397,7 +2398,7 @@ def test_admin_backup_routes_are_registered_and_role_scoped(
     client, auth_headers, customer_headers, tmp_path, monkeypatch,
 ):
     backup_dir = tmp_path / "backups"
-    monkeypatch.setattr(app_module, "BACKUP_DIR", backup_dir)
+    monkeypatch.setattr(user_management_module, "BACKUP_DIR", backup_dir)
     assert client.get("/api/admin/backups", headers=auth_headers).json() == []
     forbidden = client.get("/api/admin/backups", headers=customer_headers)
     assert forbidden.status_code == 403

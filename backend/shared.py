@@ -7,6 +7,7 @@ dùng thì để nguyên tại chỗ, không gom vào đây.
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, List, Optional
 
 from fastapi import HTTPException
@@ -32,6 +33,30 @@ CREW_ROLE_CANONICAL = {import_match_key(role): role for role in CREW_ROLES}
 # app.py) để mọi module router dùng chung đúng một handler — gọi
 # configure_local_logging nhiều lần sẽ gắn thêm handler trùng lặp.
 access_logger = configure_local_logging(ROOT)
+
+
+def _clean_email(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        return ""
+    if "@" not in value or " " in value or len(value) > 200:
+        raise ValueError("Email không hợp lệ.")
+    return value
+
+
+def certificate_status(value: Optional[str], warning_days: int = 30) -> str:
+    if not value:
+        return "UNKNOWN"
+    try:
+        expiry = date.fromisoformat(value[:10])
+    except ValueError:
+        return "UNKNOWN"
+    remaining = (expiry - date.today()).days
+    if remaining < 0:
+        return "EXPIRED"
+    if remaining <= warning_days:
+        return "EXPIRING"
+    return "VALID"
 
 
 # ── Attachment signature rules ─────────────────────────────────────────────────

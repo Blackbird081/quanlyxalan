@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "cvf://downstream-catalog/artifact-registry-schema/1.0",
+  "title": "CVF Downstream Artifact Registry",
+  "description": "Closed-schema machine source that self-registers the generated bootstrap authority surfaces (schemas, tool, manifest, policy, continuity, implementation truth, generated views, governed artifact families). It never claims runtime module capability.",
+  "type": "object",
+  "required": ["schemaVersion", "projectName", "updatedAt", "claimBoundary", "artifacts"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0" },
+    "projectName": { "type": "string", "minLength": 1 },
+    "updatedAt": { "type": "string", "minLength": 1 },
+    "claimBoundary": { "type": "string", "minLength": 1 },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/artifactEntry" }
+    }
+  },
+  "definitions": {
+    "artifactEntry": {
+      "type": "object",
+      "required": ["id", "family", "path", "status", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "family": {
+          "type": "string",
+          "enum": [
+            "schema",
+            "tool",
+            "manifest",
+            "policy",
+            "continuity",
+            "implementation_truth",
+            "generated_view",
+            "governed_artifact_family"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Project-relative POSIX-style path. No drive letters, no backslashes, no path escape segments."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "DEPRECATED", "RETIRED"]
+        },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

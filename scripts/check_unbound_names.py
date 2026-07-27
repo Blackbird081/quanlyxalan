@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import ast
 import builtins
+import glob
 import sys
 from pathlib import Path
 
@@ -90,19 +91,31 @@ def unbound_names(path: Path) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("paths", nargs="+", type=Path)
+    parser.add_argument("paths", nargs="+")
     args = parser.parse_args()
 
     failed = False
-    for path in args.paths:
+    paths: list[Path] = []
+    for argument in args.paths:
+        if glob.has_magic(argument):
+            matches = glob.glob(argument)
+            if not matches:
+                print(f"{argument}: NOT FOUND")
+                failed = True
+                continue
+            paths.extend(Path(match) for match in matches)
+        else:
+            paths.append(Path(argument))
+
+    for path in paths:
         if not path.is_file():
-            print(f"{path}: KHÔNG TÌM THẤY FILE")
+            print(f"{path}: NOT FOUND")
             failed = True
             continue
         missing = unbound_names(path)
         if missing:
             failed = True
-            print(f"{path}: THIẾU {', '.join(missing)}")
+            print(f"{path}: MISSING {', '.join(missing)}")
         else:
             print(f"{path}: OK")
     return 1 if failed else 0

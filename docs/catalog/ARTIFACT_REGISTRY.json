@@ -1,0 +1,127 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "projectName":  "quanlyxalan",
+    "updatedAt":  "2026-07-27",
+    "claimBoundary":  "Registers generated bootstrap authority surfaces only; it does not claim runtime module capability.",
+    "artifacts":  [
+                      {
+                          "id":  "schema-artifact-registry",
+                          "family":  "schema",
+                          "path":  "docs/catalog/schemas/ARTIFACT_REGISTRY.schema.json",
+                          "status":  "ACTIVE",
+                          "description":  "Closed schema reference for the Artifact Registry."
+                      },
+                      {
+                          "id":  "schema-module-registry",
+                          "family":  "schema",
+                          "path":  "docs/catalog/schemas/MODULE_REGISTRY.schema.json",
+                          "status":  "ACTIVE",
+                          "description":  "Closed schema reference for the Module Registry."
+                      },
+                      {
+                          "id":  "tool-catalog-manager",
+                          "family":  "tool",
+                          "path":  "scripts/manage_cvf_downstream_catalog.ps1",
+                          "status":  "ACTIVE",
+                          "description":  "Executable catalog manager (--check / --write)."
+                      },
+                      {
+                          "id":  "tool-catalog-library",
+                          "family":  "tool",
+                          "path":  "scripts/lib/downstream_catalog/CvfDownstreamCatalogLib.ps1",
+                          "status":  "ACTIVE",
+                          "description":  "Standard-library catalog validation and rendering functions."
+                      },
+                      {
+                          "id":  "manifest-cvf",
+                          "family":  "manifest",
+                          "path":  ".cvf/manifest.json",
+                          "status":  "ACTIVE",
+                          "description":  "CVF enforcement manifest."
+                      },
+                      {
+                          "id":  "policy-cvf",
+                          "family":  "policy",
+                          "path":  ".cvf/policy.json",
+                          "status":  "ACTIVE",
+                          "description":  "CVF governance policy."
+                      },
+                      {
+                          "id":  "continuity-session-memory",
+                          "family":  "continuity",
+                          "path":  "CVF_SESSION_MEMORY.md",
+                          "status":  "ACTIVE",
+                          "description":  "Project continuity front door."
+                      },
+                      {
+                          "id":  "continuity-active-session-state",
+                          "family":  "continuity",
+                          "path":  "CVF_SESSION/ACTIVE_SESSION_STATE.json",
+                          "status":  "ACTIVE",
+                          "description":  "Active session/phase/role state."
+                      },
+                      {
+                          "id":  "continuity-initial-handoff",
+                          "family":  "continuity",
+                          "path":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V1_2026-07-27.md",
+                          "status":  "ACTIVE",
+                          "description":  "Initial agent handoff."
+                      },
+                      {
+                          "id":  "truth-implementation-status",
+                          "family":  "implementation_truth",
+                          "path":  "IMPLEMENTATION_STATUS.json",
+                          "status":  "ACTIVE",
+                          "description":  "Machine implementation-truth surface."
+                      },
+                      {
+                          "id":  "view-docs-index",
+                          "family":  "generated_view",
+                          "path":  "docs/INDEX.md",
+                          "status":  "ACTIVE",
+                          "description":  "Generated documentation index."
+                      },
+                      {
+                          "id":  "view-module-catalog",
+                          "family":  "generated_view",
+                          "path":  "docs/catalog/MODULE_CATALOG.md",
+                          "status":  "ACTIVE",
+                          "description":  "Generated human module catalog."
+                      },
+                      {
+                          "id":  "family-decisions",
+                          "family":  "governed_artifact_family",
+                          "path":  "docs/decisions",
+                          "status":  "ACTIVE",
+                          "description":  "Decisions."
+                      },
+                      {
+                          "id":  "family-roadmaps",
+                          "family":  "governed_artifact_family",
+                          "path":  "docs/roadmaps",
+                          "status":  "ACTIVE",
+                          "description":  "Roadmaps."
+                      },
+                      {
+                          "id":  "family-specs",
+                          "family":  "governed_artifact_family",
+                          "path":  "docs/specs",
+                          "status":  "ACTIVE",
+                          "description":  "Specifications."
+                      },
+                      {
+                          "id":  "family-work-orders",
+                          "family":  "governed_artifact_family",
+                          "path":  "docs/work_orders",
+                          "status":  "ACTIVE",
+                          "description":  "Work orders."
+                      },
+                      {
+                          "id":  "family-reviews",
+                          "family":  "governed_artifact_family",
+                          "path":  "docs/reviews",
+                          "status":  "ACTIVE",
+                          "description":  "Reviews and evidence."
+                      }
+                  ]
+}
