@@ -304,6 +304,7 @@ pass before committing — this is a hard project rule, not a suggestion.
 | `register-local-backup-task.sh` | Registers a launchd daily backup job (macOS) |
 | `generate_appendix_operational_review.py` | Read-only Appendix export from the live local DB, for review |
 | `generate_appendix_positive_fixture.py` | Generates isolated Appendix workbooks via an in-memory DB (never touches `data/cang_vu.db`) |
+| `check_unbound_names.py` | Reports names a file uses but never binds — catches imports dropped when moving code between modules (§18). Static only, so a clean result is not proof; the test suite is still the gate |
 
 ## 15. Configuration (`.env`, see `.env.example`)
 
@@ -362,8 +363,56 @@ the current state before relying on it.
 | External maritime-authority sync | `backend/integrations.py` (still `MANUAL`-only by design) |
 | Local backup/restore behavior | `scripts/backup_local.py`, `scripts/restore_local.py` |
 | Seed/demo data | `scripts/seed_demo_data.py` + `docs/DEMO_DATA_POLICY.md` |
+| Split another route block out of `app.py` | §18 — the order that worked, and the two mistakes the first run made |
 
-## 18. Governance note
+## 18. Splitting a route block out of `app.py`
+
+`app.py` still holds most routes. Two blocks have been extracted so far —
+`reports_api.py` and `import_api.py` — and the remaining candidates are VESSELS
+(~600 lines) and USER MANAGEMENT (~430). What follows is what those two runs
+actually cost, not a general refactoring method.
+
+**Why it is tractable here at all:** `app.py` carries `# ═══` section markers
+(listed in §6), so the boundaries already exist in the file. Sections are also
+mostly self-contained — check before assuming, but REPORTS had zero symbols
+referenced from outside it.
+
+The order that worked:
+
+1. **Check for reverse dependencies first.** Grep every symbol the section
+   defines against the rest of the file. If something outside uses one, the
+   section is not a clean unit and the plan changes.
+2. **List what the section needs from outside**, via AST rather than by eye —
+   locals and comprehension variables are easy to mistake for imports.
+3. **Split those needs into two piles.** Things only this section uses travel
+   with it (`ReportAdjustmentRequest` went to `reports_api.py`). Things `app.py`
+   still needs elsewhere must move *down* a layer instead, to `database.py` or
+   `shared.py` — never import back from `app.py`, which is the cycle
+   `historical_api.py` avoided from the start.
+4. **Create the module, then verify it before touching `app.py`:**
+   `python scripts/check_unbound_names.py backend/<new>.py`, then import it for
+   real. During the reports run this step was skipped and a missing `ROOT` —
+   one line out of 883 — got through to the test suite.
+5. **Delete from `app.py` with assertions on the boundary lines**, not bare
+   slice indices. Line numbers shift between reads; the assertions stopped two
+   off-by-one deletions that would have cut into the neighbouring section.
+6. **Register the router next to the others near the top of `app.py`.** The
+   static mount at the bottom is a catch-all: anything registered after it never
+   receives a request.
+
+Verifying the move changed nothing:
+
+- Dump `app.routes` before and after and diff them. Both extractions kept all
+  77 `/api` routes byte-identical, which is the strongest evidence the API
+  contract survived. Watch route *order* too — `/api/reports/{kind}` must stay
+  after the more specific `/api/reports/...` paths or it swallows them.
+- Run the **whole** suite, not just the tests for the block being moved.
+- Exercise the feature against a running server. Tests did not catch that
+  `test_static_frontend` asserts on the *text of* `backend/app.py`; a moved
+  string breaks it even though behaviour is unchanged. That assertion was the
+  only one of its kind, but the class of problem is worth remembering.
+
+## 19. Governance note
 
 This repo runs under the CVF framework. Before non-trivial work, an agent
 should read `AGENTS.md` at the repo root — it defines phase gates
