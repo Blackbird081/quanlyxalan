@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V1_2026-07-27.md",
-    "nextAllowedMove":  "Commit the reviewed changed set, verify the commit, then transition to CLOSER.",
+    "nextAllowedMove":  "Tranche closed. Await the next governed request from INTAKE.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "COMMIT_STEWARD",
+    "activeRole":  "CLOSER",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
     "updatedAt":  "2026-07-27"
 }

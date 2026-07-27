@@ -10,6 +10,9 @@ Reviewer role: REVIEWER
 
 Risk: R1
 
+Implementation commit:
+`1b2dd1089250dafc316c205645c22d454758952d`
+
 ## Changed Behavior Assessment
 
 No intended application behavior changed. The VESSELS and USER MANAGEMENT
