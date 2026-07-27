@@ -302,6 +302,26 @@ class AppSetting(Base):
     value = Column(Text, nullable=False, default="")
     updated_at = Column(String, nullable=False, default=now_iso)
 
+
+class LoginAttempt(Base):
+    """Bộ đếm đăng nhập sai theo IP, phục vụ chặn dò mật khẩu.
+
+    Trước đây đếm bằng dict trong RAM: restart server là mất sạch (kẻ tấn công
+    chỉ cần đợi một lần deploy), chạy nhiều worker thì mỗi worker đếm riêng nên
+    ngưỡng thực tế bị nhân lên, và dict phình mãi vì không bao giờ dọn.
+
+    Bảng này KHÔNG phải nhật ký — mỗi IP đúng một dòng, ghi đè tại chỗ. Lịch sử
+    đăng nhập sai vẫn nằm ở ``audit_events`` (action ``LOGIN_FAILURE``).
+    """
+    __tablename__ = "login_attempts"
+    ip = Column(String, primary_key=True)
+    failures = Column(Integer, nullable=False, default=0)
+    # ISO-8601 như mọi cột thời gian khác trong ứng dụng (xem now_iso).
+    blocked_until = Column(String, nullable=False, default="")
+    # Có index vì việc dọn định kỳ lọc theo cột này.
+    updated_at = Column(String, nullable=False, default=now_iso, index=True)
+
+
 class SyncJob(Base):
     __tablename__ = "sync_jobs"
     id = Column(Integer, primary_key=True, autoincrement=True)

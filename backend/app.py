@@ -46,7 +46,8 @@ from .database import (
 )
 from .models import (
     AppSetting, Attachment, AuditEvent, Base, CrewMember, Declaration,
-    DeclarationCrew, DeclarationEvent, ImportJob, IntegrationConnector, Organization,
+    DeclarationCrew, DeclarationEvent, ImportJob, IntegrationConnector,
+    LoginAttempt, Organization,
     ReportAdjustment, SyncJob, User, Vessel, VesselOperatingProfile,
     ReportingUnit, ReportingUnitOrganization, ReportingUnitUser, ReportingUnitVessel,
     HistoricalCargoRow, HistoricalPortCall, HistoricalReportImport,
@@ -822,39 +823,56 @@ UNLOAD_MOVEMENTS = [
 LOAD_MOVEMENTS = ["Nội địa", "Xuất khẩu"]
 
 
-# Rate limiting tracker for login: {ip: {"failures": count, "blocked_until": datetime}}
-_login_attempts: Dict[str, Dict[str, Any]] = {}
+# Chặn dò mật khẩu: ngưỡng và thời gian khóa.
+LOGIN_MAX_FAILURES = 5
+LOGIN_BLOCK_MINUTES = 5
+# Dòng đếm cũ hơn mốc này coi như hết hiệu lực và bị dọn — giữ bảng không phình
+# theo số IP đã từng gõ sai (dict trong RAM trước đây không bao giờ dọn).
+LOGIN_ATTEMPT_RETENTION_HOURS = 24
+
+
+def _purge_stale_login_attempts(db: Session, now: datetime) -> None:
+    cutoff = (now - timedelta(hours=LOGIN_ATTEMPT_RETENTION_HOURS)).isoformat()
+    db.query(LoginAttempt).filter(LoginAttempt.updated_at < cutoff).delete(
+        synchronize_session=False
+    )
+
 
 @app.post("/api/auth/login")
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     ip = request.client.host if request.client else "unknown"
     now = datetime.now()
 
-    # Rate limiting check
-    tracker = _login_attempts.get(ip)
-    if tracker and tracker["failures"] >= 5:
-        if now < tracker["blocked_until"]:
+    # Bộ đếm nằm ở DB, không phải RAM: restart server hay chạy nhiều worker đều
+    # không làm mất/nhân đôi ngưỡng chặn.
+    tracker = db.query(LoginAttempt).filter(LoginAttempt.ip == ip).first()
+    if tracker and tracker.failures >= LOGIN_MAX_FAILURES:
+        if tracker.blocked_until and now.isoformat() < tracker.blocked_until:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Tài khoản hoặc IP bị tạm khóa do đăng nhập sai nhiều lần. Vui lòng thử lại sau 5 phút."
+                detail=(
+                    "Tài khoản hoặc IP bị tạm khóa do đăng nhập sai nhiều lần. "
+                    f"Vui lòng thử lại sau {LOGIN_BLOCK_MINUTES} phút."
+                ),
             )
-        else:
-            # Block expired, reset tracker
-            _login_attempts[ip] = {"failures": 0, "blocked_until": now}
+        # Hết hạn khóa: cho đếm lại từ đầu.
+        tracker.failures = 0
+        tracker.blocked_until = ""
+        tracker.updated_at = now.isoformat()
 
     user = db.query(User).filter(User.username == payload.username).first()
     if not user or not verify_password(payload.password, user.password_hash):
-        # Register failure
-        if ip not in _login_attempts:
-            _login_attempts[ip] = {"failures": 1, "blocked_until": now}
-        else:
-            _login_attempts[ip]["failures"] += 1
-            if _login_attempts[ip]["failures"] >= 5:
-                from datetime import timedelta
-                _login_attempts[ip]["blocked_until"] = now + timedelta(minutes=5)
+        if tracker is None:
+            tracker = LoginAttempt(ip=ip, failures=0, blocked_until="")
+            db.add(tracker)
+        tracker.failures += 1
+        tracker.updated_at = now.isoformat()
+        if tracker.failures >= LOGIN_MAX_FAILURES:
+            tracker.blocked_until = (now + timedelta(minutes=LOGIN_BLOCK_MINUTES)).isoformat()
 
         # Audit failure (NO password/token printed)
         audit(db, "auth", 0, "LOGIN_FAILURE", f"Đăng nhập thất bại từ IP={ip}")
+        _purge_stale_login_attempts(db, now)
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -870,9 +888,10 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
             detail="Tài khoản đã bị vô hiệu hóa."
         )
 
-    # Reset failure tracker on successful login
-    if ip in _login_attempts:
-        _login_attempts[ip] = {"failures": 0, "blocked_until": now}
+    # Đăng nhập đúng: xóa hẳn dòng đếm của IP này thay vì để lại số 0 vô nghĩa.
+    if tracker is not None:
+        db.delete(tracker)
+    _purge_stale_login_attempts(db, now)
 
     # Generate token containing username (sub), role, and org_id
     token = create_access_token(data={
