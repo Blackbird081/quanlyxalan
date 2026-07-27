@@ -107,3 +107,35 @@ def decode_declaration(item: dict[str, Any]) -> dict[str, Any]:
     item["unload"] = json.loads(item.pop("unload_json", "{}"))
     item["load"] = json.loads(item.pop("load_json", "{}"))
     return item
+
+
+# Tổ chức demo do scripts/seed_demo_data.py tạo ra, nhận diện qua mã số thuế
+# sentinel này. Đặt ở đây (không phải app.py) vì cả app.py, reports_api.py và
+# scripts/seed_demo_data.py đều cần — xem is_demo_data_active bên dưới.
+DEMO_ORGANIZATION_TAX_CODE = "DEMO-TANTHUAN-2026"
+
+
+def is_demo_data_active(db) -> bool:
+    """True khi dữ liệu demo còn trong hệ thống (báo cáo gắn nhãn DEMO)."""
+    from .models import Organization
+
+    return db.query(Organization.id).filter(
+        Organization.tax_code == DEMO_ORGANIZATION_TAX_CODE
+    ).first() is not None
+
+
+def joined_profile_value(vessel, field: str) -> Any:
+    """Giá trị `field` gộp từ các hồ sơ khai thác của phương tiện.
+
+    Một phương tiện có thể có nhiều VesselOperatingProfile (vd. sà lan chở
+    được nhiều loại hàng). Không hồ sơ nào khai thì lấy giá trị trên chính
+    Vessel; nhiều hồ sơ khai khác nhau thì nối lại bằng " / " để báo cáo thể
+    hiện đủ, thay vì chọn bừa một giá trị.
+    """
+    values = [getattr(profile, field) for profile in vessel.operating_profiles]
+    values = [value for value in values if value is not None]
+    if not values:
+        return getattr(vessel, field, None)
+    if len(values) == 1:
+        return values[0]
+    return " / ".join(f"{value:g}" for value in values)
