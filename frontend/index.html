@@ -216,6 +216,19 @@
             </form>
           </section>
 
+          <section class="panel">
+            <div class="panel-header"><div><p class="eyebrow">BẢO MẬT</p><h2>Đổi mật khẩu</h2><p class="muted">Nên đổi mật khẩu do quản trị viên cấp ban đầu sang mật khẩu của riêng bạn.</p></div></div>
+            <form id="change-password-form" class="settings-form">
+              <div class="settings-inline">
+                <label>* Mật khẩu hiện tại<input name="current_password" type="password" autocomplete="current-password" required></label>
+                <label>* Mật khẩu mới<input name="new_password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
+                <label>* Nhập lại mật khẩu mới<input name="confirm_password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
+              </div>
+              <p class="muted">Mật khẩu mới cần từ 8 đến 128 ký tự.</p>
+              <div class="modal-actions"><button type="submit" class="primary-button">Đổi mật khẩu</button></div>
+            </form>
+          </section>
+
           <section id="settings-port-panel" class="panel" hidden>
             <div class="panel-header"><div><p class="eyebrow">EMAIL</p><h2 id="settings-port-name">Đơn vị đang chọn</h2><p class="muted">Công ty</p></div></div>
             <form id="port-email-form" class="settings-form">

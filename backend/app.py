@@ -400,6 +400,20 @@ class UserResetPasswordRequest(BaseModel):
         return value
 
 
+class ChangeMyPasswordRequest(BaseModel):
+    """Người dùng tự đổi mật khẩu — khác UserResetPasswordRequest (Admin đặt lại
+    hộ, không cần mật khẩu cũ)."""
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def valid_password(cls, value: str) -> str:
+        if len(value) < 8 or len(value) > 128:
+            raise ValueError("Mật khẩu mới phải có từ 8 đến 128 ký tự.")
+        return value
+
+
 class UserActiveRequest(BaseModel):
     is_active: bool
 
@@ -978,6 +992,35 @@ def update_my_profile(
         "notification_preferences": _notification_preferences(current_user),
         "email_enabled": email_notifications_enabled(db),
     }
+
+
+@app.post("/api/me/password")
+def change_my_password(
+    payload: ChangeMyPasswordRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Self-service: người dùng tự đổi mật khẩu của chính mình.
+
+    Bắt buộc nhập đúng mật khẩu hiện tại — chặn người khác đổi mật khẩu khi
+    mượn được máy đang đăng nhập sẵn. Admin đặt lại hộ dùng route riêng
+    (`/api/admin/users/{id}/reset-password`) và KHÔNG cần mật khẩu cũ.
+    """
+    current_user = db.query(User).filter(User.id == user.id).first()
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Không thể xác thực thông tin đăng nhập")
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Mật khẩu hiện tại không đúng.")
+    if verify_password(payload.new_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Mật khẩu mới phải khác mật khẩu hiện tại.")
+    current_user.password_hash = get_password_hash(payload.new_password)
+    audit(
+        db, "USER", current_user.id, "PASSWORD_SELF_CHANGE",
+        f"{current_user.username} tự đổi mật khẩu",
+        actor_user_id=user.id, organization_id=current_user.organization_id,
+    )
+    db.commit()
+    return {"status": "ok", "detail": "Đã đổi mật khẩu."}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2674,6 +2717,13 @@ def save_declaration(
     unload_data = cargo(payload.unload.model_dump())
     load_data = cargo(payload.load.model_dump())
 
+    # ETB/ETD là mốc DỰ KIẾN nên không được nằm trong quá khứ khi lập phiếu mới.
+    # Chỉ áp cho phiếu tạo mới: phiếu đã lưu (kể cả phiếu cũ/import có ETB quá
+    # khứ) vẫn phải sửa/lưu lại được, nếu không sẽ bị khóa cứng vĩnh viễn.
+    # ATB/ATD không kiểm tra — giờ thực tế luôn thuộc quá khứ.
+    if not payload.id:
+        _require_future_planned_times(payload.eta, payload.etd)
+
     if payload.id:
         decl = db.query(Declaration).filter(Declaration.id == payload.id).first()
         if not decl:
@@ -2930,6 +2980,28 @@ def _require_approved(decl: Declaration) -> None:
             status_code=409,
             detail="Chỉ thao tác được trên phiếu đã được Admin duyệt (APPROVED).",
         )
+
+
+def _require_future_planned_times(eta: str, etd: str) -> None:
+    """Chặn ETB/ETD nằm trong quá khứ khi LẬP PHIẾU MỚI.
+
+    So sánh theo NGÀY (không theo giờ) để không loại phiếu khai cho chính hôm
+    nay ở khung giờ đã trôi qua — nghiệp vụ vẫn cho phép khai trong ngày. Chuỗi
+    rỗng/sai định dạng bỏ qua ở đây; các validator bắt buộc khác đã xử lý.
+    """
+    today = date.today()
+    for value, label in ((eta, "Thời gian dự kiến cập cầu (ETB)"), (etd, "Thời gian dự kiến rời cầu (ETD)")):
+        if not value:
+            continue
+        try:
+            when = datetime.fromisoformat(value).date()
+        except ValueError:
+            continue
+        if when < today:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{label} không được ở trong quá khứ (trước {today.strftime('%d/%m/%Y')}).",
+            )
 
 
 def _fmt_vn_datetime(value: str) -> str:

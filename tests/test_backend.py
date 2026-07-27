@@ -17,6 +17,7 @@ import tempfile
 import time
 import uuid
 import zipfile
+from datetime import date, timedelta
 from pathlib import Path
 
 # ── Set test DB FIRST, before any backend import ──────────────────────────────
@@ -165,17 +166,21 @@ def _reg() -> str:
 
 
 def _minimal_declaration(**overrides) -> dict:
+    # ETB/ETD phải là ngày tương lai: backend chặn lập phiếu MỚI với mốc dự kiến
+    # trong quá khứ (xem _require_future_planned_times). Dùng ngày động thay vì
+    # ngày cứng để fixture không "hết hạn" theo thời gian thực.
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     base = {
         "company_name": "Test Company",
-        "declaration_date": "2026-07-11",
+        "declaration_date": date.today().isoformat(),
         "vessel_name": "TT TEST",
         "registration_no": _reg(),
         "vessel_type": "Tàu container",
         "vessel_class": "VR-SI",
         "last_port": "Bến A",
         "working_port": "Cảng Tân Thuận",
-        "eta": "2026-07-11T08:00",
-        "etd": "2026-07-11T18:00",
+        "eta": f"{tomorrow}T08:00",
+        "etd": f"{tomorrow}T18:00",
         "master_name": "Nguyễn Văn A",
         "master_phone": "0900000000",
         "unload": {},
@@ -808,6 +813,61 @@ def test_declaration_draft_create(client, auth_headers):
     data = res.json()
     assert data["workflow_status"] == "DRAFT"
     assert "reference_no" in data
+
+
+# ── ETB/ETD không được ở quá khứ khi lập phiếu MỚI ───────────────────────────
+
+def test_new_declaration_rejects_past_etb(client, auth_headers):
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    res = client.post(
+        "/api/declarations",
+        json=_minimal_declaration(eta=f"{yesterday}T08:00"),
+        headers=auth_headers,
+    )
+    assert res.status_code == 422
+    assert "quá khứ" in res.json()["detail"]
+
+
+def test_new_declaration_rejects_past_etd(client, auth_headers):
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    res = client.post(
+        "/api/declarations",
+        json=_minimal_declaration(etd=f"{yesterday}T18:00"),
+        headers=auth_headers,
+    )
+    assert res.status_code == 422
+
+
+def test_new_declaration_allows_today_etb(client, auth_headers):
+    """So sánh theo NGÀY, không theo giờ — khai cho chính hôm nay vẫn hợp lệ
+    kể cả khi khung giờ đã trôi qua."""
+    today = date.today().isoformat()
+    res = client.post(
+        "/api/declarations",
+        json=_minimal_declaration(eta=f"{today}T00:01", etd=f"{today}T23:59"),
+        headers=auth_headers,
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_existing_declaration_with_past_etb_can_still_be_saved(client, auth_headers):
+    """Ràng buộc chỉ áp cho phiếu tạo mới. Phiếu đã lưu (phiếu cũ, dữ liệu
+    import) phải sửa/lưu lại được, nếu không sẽ bị khóa cứng vĩnh viễn."""
+    created = client.post("/api/declarations", json=_minimal_declaration(), headers=auth_headers)
+    assert created.status_code == 200, created.text
+    body = created.json()
+
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    update = _minimal_declaration(
+        eta=f"{yesterday}T08:00",
+        etd=f"{yesterday}T18:00",
+        registration_no=body["registration_no"],
+    )
+    update["id"] = body["id"]
+    update["version"] = body["version"]
+    res = client.post("/api/declarations", json=update, headers=auth_headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["eta"] == f"{yesterday}T08:00"
 
 
 def test_platform_admin_can_delete_draft_declaration(client, auth_headers):
