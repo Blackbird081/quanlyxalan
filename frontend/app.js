@@ -216,18 +216,19 @@ function dateTimeField(name, label, value = '', extra = '', minDate = '') {
     </span></label>`;
 }
 
-// Ngày tối thiểu cho ETB/ETD = hôm nay: không cho khai lượt dự kiến trong quá
-// khứ. Với phiếu ĐÃ LƯU mà ETB/ETD vốn đã ở quá khứ (phiếu cũ, hoặc import),
-// lấy mốc cũ hơn làm min để người dùng vẫn mở/sửa được các trường khác — nếu
-// không, phiếu cũ sẽ vĩnh viễn không lưu lại được. ATB/ATD (giờ thực tế) không
-// bao giờ áp ràng buộc này vì bản chất luôn nằm trong quá khứ.
-function etbEtdMinDate(declaration = {}) {
-  const today = new Date().toISOString().slice(0, 10);
-  const existing = [declaration.eta, declaration.etd]
-    .map(value => (typeof value === 'string' ? value.slice(0, 10) : ''))
-    .filter(Boolean)
-    .sort();
-  return existing.length && existing[0] < today ? existing[0] : today;
+// Ngày tối thiểu cho cả 4 mốc ETB/ETD/ATB/ATD = NGÀY TẠO PHIẾU: phiếu lập cho
+// ngày nào thì mọi mốc của lượt đó phải từ ngày ấy trở đi (backend kiểm tra lại
+// trong _require_times_not_before_declaration_date).
+//
+// Chỉ áp cho phiếu MỚI. Phiếu ĐÃ LƯU (phiếu cũ, dữ liệu import) có thể có mốc
+// sớm hơn ngày tạo — trả '' để không đặt min, nếu không người dùng sẽ không mở
+// và lưu lại được phiếu đó nữa.
+function declarationTimeMinDate(declaration = {}) {
+  if (declaration.id) return '';
+  const declarationDate = typeof declaration.declaration_date === 'string'
+    ? declaration.declaration_date.slice(0, 10)
+    : '';
+  return declarationDate || new Date().toISOString().slice(0, 10);
 }
 
 function syncDateTimeHidden(name, root = document) {
@@ -241,11 +242,27 @@ function syncDateTimeHidden(name, root = document) {
   hidden.value = date ? `${date}T${hour}:${minute}` : '';
 }
 
+// Thuộc tính `min` đã làm trình duyệt mờ/khóa các ngày cũ hơn ngay trên bảng
+// lịch. Nhưng người dùng vẫn GÕ TAY được một ngày sớm hơn (ô chỉ bị đánh dấu
+// invalid, giá trị vẫn nằm đó) — nên kéo về đúng `min` khi họ gõ xong. Chỉ xử
+// lý ở sự kiện `change`; nếu làm ở `input` thì giá trị nhảy loạn khi đang gõ dở.
+function clampDateToMin(input) {
+  const min = input.getAttribute('min');
+  if (!min || !input.value || input.value >= min) return false;
+  input.value = min;
+  return true;
+}
+
 function bindDateTimeFields(root = document) {
   $$('.datetime-field', root).forEach(group => {
     const name = group.dataset.dtGroup;
     $$('[data-dt-part]', group).forEach(control => {
-      control.addEventListener('change', () => syncDateTimeHidden(name, root));
+      control.addEventListener('change', () => {
+        if (control.dataset.dtPart === 'date' && clampDateToMin(control)) {
+          toast(`Ngày không được sớm hơn ${fmtDate(control.getAttribute('min'))} — đã tự điều chỉnh.`, true);
+        }
+        syncDateTimeHidden(name, root);
+      });
       control.addEventListener('input', () => syncDateTimeHidden(name, root));
     });
   });
@@ -1796,10 +1813,10 @@ function renderDeclarationWizard() {
         ${field('working_port','Cảng / cầu bến đến làm hàng',d.working_port,'text','required list="ports-list"')}
         ${field('departure_berth','Cảng / cầu bến rời',d.departure_berth,'text','list="ports-list"')}
         ${field('destination_port','Cảng đích',d.destination_port,'text','list="ports-list"')}
-        ${dateTimeField('eta','Thời gian dự kiến cập cầu (ETB)',d.eta,'required',etbEtdMinDate(d))}
-        ${dateTimeField('etd','Thời gian dự kiến rời cầu (ETD)',d.etd,'required',etbEtdMinDate(d))}
-        ${dateTimeField('actual_arrival_at','Thời gian cập cầu thực tế (ATB)',d.actual_arrival_at)}
-        ${dateTimeField('actual_departure_at','Thời gian rời cầu thực tế (ATD)',d.actual_departure_at)}
+        ${dateTimeField('eta','Thời gian dự kiến cập cầu (ETB)',d.eta,'required',declarationTimeMinDate(d))}
+        ${dateTimeField('etd','Thời gian dự kiến rời cầu (ETD)',d.etd,'required',declarationTimeMinDate(d))}
+        ${dateTimeField('actual_arrival_at','Thời gian cập cầu thực tế (ATB)',d.actual_arrival_at,'',declarationTimeMinDate(d))}
+        ${dateTimeField('actual_departure_at','Thời gian rời cầu thực tế (ATD)',d.actual_departure_at,'',declarationTimeMinDate(d))}
         ${field('agent_ptnd_name','Đại lý PTND',d.agent_ptnd_name,'text','class="wide-field"')}
         <datalist id="ports-list"></datalist>
       </div></section>

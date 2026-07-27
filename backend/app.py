@@ -2717,12 +2717,11 @@ def save_declaration(
     unload_data = cargo(payload.unload.model_dump())
     load_data = cargo(payload.load.model_dump())
 
-    # ETB/ETD là mốc DỰ KIẾN nên không được nằm trong quá khứ khi lập phiếu mới.
-    # Chỉ áp cho phiếu tạo mới: phiếu đã lưu (kể cả phiếu cũ/import có ETB quá
-    # khứ) vẫn phải sửa/lưu lại được, nếu không sẽ bị khóa cứng vĩnh viễn.
-    # ATB/ATD không kiểm tra — giờ thực tế luôn thuộc quá khứ.
+    # Mọi mốc thời gian của phiếu MỚI phải từ ngày tạo phiếu trở đi.
+    # Chỉ áp cho phiếu tạo mới: phiếu đã lưu (kể cả phiếu cũ/import có mốc sớm
+    # hơn) vẫn phải sửa/lưu lại được, nếu không sẽ bị khóa cứng vĩnh viễn.
     if not payload.id:
-        _require_future_planned_times(payload.eta, payload.etd)
+        _require_times_not_before_declaration_date(payload)
 
     if payload.id:
         decl = db.query(Declaration).filter(Declaration.id == payload.id).first()
@@ -2982,25 +2981,43 @@ def _require_approved(decl: Declaration) -> None:
         )
 
 
-def _require_future_planned_times(eta: str, etd: str) -> None:
-    """Chặn ETB/ETD nằm trong quá khứ khi LẬP PHIẾU MỚI.
+def _require_times_not_before_declaration_date(payload: "DeclarationSaveRequest") -> None:
+    """Chặn mọi mốc thời gian sớm hơn NGÀY TẠO PHIẾU, khi LẬP PHIẾU MỚI.
 
-    So sánh theo NGÀY (không theo giờ) để không loại phiếu khai cho chính hôm
-    nay ở khung giờ đã trôi qua — nghiệp vụ vẫn cho phép khai trong ngày. Chuỗi
-    rỗng/sai định dạng bỏ qua ở đây; các validator bắt buộc khác đã xử lý.
+    Gốc so sánh là `declaration_date` (ngày lập phiếu), không phải ngày hệ
+    thống: phiếu lập cho ngày nào thì mọi mốc của lượt đó phải từ ngày ấy trở
+    đi. Áp cho cả 4 mốc — ETB/ETD (dự kiến) lẫn ATB/ATD (thực tế), vì với phiếu
+    MỚI thì cả bốn đều thuộc cùng một lượt tính từ ngày lập.
+
+    So sánh theo NGÀY (không theo giờ): khai cho chính ngày lập phiếu ở khung
+    giờ đã trôi qua vẫn hợp lệ. Chuỗi rỗng/sai định dạng bỏ qua — các validator
+    bắt buộc khác đã xử lý.
     """
-    today = date.today()
-    for value, label in ((eta, "Thời gian dự kiến cập cầu (ETB)"), (etd, "Thời gian dự kiến rời cầu (ETD)")):
+    try:
+        base = datetime.fromisoformat(payload.declaration_date).date()
+    except (TypeError, ValueError):
+        return  # declaration_date lỗi định dạng: để validator riêng của nó báo
+
+    fields = (
+        (payload.eta, "Thời gian dự kiến cập cầu (ETB)"),
+        (payload.etd, "Thời gian dự kiến rời cầu (ETD)"),
+        (payload.actual_arrival_at, "Thời gian cập cầu thực tế (ATB)"),
+        (payload.actual_departure_at, "Thời gian rời cầu thực tế (ATD)"),
+    )
+    for value, label in fields:
         if not value:
             continue
         try:
             when = datetime.fromisoformat(value).date()
         except ValueError:
             continue
-        if when < today:
+        if when < base:
             raise HTTPException(
                 status_code=422,
-                detail=f"{label} không được ở trong quá khứ (trước {today.strftime('%d/%m/%Y')}).",
+                detail=(
+                    f"{label} không được sớm hơn ngày tạo phiếu "
+                    f"({base.strftime('%d/%m/%Y')})."
+                ),
             )
 
 

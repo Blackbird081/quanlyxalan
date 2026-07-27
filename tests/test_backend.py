@@ -817,57 +817,75 @@ def test_declaration_draft_create(client, auth_headers):
 
 # ── ETB/ETD không được ở quá khứ khi lập phiếu MỚI ───────────────────────────
 
-def test_new_declaration_rejects_past_etb(client, auth_headers):
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    res = client.post(
-        "/api/declarations",
-        json=_minimal_declaration(eta=f"{yesterday}T08:00"),
-        headers=auth_headers,
-    )
+@pytest.mark.parametrize("field", ["eta", "etd", "actual_arrival_at", "actual_departure_at"])
+def test_new_declaration_rejects_time_before_declaration_date(client, auth_headers, field):
+    """Cả 4 mốc (ETB/ETD/ATB/ATD) đều không được sớm hơn ngày tạo phiếu."""
+    day_before = (date.today() - timedelta(days=1)).isoformat()
+    payload = _minimal_declaration(**{field: f"{day_before}T08:00"})
+    # ETB phải trước ETD (validator có sẵn) — khi thử ETD ở quá khứ thì phải kéo
+    # ETB xuống sớm hơn nữa, nếu không sẽ vướng validator kia trước và test này
+    # không còn kiểm tra đúng thứ nó định kiểm tra.
+    if field == "etd":
+        payload["eta"] = f"{(date.today() - timedelta(days=2)).isoformat()}T08:00"
+    res = client.post("/api/declarations", json=payload, headers=auth_headers)
     assert res.status_code == 422
-    assert "quá khứ" in res.json()["detail"]
+    assert "sớm hơn ngày tạo phiếu" in res.json()["detail"]
 
 
-def test_new_declaration_rejects_past_etd(client, auth_headers):
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    res = client.post(
-        "/api/declarations",
-        json=_minimal_declaration(etd=f"{yesterday}T18:00"),
-        headers=auth_headers,
-    )
-    assert res.status_code == 422
-
-
-def test_new_declaration_allows_today_etb(client, auth_headers):
-    """So sánh theo NGÀY, không theo giờ — khai cho chính hôm nay vẫn hợp lệ
-    kể cả khi khung giờ đã trôi qua."""
+def test_new_declaration_uses_declaration_date_not_today_as_base(client, auth_headers):
+    """Gốc so sánh là declaration_date, KHÔNG phải ngày hệ thống: phiếu lập
+    cho ngày mai thì ETB hôm nay là sai, dù hôm nay chưa phải quá khứ."""
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     today = date.today().isoformat()
     res = client.post(
         "/api/declarations",
-        json=_minimal_declaration(eta=f"{today}T00:01", etd=f"{today}T23:59"),
+        json=_minimal_declaration(
+            declaration_date=tomorrow,
+            eta=f"{today}T08:00",
+            etd=f"{tomorrow}T18:00",
+        ),
+        headers=auth_headers,
+    )
+    assert res.status_code == 422
+    assert "sớm hơn ngày tạo phiếu" in res.json()["detail"]
+
+
+def test_new_declaration_allows_times_on_declaration_date(client, auth_headers):
+    """So sánh theo NGÀY, không theo giờ — mọi mốc rơi đúng ngày tạo phiếu đều
+    hợp lệ kể cả khung giờ đã trôi qua."""
+    today = date.today().isoformat()
+    res = client.post(
+        "/api/declarations",
+        json=_minimal_declaration(
+            declaration_date=today,
+            eta=f"{today}T00:01",
+            etd=f"{today}T23:59",
+            actual_arrival_at=f"{today}T00:05",
+            actual_departure_at=f"{today}T23:00",
+        ),
         headers=auth_headers,
     )
     assert res.status_code == 200, res.text
 
 
-def test_existing_declaration_with_past_etb_can_still_be_saved(client, auth_headers):
+def test_existing_declaration_with_earlier_times_can_still_be_saved(client, auth_headers):
     """Ràng buộc chỉ áp cho phiếu tạo mới. Phiếu đã lưu (phiếu cũ, dữ liệu
     import) phải sửa/lưu lại được, nếu không sẽ bị khóa cứng vĩnh viễn."""
     created = client.post("/api/declarations", json=_minimal_declaration(), headers=auth_headers)
     assert created.status_code == 200, created.text
     body = created.json()
 
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    day_before = (date.today() - timedelta(days=1)).isoformat()
     update = _minimal_declaration(
-        eta=f"{yesterday}T08:00",
-        etd=f"{yesterday}T18:00",
+        eta=f"{day_before}T08:00",
+        etd=f"{day_before}T18:00",
         registration_no=body["registration_no"],
     )
     update["id"] = body["id"]
     update["version"] = body["version"]
     res = client.post("/api/declarations", json=update, headers=auth_headers)
     assert res.status_code == 200, res.text
-    assert res.json()["eta"] == f"{yesterday}T08:00"
+    assert res.json()["eta"] == f"{day_before}T08:00"
 
 
 def test_platform_admin_can_delete_draft_declaration(client, auth_headers):
@@ -1688,9 +1706,13 @@ def test_appendix_month_ytd_operating_date_adjustment_and_vessel_grain(
 ):
     registration = _reg()
     created_ids = []
+    # Trọng tâm của test là báo cáo gom theo NGÀY VẬN HÀNH (ETB), không theo
+    # declaration_date — nên các mốc ETB/ETD dưới đây (tháng 1, tháng 7, tháng 8)
+    # là phần phải giữ nguyên. declaration_date chỉ cần không muộn hơn ETB để
+    # thỏa ràng buộc "mốc thời gian không sớm hơn ngày tạo phiếu".
     fixtures = (
         {
-            "declaration_date": "2045-07-20", "eta": "2045-01-15T08:00", "etd": "2045-01-15T18:00",
+            "declaration_date": "2045-01-10", "eta": "2045-01-15T08:00", "etd": "2045-01-15T18:00",
             "registration_no": registration, "agent_ptnd_name": "Đại lý A",
             "unload": {"cargo_type": "Container", "movement_type": "Nhập khẩu", "cargo_name": "Hàng tháng 1", "cont20_full": 1, "tons": 10},
         },
