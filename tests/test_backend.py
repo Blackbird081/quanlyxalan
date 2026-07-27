@@ -337,7 +337,9 @@ def test_static_frontend(client):
     assert "const crewContainer = $('#declaration-crew-container');" in app_js
     assert "name=\"crew_onboard_count\"" in app_js
     assert "node.setAttribute('role', error ? 'alert' : 'status')" in app_js
-    assert "Không thể nhập dòng này. Hãy kiểm tra định dạng số, ngày hoặc mã đăng ký trùng." in Path(__file__).resolve().parents[1].joinpath("backend", "app.py").read_text(encoding="utf-8")
+    # Thông báo này nằm ở backend/import_api.py kể từ khi khối IMPORT được tách
+    # khỏi app.py (chỉ di chuyển, nội dung không đổi).
+    assert "Không thể nhập dòng này. Hãy kiểm tra định dạng số, ngày hoặc mã đăng ký trùng." in Path(__file__).resolve().parents[1].joinpath("backend", "import_api.py").read_text(encoding="utf-8")
     assert "File đã được nhập trước đó" in app_js
     assert "Không tạo thêm bản ghi" in app_js
     assert "searchDashboardVessels(query, sequence)" in app_js
