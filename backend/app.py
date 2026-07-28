@@ -12,15 +12,15 @@ import logging
 import os
 import uuid
 from calendar import monthrange
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from fastapi import (
     BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, status
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import desc, func, or_, text
@@ -29,7 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import create_access_token, get_current_user, get_password_hash, verify_password
-from .integrations import maritime_authority_adapter, registry_adapter
+from .integrations import maritime_authority_adapter
 from .logging_config import configure_local_logging
 from .mailer import (
     SMTP_SETTING_KEY, get_smtp_config, mailer_enabled as email_notifications_enabled, send_email,
@@ -37,48 +37,50 @@ from .mailer import (
 from .notifications import notify_cancel_requested, notify_declaration_submitted, notify_declaration_workflow
 from .rbac import require_roles
 from .tenant import (
-    resolve_scope, require_port_scope, Scope, register_vessel_ids,
-    scope_allows_vessel, require_vessel_in_scope,
+    resolve_scope, require_port_scope, Scope, scope_allows_vessel,
+    require_vessel_in_scope,
 )
 from .storage import ScannerNotConfigured, get_attachment_storage
 from .database import (
-    SQLALCHEMY_DATABASE_URL, SessionLocal, audit, cargo, correlation_id, engine, now_iso,
+    DEMO_ORGANIZATION_TAX_CODE, audit, cargo, correlation_id, engine, get_db,
+    is_demo_data_active, now_iso,
 )
 from .models import (
     AppSetting, Attachment, AuditEvent, Base, CrewMember, Declaration,
-    DeclarationCrew, DeclarationEvent, ImportJob, IntegrationConnector, Organization,
+    DeclarationCrew, DeclarationEvent, IntegrationConnector,
+    LoginAttempt, Organization,
     ReportAdjustment, SyncJob, User, Vessel, VesselOperatingProfile,
-    ReportingUnit, ReportingUnitOrganization, ReportingUnitUser, ReportingUnitVessel,
+    ReportingUnit, ReportingUnitOrganization,
     HistoricalCargoRow, HistoricalPortCall, HistoricalReportImport,
 )
 from .xlsx_io import (
     crew_rows, declaration_row, excel_date, import_match_key, make_report_xlsx,
-    make_xlsx, read_workbook, vessel_rows,
+    read_workbook, vessel_rows,
 )
 from .historical_api import router as historical_import_router
-from scripts.backup_local import (
-    BACKUP_GLOB,
-    BACKUP_SUFFIX,
-    backup as create_local_backup,
-    prune as prune_local_backups,
+from .import_api import router as import_router
+from .reports_api import router as reports_router
+from .user_management_api import router as user_management_router
+from .vessels_api import router as vessels_router
+from .shared import (
+    CREW_ROLES, CREW_ROLE_CANONICAL, _clean_email,
+    _resolve_org_for_port_scope, access_logger, certificate_status,
+    remove_demo_data_for_real_input, validate_attachment_content,
 )
-
-IMPORT_MAPPING_VERSION = "KBCV-IMPORT-1.5"
-DEMO_ORGANIZATION_TAX_CODE = "DEMO-TANTHUAN-2026"
-CREW_ROLES = ("Thuyền trưởng", "Máy trưởng", "Thuyền viên", "Thuyền phó")
-CREW_ROLE_CANONICAL = {import_match_key(role): role for role in CREW_ROLES}
-
 ROOT = Path(__file__).resolve().parents[1]
-access_logger = configure_local_logging(ROOT)
 ATTACHMENT_DIR = ROOT / "data" / "attachments"
 ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
-BACKUP_DIR = ROOT / "data" / "backups"
 attachment_storage = get_attachment_storage(ATTACHMENT_DIR / "quarantine")
 attachment_scanner = ScannerNotConfigured()
 
 # ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Quản Lý Xalan API", version="1.0.0")
 app.include_router(historical_import_router)
+# Đăng ký ở đây (không phải cuối file) để chắc chắn nằm TRƯỚC phần STATIC
+# FRONTEND — mount static bắt mọi đường dẫn không khớp, nên router nào đăng ký
+# sau nó sẽ không bao giờ nhận được request.
+app.include_router(reports_router)
+app.include_router(import_router)
 
 
 @app.middleware("http")
@@ -141,61 +143,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── DB dependency ──────────────────────────────────────────────────────────────
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
 # ── Attachment signature rules ─────────────────────────────────────────────────
-MAGIC_BYTES: dict[str, bytes] = {
-    ".pdf": b"%PDF",
-    ".jpg": b"\xff\xd8\xff",
-    ".jpeg": b"\xff\xd8\xff",
-    ".png": b"\x89PNG",
-    ".xlsx": b"PK\x03\x04",
-    ".xls": b"\xd0\xcf",
-    ".doc": b"\xd0\xcf",
-    ".docx": b"PK\x03\x04",
-    ".webp": b"RIFF",
-}
-ALLOWED_ATTACHMENT_EXTENSIONS = frozenset(MAGIC_BYTES)
-MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024  # 12 MB
-
-
-def validate_attachment_content(extension: str, content: bytes) -> None:
-    extension = extension.lower()
-    if extension not in ALLOWED_ATTACHMENT_EXTENSIONS:
-        raise HTTPException(status_code=415, detail="Phần mở rộng file không được hỗ trợ.")
-    if len(content) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(status_code=413, detail="File vượt quá giới hạn 12 MB.")
-    expected = MAGIC_BYTES[extension]
-    if not content.startswith(expected):
-        raise HTTPException(
-            status_code=400,
-            detail=f"File không đúng định dạng {extension} (magic bytes không khớp).",
-        )
-
-
-# ── Certificate helper ─────────────────────────────────────────────────────────
-def certificate_status(value: Optional[str], warning_days: int = 30) -> str:
-    if not value:
-        return "UNKNOWN"
-    try:
-        expiry = date.fromisoformat(value[:10])
-    except ValueError:
-        return "UNKNOWN"
-    remaining = (expiry - date.today()).days
-    if remaining < 0:
-        return "EXPIRED"
-    if remaining <= warning_days:
-        return "EXPIRING"
-    return "VALID"
 
 
 # ── Workflow state machine ─────────────────────────────────────────────────────
@@ -281,91 +229,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-def _clean_email(value: str) -> str:
-    value = (value or "").strip()
-    if not value:
-        return ""
-    if "@" not in value or " " in value or len(value) > 200:
-        raise ValueError("Email không hợp lệ.")
-    return value
-
-
-class ReportingUnitCreateRequest(BaseModel):
-    name: str
-    code: str
-    notify_email: str = ""  # email chung của Cảng để nhận thông báo (tùy chọn)
-
-    @field_validator("notify_email")
-    @classmethod
-    def valid_notify_email(cls, value: str) -> str:
-        return _clean_email(value)
-
-    @field_validator("name")
-    @classmethod
-    def valid_name(cls, value: str) -> str:
-        value = " ".join(value.strip().split())
-        if len(value) < 2 or len(value) > 150:
-            raise ValueError("Tên đơn vị phải có từ 2 đến 150 ký tự.")
-        return value
-
-    @field_validator("code")
-    @classmethod
-    def valid_code(cls, value: str) -> str:
-        value = "-".join(value.strip().upper().split())
-        if len(value) < 2 or len(value) > 30:
-            raise ValueError("Mã đơn vị phải có từ 2 đến 30 ký tự.")
-        if any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for char in value):
-            raise ValueError("Mã đơn vị chỉ dùng chữ A-Z, số, dấu gạch ngang hoặc gạch dưới.")
-        return value
-
-
-class UserCreateRequest(BaseModel):
-    username: str
-    password: str
-    full_name: str = ""
-    email: str = ""  # địa chỉ nhận thông báo (tùy chọn)
-    role: str
-    # CUSTOMER accounts must be tied to a customer Organization.
-    organization_id: Optional[int] = None
-    # PORT_STAFF accounts may be granted membership in one or more reporting units.
-    reporting_unit_ids: List[int] = []
-
-    @field_validator("email")
-    @classmethod
-    def valid_email(cls, value: str) -> str:
-        return _clean_email(value)
-
-    @field_validator("username")
-    @classmethod
-    def valid_username(cls, value: str) -> str:
-        value = value.strip().lower()
-        if len(value) < 3 or len(value) > 50:
-            raise ValueError("Tên đăng nhập phải có từ 3 đến 50 ký tự.")
-        if any(char not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for char in value):
-            raise ValueError("Tên đăng nhập chỉ dùng chữ thường a-z, số, dấu chấm, gạch ngang hoặc gạch dưới.")
-        return value
-
-    @field_validator("password")
-    @classmethod
-    def valid_password(cls, value: str) -> str:
-        if len(value) < 8 or len(value) > 128:
-            raise ValueError("Mật khẩu phải có từ 8 đến 128 ký tự.")
-        return value
-
-    @field_validator("full_name")
-    @classmethod
-    def clean_full_name(cls, value: str) -> str:
-        return " ".join((value or "").strip().split())[:150]
-
-    @field_validator("role")
-    @classmethod
-    def valid_role(cls, value: str) -> str:
-        value = (value or "").strip().upper()
-        if value not in {"CUSTOMER", "PORT_STAFF", "PLATFORM_ADMIN"}:
-            raise ValueError("Vai trò không hợp lệ.")
-        return value
-
-
 class OrganizationSaveRequest(BaseModel):
     name: str
     tax_code: str = ""
@@ -389,19 +252,18 @@ class OrganizationSaveRequest(BaseModel):
         return (value or "").strip()[:200]
 
 
-class UserResetPasswordRequest(BaseModel):
-    password: str
+class ChangeMyPasswordRequest(BaseModel):
+    """Người dùng tự đổi mật khẩu — khác UserResetPasswordRequest (Admin đặt lại
+    hộ, không cần mật khẩu cũ)."""
+    current_password: str
+    new_password: str
 
-    @field_validator("password")
+    @field_validator("new_password")
     @classmethod
     def valid_password(cls, value: str) -> str:
         if len(value) < 8 or len(value) > 128:
-            raise ValueError("Mật khẩu phải có từ 8 đến 128 ký tự.")
+            raise ValueError("Mật khẩu mới phải có từ 8 đến 128 ký tự.")
         return value
-
-
-class UserActiveRequest(BaseModel):
-    is_active: bool
 
 
 class CargoPayload(BaseModel):
@@ -435,101 +297,6 @@ class CargoPayload(BaseModel):
         return value
 
 
-class VesselOperatingProfilePayload(BaseModel):
-    sequence: int = 1
-    activity_area: str
-    deadweight_tons: Optional[float] = None
-    cargo_capacity_tons: Optional[float] = None
-
-    @field_validator("activity_area")
-    @classmethod
-    def required_activity_area(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Vùng hoạt động là bắt buộc.")
-        return value
-
-    @field_validator("deadweight_tons", "cargo_capacity_tons")
-    @classmethod
-    def non_negative_profile_value(cls, value: Optional[float]) -> Optional[float]:
-        if value is not None and value < 0:
-            raise ValueError("Thông số vùng hoạt động không được âm.")
-        return value
-
-
-class VesselSaveRequest(BaseModel):
-    id: Optional[int] = None
-    version: Optional[int] = None
-    organization_name: Optional[str] = None
-    organization: Optional[Dict[str, Any]] = None
-    name: str
-    registration_no: str
-    registry_or_imo: str = ""
-    vessel_type: str
-    vessel_category: Optional[str] = None
-    vessel_class: str
-    shell_material: str = ""
-    build_year: Optional[int] = None
-    length_m: Optional[float] = None
-    width_m: Optional[float] = None
-    side_height_m: Optional[float] = None
-    draft_m: Optional[float] = None
-    deadweight_tons: Optional[float] = None
-    gross_tonnage: Optional[float] = None
-    engine_power_cv: Optional[float] = None
-    cargo_capacity_tons: Optional[float] = None
-    container_capacity_teu: Optional[float] = None
-    passenger_capacity: Optional[int] = None
-    min_crew: Optional[int] = None
-    safety_certificate_no: str = ""
-    certificate_issue_date: Optional[str] = None
-    certificate_expiry_date: Optional[str] = None
-    tracking_master_name: str = ""
-    tracking_master_phone: str = ""
-    operating_profiles: Optional[List[VesselOperatingProfilePayload]] = None
-    notes: str = ""
-
-    @field_validator("name", "registration_no")
-    @classmethod
-    def required_vessel_text(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Trường này là bắt buộc.")
-        return value
-
-    @field_validator("length_m", "width_m", "side_height_m", "draft_m", "deadweight_tons", "gross_tonnage", "engine_power_cv", "cargo_capacity_tons", "container_capacity_teu")
-    @classmethod
-    def non_negative_measurements(cls, value: Optional[float]) -> Optional[float]:
-        if value is not None and value < 0:
-            raise ValueError("Thông số không được âm.")
-        return value
-
-    @field_validator("build_year", "passenger_capacity", "min_crew")
-    @classmethod
-    def non_negative_integer_fields(cls, value: Optional[int]) -> Optional[int]:
-        if value is not None and value < 0:
-            raise ValueError("Thông số không được âm.")
-        return value
-
-
-class PortRegisterRemoveRequest(BaseModel):
-    ids: List[int]
-
-    @field_validator("ids")
-    @classmethod
-    def valid_ids(cls, value: List[int]) -> List[int]:
-        ids = list(dict.fromkeys(value))
-        if not ids:
-            raise ValueError("Cần chọn ít nhất một Salan.")
-        if len(ids) > 100:
-            raise ValueError("Mỗi lần chỉ được xử lý tối đa 100 Salan.")
-        if any(item <= 0 for item in ids):
-            raise ValueError("Mã Salan không hợp lệ.")
-        return ids
-
-
-class PortRegisterAddRequest(PortRegisterRemoveRequest):
-    pass
 
 
 class CrewSaveRequest(BaseModel):
@@ -694,26 +461,6 @@ class MyProfileRequest(BaseModel):
         return _clean_email(value)
 
 
-class UserUpdateRequest(BaseModel):
-    """Admin editing another user's contact fields (not username/role/password)."""
-    full_name: Optional[str] = None
-    email: Optional[str] = None
-
-    @field_validator("full_name")
-    @classmethod
-    def clean_full_name(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        return " ".join(value.strip().split())[:150]
-
-    @field_validator("email")
-    @classmethod
-    def valid_email(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        return _clean_email(value)
-
-
 class SmtpConfigRequest(BaseModel):
     enabled: bool = False
     host: str = ""
@@ -752,38 +499,6 @@ class SmtpTestRequest(BaseModel):
         return value
 
 
-class ReportAdjustmentRequest(BaseModel):
-    report_month: str
-    metric: str
-    delta: float
-    reason: str
-    organization_id: Optional[int] = None
-
-    @field_validator("report_month")
-    @classmethod
-    def valid_report_month(cls, value: str) -> str:
-        try:
-            datetime.strptime(value, "%Y-%m")
-        except ValueError as exc:
-            raise ValueError("Tháng báo cáo phải có định dạng YYYY-MM.") from exc
-        return value
-
-    @field_validator("metric")
-    @classmethod
-    def valid_metric(cls, value: str) -> str:
-        allowed = {"calls", "passenger_calls"}
-        if value not in allowed:
-            raise ValueError(f"Chỉ tiêu điều chỉnh phải là một trong: {', '.join(sorted(allowed))}.")
-        return value
-
-    @field_validator("reason")
-    @classmethod
-    def required_reason(cls, value: str) -> str:
-        value = value.strip()
-        if len(value) < 5:
-            raise ValueError("Lý do điều chỉnh phải có ít nhất 5 ký tự.")
-        return value
-
 
 # ── Catalog constants ──────────────────────────────────────────────────────────
 # Gợi ý cho ô Công dụng/Loại phương tiện — trường này ghi nguyên văn theo GCN
@@ -808,39 +523,56 @@ UNLOAD_MOVEMENTS = [
 LOAD_MOVEMENTS = ["Nội địa", "Xuất khẩu"]
 
 
-# Rate limiting tracker for login: {ip: {"failures": count, "blocked_until": datetime}}
-_login_attempts: Dict[str, Dict[str, Any]] = {}
+# Chặn dò mật khẩu: ngưỡng và thời gian khóa.
+LOGIN_MAX_FAILURES = 5
+LOGIN_BLOCK_MINUTES = 5
+# Dòng đếm cũ hơn mốc này coi như hết hiệu lực và bị dọn — giữ bảng không phình
+# theo số IP đã từng gõ sai (dict trong RAM trước đây không bao giờ dọn).
+LOGIN_ATTEMPT_RETENTION_HOURS = 24
+
+
+def _purge_stale_login_attempts(db: Session, now: datetime) -> None:
+    cutoff = (now - timedelta(hours=LOGIN_ATTEMPT_RETENTION_HOURS)).isoformat()
+    db.query(LoginAttempt).filter(LoginAttempt.updated_at < cutoff).delete(
+        synchronize_session=False
+    )
+
 
 @app.post("/api/auth/login")
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     ip = request.client.host if request.client else "unknown"
     now = datetime.now()
 
-    # Rate limiting check
-    tracker = _login_attempts.get(ip)
-    if tracker and tracker["failures"] >= 5:
-        if now < tracker["blocked_until"]:
+    # Bộ đếm nằm ở DB, không phải RAM: restart server hay chạy nhiều worker đều
+    # không làm mất/nhân đôi ngưỡng chặn.
+    tracker = db.query(LoginAttempt).filter(LoginAttempt.ip == ip).first()
+    if tracker and tracker.failures >= LOGIN_MAX_FAILURES:
+        if tracker.blocked_until and now.isoformat() < tracker.blocked_until:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Tài khoản hoặc IP bị tạm khóa do đăng nhập sai nhiều lần. Vui lòng thử lại sau 5 phút."
+                detail=(
+                    "Tài khoản hoặc IP bị tạm khóa do đăng nhập sai nhiều lần. "
+                    f"Vui lòng thử lại sau {LOGIN_BLOCK_MINUTES} phút."
+                ),
             )
-        else:
-            # Block expired, reset tracker
-            _login_attempts[ip] = {"failures": 0, "blocked_until": now}
+        # Hết hạn khóa: cho đếm lại từ đầu.
+        tracker.failures = 0
+        tracker.blocked_until = ""
+        tracker.updated_at = now.isoformat()
 
     user = db.query(User).filter(User.username == payload.username).first()
     if not user or not verify_password(payload.password, user.password_hash):
-        # Register failure
-        if ip not in _login_attempts:
-            _login_attempts[ip] = {"failures": 1, "blocked_until": now}
-        else:
-            _login_attempts[ip]["failures"] += 1
-            if _login_attempts[ip]["failures"] >= 5:
-                from datetime import timedelta
-                _login_attempts[ip]["blocked_until"] = now + timedelta(minutes=5)
+        if tracker is None:
+            tracker = LoginAttempt(ip=ip, failures=0, blocked_until="")
+            db.add(tracker)
+        tracker.failures += 1
+        tracker.updated_at = now.isoformat()
+        if tracker.failures >= LOGIN_MAX_FAILURES:
+            tracker.blocked_until = (now + timedelta(minutes=LOGIN_BLOCK_MINUTES)).isoformat()
 
         # Audit failure (NO password/token printed)
         audit(db, "auth", 0, "LOGIN_FAILURE", f"Đăng nhập thất bại từ IP={ip}")
+        _purge_stale_login_attempts(db, now)
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -856,15 +588,21 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
             detail="Tài khoản đã bị vô hiệu hóa."
         )
 
-    # Reset failure tracker on successful login
-    if ip in _login_attempts:
-        _login_attempts[ip] = {"failures": 0, "blocked_until": now}
+    # Đăng nhập đúng: xóa hẳn dòng đếm của IP này thay vì để lại số 0 vô nghĩa.
+    if tracker is not None:
+        db.delete(tracker)
+    _purge_stale_login_attempts(db, now)
 
-    # Generate token containing username (sub), role, and org_id
+    # Generate token containing username (sub), role, org_id, and the password
+    # timestamp at issuance (pwd_ts) — get_current_user compares this against
+    # the current value on every request so a later password change/reset
+    # revokes tokens issued before it, instead of leaving them valid for up to
+    # ACCESS_TOKEN_EXPIRE_MINUTES.
     token = create_access_token(data={
         "sub": user.username,
         "role": user.role,
-        "org_id": user.organization_id
+        "org_id": user.organization_id,
+        "pwd_ts": user.password_changed_at,
     })
 
     # Audit success
@@ -978,6 +716,38 @@ def update_my_profile(
         "notification_preferences": _notification_preferences(current_user),
         "email_enabled": email_notifications_enabled(db),
     }
+
+
+@app.post("/api/me/password")
+def change_my_password(
+    payload: ChangeMyPasswordRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Self-service: người dùng tự đổi mật khẩu của chính mình.
+
+    Bắt buộc nhập đúng mật khẩu hiện tại — chặn người khác đổi mật khẩu khi
+    mượn được máy đang đăng nhập sẵn. Admin đặt lại hộ dùng route riêng
+    (`/api/admin/users/{id}/reset-password`) và KHÔNG cần mật khẩu cũ.
+    """
+    current_user = db.query(User).filter(User.id == user.id).first()
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Không thể xác thực thông tin đăng nhập")
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Mật khẩu hiện tại không đúng.")
+    if verify_password(payload.new_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Mật khẩu mới phải khác mật khẩu hiện tại.")
+    current_user.password_hash = get_password_hash(payload.new_password)
+    # Thu hồi mọi token đã phát hành trước đó (kể cả trên thiết bị khác) —
+    # xem so sánh pwd_ts trong get_current_user (backend/auth.py).
+    current_user.password_changed_at = now_iso()
+    audit(
+        db, "USER", current_user.id, "PASSWORD_SELF_CHANGE",
+        f"{current_user.username} tự đổi mật khẩu",
+        actor_user_id=user.id, organization_id=current_user.organization_id,
+    )
+    db.commit()
+    return {"status": "ok", "detail": "Đã đổi mật khẩu."}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1283,285 +1053,7 @@ def update_organization(
     return _serialize_org(org)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# USER MANAGEMENT (PLATFORM_ADMIN)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _serialize_user(db: Session, item: User) -> dict:
-    unit_rows = (
-        db.query(ReportingUnit.id, ReportingUnit.name)
-        .join(ReportingUnitUser, ReportingUnitUser.reporting_unit_id == ReportingUnit.id)
-        .filter(ReportingUnitUser.user_id == item.id)
-        .order_by(ReportingUnit.name)
-        .all()
-    )
-    return {
-        "id": item.id,
-        "username": item.username,
-        "full_name": item.full_name or "",
-        "email": item.email or "",
-        "role": item.role,
-        "is_active": bool(item.is_active),
-        "organization_id": item.organization_id,
-        "organization_name": item.organization.name if item.organization else None,
-        "reporting_units": [{"id": row[0], "name": row[1]} for row in unit_rows],
-        "created_at": item.created_at,
-    }
-
-
-@app.get("/api/admin/users")
-def list_users(
-    db: Session = Depends(get_db), user: User = Depends(require_roles("PLATFORM_ADMIN")),
-):
-    users = db.query(User).order_by(User.role, User.username).all()
-    return {"items": [_serialize_user(db, item) for item in users]}
-
-
-@app.post("/api/admin/users", status_code=201)
-def create_user(
-    payload: UserCreateRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PLATFORM_ADMIN")),
-):
-    existing = db.query(User).filter(func.lower(User.username) == payload.username).first()
-    if existing:
-        raise HTTPException(status_code=409, detail="Tên đăng nhập đã tồn tại.")
-
-    organization_id = None
-    if payload.role == "CUSTOMER":
-        if payload.organization_id is None:
-            raise HTTPException(status_code=422, detail="Tài khoản khách hàng phải được gắn với một tổ chức.")
-        organization = db.query(Organization).filter(Organization.id == payload.organization_id).first()
-        if not organization:
-            raise HTTPException(status_code=422, detail="Không tìm thấy tổ chức đã chọn.")
-        organization_id = organization.id
-
-    unit_ids: List[int] = []
-    if payload.role == "PORT_STAFF" and payload.reporting_unit_ids:
-        unit_ids = sorted(set(payload.reporting_unit_ids))
-        found = db.query(ReportingUnit.id).filter(ReportingUnit.id.in_(unit_ids)).all()
-        if len(found) != len(unit_ids):
-            raise HTTPException(status_code=422, detail="Một hoặc nhiều đơn vị báo cáo không tồn tại.")
-
-    new_user = User(
-        username=payload.username,
-        password_hash=get_password_hash(payload.password),
-        full_name=payload.full_name,
-        email=payload.email,
-        role=payload.role,
-        organization_id=organization_id,
-        is_active=1,
-        created_at=now_iso(),
-    )
-    db.add(new_user)
-    db.flush()
-
-    for unit_id in unit_ids:
-        db.add(ReportingUnitUser(reporting_unit_id=unit_id, user_id=new_user.id, created_at=now_iso()))
-
-    audit(
-        db, "USER", new_user.id, "CREATE",
-        f"Tạo tài khoản {new_user.username} ({new_user.role})",
-        actor_user_id=user.id, organization_id=organization_id,
-    )
-    db.commit()
-    db.refresh(new_user)
-    return _serialize_user(db, new_user)
-
-
-@app.put("/api/admin/users/{user_id}")
-def update_user(
-    user_id: int,
-    payload: UserUpdateRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PLATFORM_ADMIN")),
-):
-    """Admin edits a user's contact fields (email, full name). Username, role and
-    password are managed through their own dedicated flows."""
-    target = db.query(User).filter(User.id == user_id).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
-    if payload.full_name is not None:
-        target.full_name = payload.full_name
-    if payload.email is not None:
-        target.email = payload.email
-    audit(
-        db, "USER", target.id, "PROFILE_ADMIN_UPDATE",
-        f"Cập nhật thông tin {target.username}",
-        actor_user_id=user.id, organization_id=target.organization_id,
-    )
-    db.commit()
-    db.refresh(target)
-    return _serialize_user(db, target)
-
-
-@app.post("/api/admin/users/{user_id}/reset-password")
-def reset_user_password(
-    user_id: int,
-    payload: UserResetPasswordRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PLATFORM_ADMIN")),
-):
-    target = db.query(User).filter(User.id == user_id).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
-    target.password_hash = get_password_hash(payload.password)
-    audit(
-        db, "USER", target.id, "RESET_PASSWORD",
-        f"Đặt lại mật khẩu cho {target.username}",
-        actor_user_id=user.id, organization_id=target.organization_id,
-    )
-    db.commit()
-    return {"status": "ok", "detail": "Đã đặt lại mật khẩu."}
-
-
-@app.post("/api/admin/users/{user_id}/active")
-def set_user_active(
-    user_id: int,
-    payload: UserActiveRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PLATFORM_ADMIN")),
-):
-    target = db.query(User).filter(User.id == user_id).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
-    if target.id == user.id and not payload.is_active:
-        raise HTTPException(status_code=400, detail="Không thể tự vô hiệu hóa tài khoản của chính mình.")
-    target.is_active = 1 if payload.is_active else 0
-    audit(
-        db, "USER", target.id, "SET_ACTIVE",
-        f"{'Kích hoạt' if payload.is_active else 'Vô hiệu hóa'} tài khoản {target.username}",
-        actor_user_id=user.id, organization_id=target.organization_id,
-    )
-    db.commit()
-    db.refresh(target)
-    return _serialize_user(db, target)
-
-
-@app.get("/api/admin/operations-summary")
-def admin_operations_summary(
-    db: Session = Depends(get_db), user: User = Depends(require_roles("PLATFORM_ADMIN")),
-):
-    today = date.today()
-    year_start = date(today.year, 1, 1).isoformat()
-    declaration_query = db.query(Declaration).filter(Declaration.declaration_date >= year_start)
-    declarations = declaration_query.all()
-    approved = [item for item in declarations if item.workflow_status == "APPROVED"]
-    pending = [item for item in declarations if item.workflow_status.startswith("PENDING_")]
-    tons = teu = 0.0
-    for item in approved:
-        for cargo_item in (json.loads(item.unload_json or "{}"), json.loads(item.load_json or "{}")):
-            tons += float(cargo_item.get("tons") or 0)
-            teu += float(cargo_item.get("teu") or 0)
-
-    expiring = sum(
-        1 for vessel in db.query(Vessel).all()
-        if certificate_status(vessel.certificate_expiry_date) in {"EXPIRING", "EXPIRED"}
-    )
-    backups = list(BACKUP_DIR.glob(BACKUP_GLOB)) if BACKUP_DIR.exists() else []
-    latest_backup = max(backups, key=lambda item: item.stat().st_mtime).name if backups else None
-    return {
-        "period": {"from": year_start, "to": today.isoformat()},
-        "operations": {"declarations": len(declarations), "approved": len(approved), "pending": len(pending), "tons": tons, "teu": teu},
-        "fleet": {"vessels": db.query(Vessel).count(), "certificateWarnings": expiring},
-        "imports": {"jobs": db.query(ImportJob).count(), "rejectedRows": db.query(func.coalesce(func.sum(ImportJob.rejected_count), 0)).scalar()},
-        "storage": {"attachments": db.query(Attachment).count(), "backups": len(backups), "latestBackup": latest_backup},
-        "security": {"failedLogins": db.query(AuditEvent).filter(AuditEvent.action.like("LOGIN_FAILURE%")).count(), "disabledUsers": db.query(User).filter(User.is_active == 0).count()},
-    }
-
-
-def _backup_record(path: Path) -> dict[str, Any]:
-    manifest_path = path.with_suffix(path.suffix + ".manifest.json")
-    manifest: dict[str, Any] = {}
-    if manifest_path.exists():
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            manifest = {}
-    created_at = manifest.get("created_at") or datetime.fromtimestamp(
-        path.stat().st_mtime, timezone.utc
-    ).isoformat()
-    return {
-        "filename": path.name,
-        "createdAt": created_at,
-        "sizeBytes": path.stat().st_size,
-        "integrityCheck": manifest.get("integrity_check", "unknown"),
-        "sha256": manifest.get("sha256", ""),
-    }
-
-
-@app.get("/api/admin/backups")
-def list_admin_backups(user: User = Depends(require_roles("PLATFORM_ADMIN"))):
-    del user
-    if not BACKUP_DIR.exists():
-        return []
-    return [
-        _backup_record(path)
-        for path in sorted(
-            BACKUP_DIR.glob(BACKUP_GLOB),
-            key=lambda item: item.stat().st_mtime,
-            reverse=True,
-        )
-    ]
-
-
-@app.post("/api/admin/backups")
-def create_admin_backup(
-    db: Session = Depends(get_db), user: User = Depends(require_roles("PLATFORM_ADMIN")),
-):
-    if engine.url.get_backend_name() != "postgresql" or not engine.url.database:
-        raise HTTPException(
-            status_code=503,
-            detail="Sao lưu trực tiếp chỉ khả dụng với cấu hình PostgreSQL.",
-        )
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    destination = BACKUP_DIR / f"cang_vu-{stamp}{BACKUP_SUFFIX}"
-    try:
-        create_local_backup(SQLALCHEMY_DATABASE_URL, destination)
-        removed = prune_local_backups(BACKUP_DIR)
-    except Exception as exc:
-        access_logger.exception("Local backup failed")
-        raise HTTPException(status_code=500, detail="Không thể tạo bản sao lưu cục bộ.") from exc
-    audit(
-        db, "BACKUP", 0, "CREATE", destination.name,
-        actor_user_id=user.id, organization_id=user.organization_id,
-    )
-    db.commit()
-    return {**_backup_record(destination), "pruned": len(removed)}
-
-
-def _get_or_create_org(db: Session, name: Optional[str]) -> Optional[Organization]:
-    if not name:
-        return None
-    org = db.query(Organization).filter(Organization.name == name).first()
-    if not org:
-        org = Organization(name=name, updated_at=now_iso(), created_at=now_iso())
-        db.add(org)
-        db.flush()
-    return org
-
-
-def _resolve_org_for_port_scope(db: Session, scope: Scope, name: Optional[str]) -> Optional[Organization]:
-    """Look up or create an Organization by name for a PORT-scope mutation.
-
-    A brand-new Organization is onboarded through (and linked to) the resolved
-    reporting unit. An Organization that already exists must already belong to
-    the resolved unit — otherwise it is another tenant's data and is rejected.
-    """
-    if not name:
-        return None
-    org = db.query(Organization).filter(Organization.name == name).first()
-    if org is None:
-        org = Organization(name=name, updated_at=now_iso(), created_at=now_iso())
-        db.add(org)
-        db.flush()
-        db.add(ReportingUnitOrganization(
-            reporting_unit_id=scope.reporting_unit_id, organization_id=org.id, created_at=now_iso(),
-        ))
-        return org
-    if org.id not in scope.member_org_ids:
-        raise HTTPException(status_code=403, detail="Tổ chức không thuộc đơn vị báo cáo hiện tại.")
-    return org
+app.include_router(user_management_router)
 
 
 def _resolve_unit_id_for_reference(db: Session, scope: Scope, org_id: Optional[int]) -> Optional[int]:
@@ -1612,66 +1104,10 @@ def _next_reference_no(db: Session, scope: Scope, org_id: Optional[int]) -> str:
     return f"{prefix}{count + 1:03d}"
 
 
-def is_demo_data_active(db: Session) -> bool:
-    return db.query(Organization.id).filter(
-        Organization.tax_code == DEMO_ORGANIZATION_TAX_CODE
-    ).first() is not None
+# is_demo_data_active đã chuyển sang backend/database.py (reports_api.py cũng
+# dùng) và được import ở đầu file này.
 
 
-def remove_demo_data_for_real_input(
-    db: Session,
-    *,
-    retain_organization_id: int | None = None,
-    organization_data: dict[str, Any] | None = None,
-    allowed_organization_ids: tuple[int, ...] | None = None,
-) -> bool:
-    """Remove sentinel-marked records before the first real input.
-
-    A demo CUSTOMER keeps its organization binding, but the sentinel is cleared
-    and optional workbook metadata becomes the real profile. PLATFORM_ADMIN imports may
-    remove the demo organization entirely.
-    """
-    demo_org = db.query(Organization).filter(
-        Organization.tax_code == DEMO_ORGANIZATION_TAX_CODE
-    ).first()
-    if not demo_org:
-        return False
-    if allowed_organization_ids is not None and demo_org.id not in allowed_organization_ids:
-        return False
-
-    declaration_ids = [row[0] for row in db.query(Declaration.id).filter(
-        Declaration.organization_id == demo_org.id
-    ).all()]
-    if declaration_ids:
-        db.query(Attachment).filter(Attachment.declaration_id.in_(declaration_ids)).delete(synchronize_session=False)
-        db.query(DeclarationCrew).filter(DeclarationCrew.declaration_id.in_(declaration_ids)).delete(synchronize_session=False)
-        db.query(DeclarationEvent).filter(DeclarationEvent.declaration_id.in_(declaration_ids)).delete(synchronize_session=False)
-        db.query(Declaration).filter(Declaration.id.in_(declaration_ids)).delete(synchronize_session=False)
-    db.query(CrewMember).filter(CrewMember.organization_id == demo_org.id).delete(synchronize_session=False)
-    db.query(Vessel).filter(Vessel.organization_id == demo_org.id).delete(synchronize_session=False)
-    db.query(AuditEvent).filter(AuditEvent.organization_id == demo_org.id).delete(synchronize_session=False)
-    db.query(ImportJob).filter(ImportJob.organization_id == demo_org.id).delete(synchronize_session=False)
-    if retain_organization_id == demo_org.id:
-        profile = organization_data or {}
-        proposed_name = str(profile.get("name") or "").strip()
-        name_in_use = proposed_name and db.query(Organization.id).filter(
-            Organization.name == proposed_name, Organization.id != demo_org.id
-        ).first()
-        if proposed_name and not name_in_use:
-            demo_org.name = proposed_name
-        demo_org.tax_code = str(profile.get("tax_code") or "").strip()
-        for field in ("address", "contact_name", "phone"):
-            value = str(profile.get(field) or "").strip()
-            if value:
-                setattr(demo_org, field, value)
-        demo_org.updated_at = now_iso()
-    else:
-        db.query(User).filter(User.organization_id == demo_org.id).update(
-            {User.organization_id: None}, synchronize_session=False
-        )
-        db.delete(demo_org)
-    db.flush()
-    return True
 
 
 def _attention_queue(db: Session, scope: Scope) -> dict[str, Any]:
@@ -1813,607 +1249,7 @@ def get_dashboard(
     }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# VESSELS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _vessel_dict(v: Vessel) -> dict:
-    d = {c.name: getattr(v, c.name) for c in v.__table__.columns}
-    d["organization_name"] = v.organization.name if v.organization else None
-    d["certificate_status"] = certificate_status(v.certificate_expiry_date)
-    d["operating_profiles"] = [
-        {
-            "id": profile.id,
-            "sequence": profile.sequence,
-            "activity_area": profile.activity_area,
-            "deadweight_tons": profile.deadweight_tons,
-            "cargo_capacity_tons": profile.cargo_capacity_tons,
-        }
-        for profile in v.operating_profiles
-    ]
-    return d
-
-
-def _sync_vessel_operating_profiles(
-    vessel: Vessel,
-    profiles: Optional[List[VesselOperatingProfilePayload | dict[str, Any]]],
-) -> None:
-    if profiles is None:
-        return
-    vessel.operating_profiles.clear()
-    normalized: list[dict[str, Any]] = []
-    for index, profile in enumerate(profiles, start=1):
-        values = profile.model_dump() if isinstance(profile, BaseModel) else profile
-        activity_area = str(values.get("activity_area") or "").strip()
-        if not activity_area:
-            continue
-        item = {
-            "sequence": index,
-            "activity_area": activity_area,
-            "deadweight_tons": values.get("deadweight_tons"),
-            "cargo_capacity_tons": values.get("cargo_capacity_tons"),
-        }
-        normalized.append(item)
-        vessel.operating_profiles.append(VesselOperatingProfile(**item))
-    if normalized:
-        vessel.vessel_class = " / ".join(item["activity_area"] for item in normalized)
-        vessel.deadweight_tons = normalized[0]["deadweight_tons"]
-        vessel.cargo_capacity_tons = normalized[0]["cargo_capacity_tons"]
-
-
-@app.get("/api/reporting-units")
-def list_reporting_units(
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PORT_STAFF", "PLATFORM_ADMIN")),
-):
-    """Active reporting units the caller may select as tenant context.
-
-    PORT_STAFF sees only units where it holds membership; PLATFORM_ADMIN sees all
-    active units and must deliberately choose one before opening tenant data.
-    """
-    query = db.query(ReportingUnit).filter(ReportingUnit.is_active == 1)
-    staff_functions: dict[int, str | None] = {}
-    if user.role == "PORT_STAFF":
-        memberships = db.query(ReportingUnitUser).filter_by(user_id=user.id).all()
-        if not memberships:
-            return {"items": [], "role": user.role}
-        staff_functions = {m.reporting_unit_id: m.staff_function for m in memberships}
-        query = query.filter(ReportingUnit.id.in_(staff_functions.keys()))
-    units = query.order_by(ReportingUnit.name).all()
-    return {
-        "items": [
-            {
-                "id": u.id, "name": u.name, "code": u.code, "notify_email": u.notify_email or "",
-                # None cho PLATFORM_ADMIN (không gate theo staff_function — full
-                # authority ở mọi cổng, xem Scope.allows_staff_function).
-                "staff_function": staff_functions.get(u.id) if user.role == "PORT_STAFF" else None,
-            }
-            for u in units
-        ],
-        "role": user.role,
-    }
-
-
-@app.post("/api/reporting-units", status_code=201)
-def create_reporting_unit(
-    payload: ReportingUnitCreateRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PLATFORM_ADMIN")),
-):
-    """Create an empty tenant. Memberships and customer links are separate.
-
-    This is a platform operation and deliberately does not infer or copy the
-    currently selected tenant's organizations, staff or historical data.
-    """
-    duplicate = db.query(ReportingUnit).filter(
-        or_(
-            func.lower(ReportingUnit.name) == payload.name.lower(),
-            func.lower(ReportingUnit.code) == payload.code.lower(),
-        )
-    ).first()
-    if duplicate:
-        field = "tên" if duplicate.name.lower() == payload.name.lower() else "mã"
-        raise HTTPException(status_code=409, detail=f"Đã có đơn vị báo cáo dùng {field} này.")
-    item = ReportingUnit(
-        name=payload.name, code=payload.code, official_header_json="{}",
-        notify_email=payload.notify_email,
-        is_active=1, created_at=now_iso(), updated_at=now_iso(),
-    )
-    db.add(item)
-    db.flush()
-    audit(
-        db, "REPORTING_UNIT", item.id, "CREATE", f"{item.name} ({item.code})",
-        actor_user_id=user.id, reporting_unit_id=item.id,
-    )
-    db.commit()
-    db.refresh(item)
-    return {
-        "id": item.id, "name": item.name, "code": item.code,
-        "notify_email": item.notify_email or "", "is_active": bool(item.is_active),
-    }
-
-
-@app.put("/api/reporting-units/{unit_id}")
-def update_reporting_unit(
-    unit_id: int,
-    payload: ReportingUnitCreateRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles("PLATFORM_ADMIN")),
-):
-    """Update a reporting unit's name/code/notify_email (platform operation)."""
-    item = db.query(ReportingUnit).filter(ReportingUnit.id == unit_id).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Không tìm thấy đơn vị báo cáo.")
-    duplicate = db.query(ReportingUnit).filter(
-        ReportingUnit.id != unit_id,
-        or_(
-            func.lower(ReportingUnit.name) == payload.name.lower(),
-            func.lower(ReportingUnit.code) == payload.code.lower(),
-        ),
-    ).first()
-    if duplicate:
-        field = "tên" if duplicate.name.lower() == payload.name.lower() else "mã"
-        raise HTTPException(status_code=409, detail=f"Đã có đơn vị báo cáo khác dùng {field} này.")
-    item.name = payload.name
-    item.code = payload.code
-    item.notify_email = payload.notify_email
-    item.updated_at = now_iso()
-    audit(
-        db, "REPORTING_UNIT", item.id, "UPDATE", f"{item.name} ({item.code})",
-        actor_user_id=user.id, reporting_unit_id=item.id,
-    )
-    db.commit()
-    db.refresh(item)
-    return {
-        "id": item.id, "name": item.name, "code": item.code,
-        "notify_email": item.notify_email or "", "is_active": bool(item.is_active),
-    }
-
-
-@app.get("/api/reporting-unit/organizations")
-def list_reporting_unit_organizations(
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(require_port_scope),
-):
-    if not scope.member_org_ids:
-        return {"items": []}
-    organizations = (
-        db.query(Organization)
-        .filter(Organization.id.in_(scope.member_org_ids))
-        .order_by(Organization.name, Organization.id)
-        .all()
-    )
-    return {"items": [{"id": item.id, "name": item.name} for item in organizations]}
-
-
-@app.get("/api/vessels")
-def get_vessels(db: Session = Depends(get_db), scope: Scope = Depends(resolve_scope)):
-    # Reads are scoped: CUSTOMER to its Organization; PORT to the Organizations
-    # linked to the resolved reporting unit. Never a global fetch.
-    org_ids = scope.visible_org_ids()
-    if not org_ids:
-        return []
-    vessels = (
-        db.query(Vessel)
-        .filter(Vessel.organization_id.in_(org_ids))
-        .order_by(Vessel.name, Vessel.registration_no)
-        .all()
-    )
-    return [_vessel_dict(v) for v in vessels]
-
-
-def _joined_profile_value(vessel: Vessel, field: str) -> Any:
-    values = [getattr(profile, field) for profile in vessel.operating_profiles]
-    values = [value for value in values if value is not None]
-    if not values:
-        return getattr(vessel, field, None)
-    if len(values) == 1:
-        return values[0]
-    return " / ".join(f"{value:g}" for value in values)
-
-
-@app.get("/api/port-vessel-register")
-def get_port_vessel_register(
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(require_port_scope),
-):
-    register_ids = register_vessel_ids(db, scope.reporting_unit_id)
-    vessels = (
-        db.query(Vessel)
-        .filter(Vessel.id.in_(register_ids))
-        .order_by(Vessel.name, Vessel.registration_no)
-        .all()
-    ) if register_ids else []
-
-    # "Lượt gần nhất" — chỉ tham khảo, KHÔNG chuyển record giữa 2 tab (quyết
-    # định nghiệp vụ đã chốt, xem ROADMAP_PORT_OPERATIONS.md Giai đoạn 3). Sổ
-    # theo dõi lưu theo phương tiện (vĩnh viễn); Declaration là theo lượt.
-    latest_calls: dict[int, dict] = {}
-    if register_ids:
-        recent = (
-            db.query(Declaration)
-            .filter(Declaration.vessel_id.in_(register_ids))
-            # updated_at only has second precision — id DESC as tiebreak makes
-            # "most recent" deterministic even when two saves land in the same second.
-            .order_by(Declaration.vessel_id, Declaration.updated_at.desc(), Declaration.id.desc())
-            .all()
-        )
-        for declaration in recent:
-            if declaration.vessel_id not in latest_calls:
-                latest_calls[declaration.vessel_id] = {
-                    "reference_no": declaration.reference_no,
-                    "workflow_status": declaration.workflow_status,
-                    "actual_departure_at": declaration.actual_departure_at,
-                    "updated_at": declaration.updated_at,
-                }
-
-    profile_count = sum(len(vessel.operating_profiles) for vessel in vessels)
-    multi_area_count = sum(len(vessel.operating_profiles) > 1 for vessel in vessels)
-    certificate_warnings = sum(
-        certificate_status(vessel.certificate_expiry_date) in {"EXPIRING", "EXPIRED"}
-        for vessel in vessels
-    )
-    teu_capacity = sum(vessel.container_capacity_teu or 0 for vessel in vessels)
-    # Cộng theo từng dòng operating_profiles (không phải vessel.cargo_capacity_tons,
-    # vốn chỉ giữ giá trị của vùng đầu tiên) để không bỏ sót năng lực vùng thứ hai
-    # của Salan hoạt động cả VR-SI lẫn VR-SII.
-    tonnage_capacity = sum(
-        profile.cargo_capacity_tons or 0
-        for vessel in vessels
-        for profile in vessel.operating_profiles
-    )
-    area_counts: dict[str, int] = {}
-    type_counts: dict[str, int] = {}
-    for vessel in vessels:
-        type_counts[vessel.vessel_type] = type_counts.get(vessel.vessel_type, 0) + 1
-        # Mỗi Salan tính đúng một lần: vùng đơn giữ nguyên nhãn, vùng kép gộp
-        # thành một dòng riêng (vd "VR-SI / VR-SII") thay vì cộng trùng vào cả
-        # hai thanh — nếu không tổng các thanh sẽ vượt quá tổng số Salan.
-        areas = sorted({profile.activity_area for profile in vessel.operating_profiles if profile.activity_area})
-        if not areas:
-            continue
-        label = " / ".join(areas)
-        area_counts[label] = area_counts.get(label, 0) + 1
-    items = []
-    for vessel in vessels:
-        item = _vessel_dict(vessel)
-        item["latest_call"] = latest_calls.get(vessel.id)
-        items.append(item)
-
-    return {
-        "items": items,
-        "stats": {
-            "vessels": len(vessels),
-            "operatingProfiles": profile_count,
-            "multiAreaVessels": multi_area_count,
-            "certificateWarnings": certificate_warnings,
-            "teuCapacity": teu_capacity,
-            "tonnageCapacity": tonnage_capacity,
-        },
-        "byArea": [
-            {"label": label, "value": value}
-            for label, value in sorted(area_counts.items(), key=lambda item: (-item[1], item[0]))
-        ],
-        "byType": [
-            {"label": label, "value": value}
-            for label, value in sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))
-        ],
-    }
-
-
-@app.get("/api/port-vessel-register/export")
-def export_port_vessel_register(
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(require_port_scope),
-):
-    register_ids = register_vessel_ids(db, scope.reporting_unit_id)
-    vessels = (
-        db.query(Vessel)
-        .filter(Vessel.id.in_(register_ids))
-        .order_by(Vessel.name, Vessel.registration_no)
-        .all()
-    ) if register_ids else []
-    headers = [
-        "STT", "TÊN PHƯƠNG TIỆN", "SỐ ĐĂNG KÝ", "LOẠI PHƯƠNG TIỆN (CÔNG DỤNG)",
-        "CẤP PT (VÙNG HOẠT ĐỘNG)", "CHIỀU DÀI (M)", "TRỌNG TẢI TOÀN PHẦN (TẤN)",
-        "DUNG TÍCH (M3)", "KHẢ NĂNG KHAI THÁC (TẤN)", "KHẢ NĂNG KHAI THÁC (TEU)",
-        "NGÀY HẾT HẠN GCNATKT&BVMT", "SỐ THUYỀN VIÊN", "THUYỀN TRƯỞNG",
-        "SỐ ĐIỆN THOẠI LIÊN HỆ",
-    ]
-    rows = []
-    for index, vessel in enumerate(vessels, start=1):
-        areas = [profile.activity_area for profile in vessel.operating_profiles if profile.activity_area]
-        rows.append([
-            index,
-            vessel.name,
-            vessel.registration_no,
-            vessel.vessel_type,
-            " / ".join(areas) if areas else vessel.vessel_class,
-            vessel.length_m,
-            _joined_profile_value(vessel, "deadweight_tons"),
-            vessel.gross_tonnage,
-            _joined_profile_value(vessel, "cargo_capacity_tons"),
-            vessel.container_capacity_teu,
-            vessel.certificate_expiry_date or "",
-            vessel.min_crew,
-            vessel.tracking_master_name,
-            vessel.tracking_master_phone,
-        ])
-    content = make_xlsx("DỮ LIỆU SÀ LAN", headers, rows)
-    filename = f"DU_LIEU_SA_LAN_{date.today().isoformat()}.xlsx"
-    return Response(
-        content=content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@app.post("/api/port-vessel-register/remove")
-def remove_from_port_vessel_register(
-    payload: PortRegisterRemoveRequest,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(require_port_scope),
-):
-    """Remove rows from THIS reporting unit's register without deleting masters."""
-    register_ids = set(register_vessel_ids(db, scope.reporting_unit_id))
-    missing_ids = [item for item in payload.ids if item not in register_ids]
-    if missing_ids:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Không tìm thấy Salan đang được theo dõi: {', '.join(map(str, missing_ids))}.",
-        )
-
-    updated_at = now_iso()
-    removed = 0
-    for vessel_id in payload.ids:
-        link = (
-            db.query(ReportingUnitVessel)
-            .filter_by(reporting_unit_id=scope.reporting_unit_id, vessel_id=vessel_id)
-            .first()
-        )
-        if link is None:
-            continue
-        vessel = db.get(Vessel, vessel_id)
-        db.delete(link)
-        # Legacy compatibility flag: clear only when no unit tracks it anymore.
-        if vessel is not None:
-            still_tracked = (
-                db.query(ReportingUnitVessel).filter_by(vessel_id=vessel_id).count() > 1
-            )
-            if not still_tracked:
-                vessel.is_port_tracked = 0
-            vessel.port_tracking_updated_at = updated_at
-            vessel.updated_at = updated_at
-            vessel.version += 1
-        audit(
-            db, "VESSEL", vessel_id, "PORT_REGISTER_REMOVE",
-            (vessel.name + " / " + vessel.registration_no) if vessel else str(vessel_id),
-            actor_user_id=scope.user.id,
-            organization_id=vessel.organization_id if vessel else None,
-            reporting_unit_id=scope.reporting_unit_id,
-        )
-        removed += 1
-    db.commit()
-    return {"removed": removed, "ids": payload.ids}
-
-
-@app.post("/api/port-vessel-register/add")
-def add_to_port_vessel_register(
-    payload: PortRegisterAddRequest,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(require_port_scope),
-):
-    """Link existing Vessel masters to this unit without changing ownership."""
-    vessels = db.query(Vessel).filter(Vessel.id.in_(payload.ids)).all()
-    by_id = {vessel.id: vessel for vessel in vessels}
-    missing_ids = [item for item in payload.ids if item not in by_id]
-    if missing_ids:
-        raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện cần thêm vào sổ.")
-    added = 0
-    timestamp = now_iso()
-    for vessel_id in payload.ids:
-        if db.query(ReportingUnitVessel).filter_by(
-            reporting_unit_id=scope.reporting_unit_id, vessel_id=vessel_id,
-        ).first() is not None:
-            continue
-        vessel = by_id[vessel_id]
-        db.add(ReportingUnitVessel(
-            reporting_unit_id=scope.reporting_unit_id,
-            vessel_id=vessel_id,
-            added_by_user_id=scope.user.id,
-            created_at=timestamp,
-        ))
-        vessel.is_port_tracked = 1
-        vessel.port_tracking_updated_at = timestamp
-        vessel.updated_at = timestamp
-        vessel.version += 1
-        audit(
-            db, "VESSEL", vessel_id, "PORT_REGISTER_ADD",
-            f"{vessel.name} / {vessel.registration_no}",
-            actor_user_id=scope.user.id,
-            organization_id=vessel.organization_id,
-            reporting_unit_id=scope.reporting_unit_id,
-        )
-        added += 1
-    db.commit()
-    return {"added": added, "ids": payload.ids}
-
-
-@app.post("/api/vessels")
-def save_vessel(
-    payload: VesselSaveRequest,
-    port_register: bool = False,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(resolve_scope),
-):
-    user = scope.user
-    if port_register and scope.is_customer:
-        raise HTTPException(status_code=403, detail="Sổ theo dõi Salan chỉ dành cho Nhân viên Cảng và Admin.")
-    if scope.is_customer:
-        # Force organization to the customer's bound organization
-        org_id = user.organization_id
-    else:
-        # PLATFORM_ADMIN/PORT_STAFF can specify organization name
-        org_name = (
-            (payload.organization or {}).get("name") if isinstance(payload.organization, dict)
-            else payload.organization_name
-        )
-        if port_register:
-            # The internal register is vessel-scoped and Organization-agnostic:
-            # it may reference any Organization's vessel.
-            org = _get_or_create_org(db, org_name)
-        else:
-            org = _resolve_org_for_port_scope(db, scope, org_name)
-        org_id = org.id if org else None
-
-    if not payload.id:
-        remove_demo_data_for_real_input(
-            db,
-            retain_organization_id=org_id if scope.is_customer else None,
-            organization_data=payload.organization if isinstance(payload.organization, dict) else None,
-            allowed_organization_ids=scope.member_org_ids if scope.is_port else None,
-        )
-
-    data = payload.model_dump(
-        exclude={"id", "version", "organization", "organization_name", "operating_profiles"}
-    )
-    data["organization_id"] = org_id
-    data["updated_at"] = now_iso()
-    if port_register:
-        data["is_port_tracked"] = 1
-        data["port_tracking_updated_at"] = data["updated_at"]
-
-    audit_unit_id = scope.reporting_unit_id if scope.is_port else None
-    if payload.id:
-        vessel = db.query(Vessel).filter(Vessel.id == payload.id).first()
-        if not vessel:
-            raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện.")
-        if payload.version is not None and payload.version != vessel.version:
-            raise HTTPException(status_code=409, detail="Hồ sơ phương tiện đã được cập nhật bởi người dùng khác.")
-        # Tenant isolation check (customer org ownership or in-unit vessel/register).
-        require_vessel_in_scope(db, scope, vessel)
-
-        for k, v in data.items():
-            if hasattr(vessel, k):
-                setattr(vessel, k, v)
-        _sync_vessel_operating_profiles(vessel, payload.operating_profiles)
-        vessel.version += 1
-        audit(
-            db, "VESSEL", vessel.id, "UPDATE", f"{vessel.name} / {vessel.registration_no}",
-            actor_user_id=user.id, organization_id=vessel.organization_id,
-            reporting_unit_id=audit_unit_id,
-        )
-    else:
-        data["created_at"] = now_iso()
-        vessel = Vessel(**{k: v for k, v in data.items() if hasattr(Vessel, k)})
-        db.add(vessel)
-        db.flush()
-        profiles = payload.operating_profiles
-        if profiles is None and vessel.vessel_class:
-            profiles = [VesselOperatingProfilePayload(
-                activity_area=vessel.vessel_class,
-                deadweight_tons=vessel.deadweight_tons,
-                cargo_capacity_tons=vessel.cargo_capacity_tons,
-            )]
-        _sync_vessel_operating_profiles(vessel, profiles)
-        audit(
-            db, "VESSEL", vessel.id, "CREATE", f"{vessel.name} / {vessel.registration_no}",
-            actor_user_id=user.id, organization_id=vessel.organization_id,
-            reporting_unit_id=audit_unit_id,
-        )
-
-    # Internal register add is tenant-scoped through reporting_unit_vessels.
-    if port_register and scope.is_port:
-        exists = (
-            db.query(ReportingUnitVessel)
-            .filter_by(reporting_unit_id=scope.reporting_unit_id, vessel_id=vessel.id)
-            .first()
-        )
-        if exists is None:
-            db.add(ReportingUnitVessel(
-                reporting_unit_id=scope.reporting_unit_id, vessel_id=vessel.id,
-                added_by_user_id=user.id, created_at=now_iso(),
-            ))
-    db.commit()
-    db.refresh(vessel)
-
-    return _vessel_dict(vessel)
-
-
-@app.delete("/api/vessels/{vessel_id}")
-def delete_vessel(
-    vessel_id: int,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(require_port_scope),
-):
-    # Deletion is PLATFORM_ADMIN-only: PORT_STAFF keeps edit rights (fix wrong
-    # fields) but a hard delete of a master vessel record is an admin action.
-    if scope.user.role != "PLATFORM_ADMIN":
-        raise HTTPException(
-            status_code=403,
-            detail="Chỉ Platform admin mới có quyền xóa hồ sơ phương tiện.",
-        )
-    vessel = db.query(Vessel).filter(Vessel.id == vessel_id).first()
-    if not vessel:
-        raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện.")
-    require_vessel_in_scope(db, scope, vessel)
-
-    declaration_count = db.query(Declaration).filter(Declaration.vessel_id == vessel_id).count()
-    if declaration_count:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Không thể xóa: phương tiện đang gắn với {declaration_count} phiếu khai báo. "
-                   "Xóa các phiếu liên quan trước nếu chắc chắn cần xóa hồ sơ này.",
-        )
-    crew_count = db.query(CrewMember).filter(CrewMember.vessel_id == vessel_id).count()
-    if crew_count:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Không thể xóa: phương tiện đang gắn với {crew_count} thuyền viên trong Danh sách thuyền viên. "
-                   "Bỏ gán thuyền viên khỏi phương tiện này trước khi xóa.",
-        )
-
-    identity = f"{vessel.name} / {vessel.registration_no}"
-    organization_id = vessel.organization_id
-    audit_unit_id = scope.reporting_unit_id if scope.is_port else None
-    db.delete(vessel)
-    audit(
-        db, "VESSEL", vessel_id, "DELETE", identity,
-        actor_user_id=scope.user.id, organization_id=organization_id,
-        reporting_unit_id=audit_unit_id,
-    )
-    db.commit()
-    return {"deleted": vessel_id}
-
-
-@app.post("/api/vessels/{vessel_id}/verify-registry")
-def verify_vessel_registry(
-    vessel_id: int,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(resolve_scope),
-):
-    """
-    Local-only registry date check. Does NOT call any external Maritime Authority API.
-    Records verification source as 'local' and updates certificate_status.
-    External registry integration is out of scope until T6.
-    """
-    vessel = db.query(Vessel).filter(Vessel.id == vessel_id).first()
-    if not vessel:
-        raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện.")
-
-    # Tenant isolation check (customer org ownership or in-scope port vessel).
-    require_vessel_in_scope(db, scope, vessel)
-
-    adapter_status = registry_adapter().status()
-    vessel.registry_verification_status = "VERIFIED_LOCAL"
-    vessel.registry_verified_at = now_iso()
-    vessel.registry_verification_source = "local"
-    vessel.updated_at = now_iso()
-    db.commit()
-    db.refresh(vessel)
-    result = _vessel_dict(vessel)
-    result["adapter"] = adapter_status
-    return result
+app.include_router(vessels_router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2674,6 +1510,12 @@ def save_declaration(
     unload_data = cargo(payload.unload.model_dump())
     load_data = cargo(payload.load.model_dump())
 
+    # Mọi mốc thời gian của phiếu MỚI phải từ ngày tạo phiếu trở đi.
+    # Chỉ áp cho phiếu tạo mới: phiếu đã lưu (kể cả phiếu cũ/import có mốc sớm
+    # hơn) vẫn phải sửa/lưu lại được, nếu không sẽ bị khóa cứng vĩnh viễn.
+    if not payload.id:
+        _require_times_not_before_declaration_date(payload)
+
     if payload.id:
         decl = db.query(Declaration).filter(Declaration.id == payload.id).first()
         if not decl:
@@ -2930,6 +1772,46 @@ def _require_approved(decl: Declaration) -> None:
             status_code=409,
             detail="Chỉ thao tác được trên phiếu đã được Admin duyệt (APPROVED).",
         )
+
+
+def _require_times_not_before_declaration_date(payload: "DeclarationSaveRequest") -> None:
+    """Chặn mọi mốc thời gian sớm hơn NGÀY TẠO PHIẾU, khi LẬP PHIẾU MỚI.
+
+    Gốc so sánh là `declaration_date` (ngày lập phiếu), không phải ngày hệ
+    thống: phiếu lập cho ngày nào thì mọi mốc của lượt đó phải từ ngày ấy trở
+    đi. Áp cho cả 4 mốc — ETB/ETD (dự kiến) lẫn ATB/ATD (thực tế), vì với phiếu
+    MỚI thì cả bốn đều thuộc cùng một lượt tính từ ngày lập.
+
+    So sánh theo NGÀY (không theo giờ): khai cho chính ngày lập phiếu ở khung
+    giờ đã trôi qua vẫn hợp lệ. Chuỗi rỗng/sai định dạng bỏ qua — các validator
+    bắt buộc khác đã xử lý.
+    """
+    try:
+        base = datetime.fromisoformat(payload.declaration_date).date()
+    except (TypeError, ValueError):
+        return  # declaration_date lỗi định dạng: để validator riêng của nó báo
+
+    fields = (
+        (payload.eta, "Thời gian dự kiến cập cầu (ETB)"),
+        (payload.etd, "Thời gian dự kiến rời cầu (ETD)"),
+        (payload.actual_arrival_at, "Thời gian cập cầu thực tế (ATB)"),
+        (payload.actual_departure_at, "Thời gian rời cầu thực tế (ATD)"),
+    )
+    for value, label in fields:
+        if not value:
+            continue
+        try:
+            when = datetime.fromisoformat(value).date()
+        except ValueError:
+            continue
+        if when < base:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{label} không được sớm hơn ngày tạo phiếu "
+                    f"({base.strftime('%d/%m/%Y')})."
+                ),
+            )
 
 
 def _fmt_vn_datetime(value: str) -> str:
@@ -3395,1536 +2277,6 @@ def get_suggestions(
         .all()
     )
     return [r[0] for r in rows if r[0]]
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# IMPORT (Excel)
-# ══════════════════════════════════════════════════════════════════════════════
-
-VESSEL_IMPORT_COMPARE_FIELDS = {
-    "name": "Tên phương tiện",
-    "vessel_type": "Loại phương tiện",
-    "vessel_class": "Cấp phương tiện",
-    "registry_or_imo": "Số đăng kiểm / IMO",
-    "shell_material": "Vật liệu vỏ",
-    "build_year": "Năm đóng",
-    "length_m": "Chiều dài",
-    "width_m": "Chiều rộng",
-    "side_height_m": "Chiều cao mạn",
-    "draft_m": "Mớn nước",
-    "deadweight_tons": "Trọng tải",
-    "gross_tonnage": "Dung tích",
-    "engine_power_cv": "Công suất",
-    "cargo_capacity_tons": "Sức chở hàng",
-    "container_capacity_teu": "Sức chở container",
-    "passenger_capacity": "Sức chở khách",
-    "min_crew": "Số thuyền viên",
-    "safety_certificate_no": "Số chứng nhận an toàn",
-    "certificate_issue_date": "Ngày cấp chứng nhận",
-    "certificate_expiry_date": "Ngày hết hạn chứng nhận",
-    "tracking_master_name": "Thuyền trưởng theo dõi",
-    "tracking_master_phone": "Số điện thoại liên hệ",
-    "notes": "Ghi chú",
-}
-
-
-def _vessel_import_changes(existing: Vessel, row: dict[str, Any]) -> list[dict[str, Any]]:
-    changes: list[dict[str, Any]] = []
-    for field, label in VESSEL_IMPORT_COMPARE_FIELDS.items():
-        if field not in row:
-            continue
-        incoming = excel_date(row[field]) if "date" in field else row[field]
-        current = getattr(existing, field, None)
-        if current != incoming:
-            changes.append({
-                "field": field,
-                "label": label,
-                "current": current,
-                "incoming": incoming,
-            })
-    incoming_profiles = [
-        (
-            profile.get("activity_area") or "",
-            profile.get("deadweight_tons"),
-            profile.get("cargo_capacity_tons"),
-        )
-        for profile in row.get("operating_profiles", [])
-    ]
-    current_profiles = [
-        (profile.activity_area, profile.deadweight_tons, profile.cargo_capacity_tons)
-        for profile in existing.operating_profiles
-    ]
-    if incoming_profiles and incoming_profiles != current_profiles:
-        changes.append({
-            "field": "operating_profiles",
-            "label": "Vùng hoạt động / trọng tải / khả năng khai thác",
-            "current": current_profiles,
-            "incoming": incoming_profiles,
-        })
-    return changes
-
-@app.post("/api/import/port-vessel-register")
-@app.post("/api/import/vessels")
-async def import_vessels(
-    request: Request,
-    preview: bool = False,
-    overwrite_existing: bool = False,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(resolve_scope),
-):
-    user = scope.user
-    is_port_register = request.url.path.endswith("/port-vessel-register")
-    if is_port_register and scope.is_customer:
-        raise HTTPException(status_code=403, detail="Sổ theo dõi Salan chỉ dành cho Nhân viên Cảng và Admin.")
-    import_kind = "PORT_VESSEL_REGISTER" if is_port_register else "VESSELS"
-    content = await request.body()
-    if not content:
-        raise HTTPException(status_code=400, detail="File trống.")
-    validate_attachment_content(".xlsx", content)
-    try:
-        sheets = read_workbook(content)
-        org_data, rows = vessel_rows(sheets)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Lỗi đọc file: {exc}")
-
-    # Scoping organization based on scope
-    if scope.is_customer:
-        org_id = user.organization_id
-    elif is_port_register:
-        # Register membership is vessel-scoped, but its customer-owned master
-        # remains constrained to an Organization linked to this unit.
-        org = _resolve_org_for_port_scope(db, scope, org_data.get("name"))
-        org_id = org.id if org else None
-    else:
-        org = _resolve_org_for_port_scope(db, scope, org_data.get("name"))
-        org_id = org.id if org else None
-
-    checksum = hashlib.sha256(content).hexdigest()
-    required_vessel_fields = {
-        "name": "Tên phương tiện",
-        "registration_no": "Số đăng ký",
-        "vessel_type": "Loại phương tiện",
-        "vessel_class": "Cấp phương tiện",
-    }
-    preview_rows = []
-    conflict_count = 0
-    for row in rows:
-        clean_row = {key: value for key, value in row.items() if not key.startswith("_")}
-        clean_row["sourceRow"] = row.get("_source_row")
-        clean_row["sourceSheet"] = row.get("_source_sheet")
-        clean_row["mappingWarnings"] = row.get("_mapping_warnings", [])
-        clean_row["missingFields"] = [
-            label for field, label in required_vessel_fields.items() if not row.get(field)
-        ]
-        existing = db.query(Vessel).filter(
-            Vessel.registration_no == row.get("registration_no")
-        ).first() if row.get("registration_no") else None
-        if existing:
-            conflict_count += 1
-            same_scope = scope_allows_vessel(db, scope, existing)
-            clean_row["existing"] = True
-            clean_row["ownershipConflict"] = bool(overwrite_existing and not same_scope)
-            if same_scope:
-                clean_row["existingRecord"] = {
-                    "id": existing.id,
-                    "name": existing.name,
-                    "registration_no": existing.registration_no,
-                }
-                clean_row["changes"] = _vessel_import_changes(existing, row)
-        else:
-            clean_row["existing"] = False
-            clean_row["ownershipConflict"] = False
-            clean_row["changes"] = []
-        preview_rows.append(clean_row)
-    prior = db.query(ImportJob).filter(
-        ImportJob.organization_id == org_id,
-        ImportJob.reporting_unit_id == (scope.reporting_unit_id if scope.is_port else None),
-        ImportJob.import_kind == import_kind,
-        ImportJob.source_checksum == checksum,
-        ImportJob.mapping_version == IMPORT_MAPPING_VERSION,
-    ).first()
-    if preview:
-        db.rollback()
-        return {
-            "preview": True,
-            "mappingVersion": IMPORT_MAPPING_VERSION,
-            "checksum": checksum,
-            "organization": org_data,
-            "mapping": {
-                "strategy": "HEADER_LABEL_DETECTION",
-                "sheet": rows[0].get("_source_sheet") if rows else None,
-            },
-            "rows": preview_rows,
-            "conflictCount": conflict_count,
-            "previousImportId": prior.id if prior else None,
-            "accepted": 0,
-            "rejected": [],
-        }
-    if prior and not overwrite_existing:
-        result = json.loads(prior.result_json)
-        result["idempotent"] = True
-        result["importJobId"] = prior.id
-        return result
-
-    remove_demo_data_for_real_input(
-        db,
-        retain_organization_id=org_id if scope.is_customer else None,
-        organization_data=org_data,
-        allowed_organization_ids=scope.member_org_ids if scope.is_port else None,
-    )
-
-    accepted = 0
-    created = 0
-    updated = 0
-    skipped = 0
-    rejected: list[dict] = []
-    for row in rows:
-        source_row = row.get("_source_row")
-        missing_fields = [
-            label for field, label in required_vessel_fields.items() if not row.get(field)
-        ]
-        if missing_fields:
-            rejected.append({
-                "sourceRow": source_row,
-                "row": row.get("name"),
-                "error": f"Thiếu {', '.join(missing_fields)}",
-            })
-            continue
-        try:
-            with db.begin_nested():
-                existing = db.query(Vessel).filter(
-                    Vessel.registration_no == row.get("registration_no")
-                ).first()
-                if existing:
-                    if not overwrite_existing:
-                        skipped += 1
-                        if not is_port_register:
-                            continue
-                        # A port may link an existing shared Vessel master into
-                        # its own register without mutating that master.
-                        vessel = existing
-                    else:
-                        # Adding a register link may span master ownership, but an
-                        # overwrite is still a tenant-bound master-data mutation.
-                        require_vessel_in_scope(db, scope, existing)
-                        for k, v in row.items():
-                            if k != "operating_profiles" and hasattr(existing, k) and k not in ("id", "created_at", "organization_id"):
-                                setattr(existing, k, excel_date(v) if "date" in k else v)
-                        _sync_vessel_operating_profiles(existing, row.get("operating_profiles", []))
-                        existing.organization_id = org_id
-                        existing.updated_at = now_iso()
-                        if is_port_register:
-                            existing.is_port_tracked = 1
-                            existing.port_tracking_updated_at = existing.updated_at
-                        existing.version += 1
-                        updated += 1
-                        vessel = existing
-                else:
-                    safe = {
-                        k: (excel_date(v) if "date" in k else v)
-                        for k, v in row.items()
-                        if not k.startswith("_") and hasattr(Vessel, k) and k not in ("id", "organization_id", "operating_profiles")
-                    }
-                    safe["organization_id"] = org_id
-                    safe["created_at"] = now_iso()
-                    safe["updated_at"] = now_iso()
-                    if is_port_register:
-                        safe["is_port_tracked"] = 1
-                        safe["port_tracking_updated_at"] = safe["updated_at"]
-                    vessel = Vessel(**safe)
-                    db.add(vessel)
-                    db.flush()
-                    _sync_vessel_operating_profiles(vessel, row.get("operating_profiles", []))
-                    created += 1
-                if is_port_register and scope.is_port:
-                    link = (
-                        db.query(ReportingUnitVessel)
-                        .filter_by(reporting_unit_id=scope.reporting_unit_id, vessel_id=vessel.id)
-                        .first()
-                    )
-                    if link is None:
-                        db.add(ReportingUnitVessel(
-                            reporting_unit_id=scope.reporting_unit_id, vessel_id=vessel.id,
-                            added_by_user_id=user.id, created_at=now_iso(),
-                        ))
-                db.flush()
-            accepted += 1
-        except Exception:
-            access_logger.exception(
-                "Vessel import row rejected source_row=%s registration_no=%s",
-                source_row, row.get("registration_no"),
-            )
-            rejected.append({
-                "sourceRow": source_row,
-                "row": row.get("name"),
-                "error": "Không thể nhập dòng này. Hãy kiểm tra định dạng số, ngày hoặc mã đăng ký trùng.",
-            })
-    result = {
-        "accepted": accepted,
-        "created": created,
-        "updated": updated,
-        "skipped": skipped,
-        "rejected": rejected,
-        "mappingVersion": IMPORT_MAPPING_VERSION,
-        "checksum": checksum,
-        "idempotent": False,
-    }
-    if prior:
-        result["reapplied"] = True
-        result["importJobId"] = prior.id
-        prior.accepted_count = accepted
-        prior.rejected_count = len(rejected)
-        prior.result_json = json.dumps(result, ensure_ascii=False)
-        db.commit()
-        return result
-    job = ImportJob(
-        organization_id=org_id, import_kind=import_kind, source_checksum=checksum,
-        reporting_unit_id=scope.reporting_unit_id if scope.is_port else None,
-        mapping_version=IMPORT_MAPPING_VERSION, accepted_count=accepted,
-        rejected_count=len(rejected), result_json=json.dumps(result, ensure_ascii=False),
-        created_by_user_id=user.id, created_at=now_iso(),
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-    result["importJobId"] = job.id
-    return result
-
-
-CREW_IMPORT_COMPARE_FIELDS = {
-    "full_name": "Họ và tên",
-    "crew_role": "Chức danh",
-    "birth_date": "Ngày sinh",
-    "phone": "Số điện thoại",
-    "identity_no": "CCCD / Hộ chiếu",
-    "professional_certificate_type": "Loại chứng chỉ",
-    "professional_certificate_no": "Số chứng chỉ",
-    "certificate_issue_date": "Ngày cấp",
-    "certificate_expiry_date": "Ngày hết hạn",
-    "notes": "Ghi chú",
-}
-
-
-def _import_organization(db: Session, name: str) -> Organization | None:
-    key = import_match_key(name)
-    return next(
-        (organization for organization in db.query(Organization).all()
-         if import_match_key(organization.name) == key),
-        None,
-    )
-
-
-def _existing_import_crew(
-    db: Session, organization_id: int, row: dict[str, Any],
-) -> CrewMember | None:
-    query = db.query(CrewMember).filter(CrewMember.organization_id == organization_id)
-    identity_no = str(row.get("identity_no") or "").strip()
-    certificate_no = str(row.get("professional_certificate_no") or "").strip()
-    if identity_no:
-        existing = query.filter(CrewMember.identity_no == identity_no).first()
-        if existing:
-            return existing
-    if certificate_no:
-        return query.filter(CrewMember.professional_certificate_no == certificate_no).first()
-    birth_date = row.get("birth_date")
-    if birth_date:
-        return query.filter(
-            CrewMember.full_name == row.get("full_name"),
-            CrewMember.birth_date == birth_date,
-        ).first()
-    return None
-
-
-def _crew_import_changes(existing: CrewMember, row: dict[str, Any]) -> list[dict[str, Any]]:
-    changes: list[dict[str, Any]] = []
-    for field, label in CREW_IMPORT_COMPARE_FIELDS.items():
-        if field not in row:
-            continue
-        current = getattr(existing, field, None)
-        incoming = row[field]
-        if current != incoming:
-            changes.append({
-                "field": field,
-                "label": label,
-                "current": current,
-                "incoming": incoming,
-            })
-    return changes
-
-
-@app.post("/api/import/crew")
-async def import_crew(
-    request: Request,
-    preview: bool = False,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(require_port_scope),
-):
-    user = scope.user
-    content = await request.body()
-    if not content:
-        raise HTTPException(status_code=400, detail="File trống.")
-    validate_attachment_content(".xlsx", content)
-    try:
-        rows = crew_rows(read_workbook(content))
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Lỗi đọc file: {exc}")
-
-    checksum = hashlib.sha256(content).hexdigest()
-    required_fields = {
-        "organization_name": "Tên doanh nghiệp",
-        "full_name": "Họ và tên",
-        "crew_role": "Chức danh",
-    }
-    prepared: list[tuple[dict[str, Any], Organization | None, CrewMember | None]] = []
-    preview_rows: list[dict[str, Any]] = []
-    for row in rows:
-        raw_role = str(row.get("crew_role") or "")
-        canonical_role = CREW_ROLE_CANONICAL.get(import_match_key(raw_role))
-        if canonical_role:
-            row["crew_role"] = canonical_role
-        elif raw_role:
-            row["_invalid_crew_role"] = raw_role
-        organization = _import_organization(db, str(row.get("organization_name") or ""))
-        existing = _existing_import_crew(db, organization.id, row) if organization else None
-        missing = [label for field, label in required_fields.items() if not row.get(field)]
-        if row.get("_invalid_crew_role"):
-            missing.append("Chức danh hợp lệ")
-        if row.get("organization_name") and not organization:
-            missing.append("Doanh nghiệp đã có trong hệ thống")
-        clean = {key: value for key, value in row.items() if not key.startswith("_")}
-        clean.update({
-            "sourceRow": row.get("_source_row"),
-            "sourceSheet": row.get("_source_sheet"),
-            "mappingWarnings": row.get("_mapping_warnings", []),
-            "missingFields": missing,
-            "existing": bool(existing),
-            "changes": _crew_import_changes(existing, row) if existing else [],
-        })
-        preview_rows.append(clean)
-        prepared.append((row, organization, existing))
-
-    recognized_organization_ids = {
-        organization.id for _, organization, _ in prepared if organization
-    }
-    if len(recognized_organization_ids) > 1:
-        raise HTTPException(
-            status_code=422,
-            detail="Mỗi file thuyền viên chỉ được chứa dữ liệu của một doanh nghiệp.",
-        )
-    job_organization_id = next(iter(recognized_organization_ids), None)
-    if job_organization_id is not None:
-        scope.require_org(job_organization_id)
-    prior = db.query(ImportJob).filter(
-        ImportJob.organization_id == job_organization_id,
-        ImportJob.reporting_unit_id == scope.reporting_unit_id,
-        ImportJob.import_kind == "CREW",
-        ImportJob.source_checksum == checksum,
-        ImportJob.mapping_version == IMPORT_MAPPING_VERSION,
-    ).first()
-    if preview:
-        return {
-            "preview": True,
-            "mappingVersion": IMPORT_MAPPING_VERSION,
-            "checksum": checksum,
-            "mapping": {
-                "strategy": "HEADER_LABEL_DETECTION",
-                "sheet": rows[0].get("_source_sheet") if rows else None,
-            },
-            "rows": preview_rows,
-            "previousImportId": prior.id if prior else None,
-            "accepted": 0,
-            "rejected": [],
-        }
-    if prior:
-        result = json.loads(prior.result_json)
-        result["idempotent"] = True
-        result["importJobId"] = prior.id
-        return result
-    if job_organization_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="File không có doanh nghiệp nào khớp với dữ liệu hệ thống.",
-        )
-
-    created = 0
-    updated = 0
-    rejected: list[dict[str, Any]] = []
-    for row, organization, existing in prepared:
-        missing = [label for field, label in required_fields.items() if not row.get(field)]
-        if row.get("_invalid_crew_role"):
-            missing.append("Chức danh hợp lệ")
-        if row.get("organization_name") and not organization:
-            missing.append("Doanh nghiệp đã có trong hệ thống")
-        if missing:
-            rejected.append({
-                "sourceRow": row.get("_source_row"),
-                "row": row.get("full_name"),
-                "error": f"Thiếu hoặc không hợp lệ: {', '.join(missing)}",
-            })
-            continue
-        data = {
-            key: value for key, value in row.items()
-            if not key.startswith("_") and key != "organization_name" and hasattr(CrewMember, key)
-        }
-        data["organization_id"] = organization.id
-        data["vessel_id"] = None
-        data["updated_at"] = now_iso()
-        if existing:
-            for key, value in data.items():
-                setattr(existing, key, value)
-            existing.version += 1
-            member = existing
-            updated += 1
-            action = "IMPORT_UPDATE"
-        else:
-            data["created_at"] = now_iso()
-            member = CrewMember(**data)
-            db.add(member)
-            created += 1
-            action = "IMPORT_CREATE"
-        db.flush()
-        audit(
-            db, "CREW", member.id, action, f"{member.full_name} / {member.crew_role}",
-            actor_user_id=user.id, organization_id=organization.id,
-            reporting_unit_id=scope.reporting_unit_id,
-        )
-
-    result = {
-        "accepted": created + updated,
-        "created": created,
-        "updated": updated,
-        "rejected": rejected,
-        "mappingVersion": IMPORT_MAPPING_VERSION,
-        "checksum": checksum,
-        "idempotent": False,
-    }
-    job = ImportJob(
-        organization_id=job_organization_id,
-        reporting_unit_id=scope.reporting_unit_id,
-        import_kind="CREW",
-        source_checksum=checksum,
-        mapping_version=IMPORT_MAPPING_VERSION,
-        accepted_count=result["accepted"],
-        rejected_count=len(rejected),
-        result_json=json.dumps(result, ensure_ascii=False),
-        created_by_user_id=user.id,
-        created_at=now_iso(),
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-    result["importJobId"] = job.id
-    return result
-
-
-@app.post("/api/import/declaration")
-async def import_declaration(
-    request: Request,
-    preview: bool = False,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(resolve_scope),
-):
-    user = scope.user
-    content = await request.body()
-    if not content:
-        raise HTTPException(status_code=400, detail="File trống.")
-    validate_attachment_content(".xlsx", content)
-    try:
-        sheets = read_workbook(content)
-        row = declaration_row(sheets)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Lỗi đọc file: {exc}")
-
-    checksum = hashlib.sha256(content).hexdigest()
-    if preview:
-        return {
-            "preview": True,
-            "mappingVersion": IMPORT_MAPPING_VERSION,
-            "checksum": checksum,
-            "row": row,
-            "accepted": 0,
-            "rejected": [],
-        }
-    row["created_at"] = now_iso()
-    row["updated_at"] = now_iso()
-    # Import rows keep the IMP marker and a microsecond tail for uniqueness in
-    # bulk (they are not the per-day human sequence used for manual entry).
-    row["reference_no"] = f"TT-IMP-{datetime.now():%y%m%d}-{datetime.now().microsecond:06d}"
-    row["workflow_status"] = "DRAFT"
-    row["status"] = "DRAFT"
-    row["unload_json"] = json.dumps(cargo(row.pop("unload", {})), ensure_ascii=False)
-    row["load_json"] = json.dumps(cargo(row.pop("load", {})), ensure_ascii=False)
-
-    safe = {k: v for k, v in row.items() if not k.startswith("_") and hasattr(Declaration, k)}
-    imported_company_name = str(safe.get("company_name") or "").strip()
-    if not safe.get("declaration_date"):
-        safe["declaration_date"] = date.today().isoformat()
-    for required in ("company_name", "vessel_name", "registration_no", "vessel_type",
-                     "vessel_class", "last_port", "working_port", "eta", "etd",
-                     "master_name", "master_phone"):
-        if not safe.get(required):
-            safe[required] = "N/A"
-
-    # CUSTOMER imports stay tenant-bound. PLATFORM_ADMIN may import a declaration sent by
-    # any customer inside its resolved reporting unit; the workbook company name
-    # selects (or creates) the tenant.
-    if scope.is_customer:
-        target_organization = user.organization
-    else:
-        if not imported_company_name:
-            raise HTTPException(status_code=422, detail="File phải có tên doanh nghiệp để Admin nhập phiếu khai báo.")
-        target_organization = _import_organization(db, imported_company_name)
-        if target_organization is None:
-            # Brand-new Organization: onboard it through this resolved unit.
-            target_organization = _get_or_create_org(db, imported_company_name)
-            db.add(ReportingUnitOrganization(
-                reporting_unit_id=scope.reporting_unit_id, organization_id=target_organization.id,
-                created_at=now_iso(),
-            ))
-        else:
-            scope.require_org(target_organization.id)
-    if target_organization is None:
-        raise HTTPException(status_code=422, detail="File phải có tên doanh nghiệp để Admin nhập phiếu khai báo.")
-
-    target_organization_id = target_organization.id
-    safe["organization_id"] = target_organization_id
-
-    prior = db.query(ImportJob).filter(
-        ImportJob.organization_id == target_organization_id,
-        ImportJob.reporting_unit_id == (scope.reporting_unit_id if scope.is_port else None),
-        ImportJob.import_kind == "DECLARATION",
-        ImportJob.source_checksum == checksum,
-        ImportJob.mapping_version == IMPORT_MAPPING_VERSION,
-    ).first()
-    if prior:
-        result = json.loads(prior.result_json)
-        result["idempotent"] = True
-        result["importJobId"] = prior.id
-        return result
-
-    remove_demo_data_for_real_input(
-        db,
-        retain_organization_id=target_organization_id,
-        organization_data={"name": imported_company_name},
-        allowed_organization_ids=scope.member_org_ids if scope.is_port else None,
-    )
-    safe["company_name"] = target_organization.name
-
-    decl = Declaration(**safe)
-    db.add(decl)
-    db.flush()
-    audit(
-        db, "DECLARATION", decl.id, "IMPORT_CREATE", decl.reference_no,
-        actor_user_id=user.id, organization_id=target_organization_id,
-        reporting_unit_id=scope.reporting_unit_id if scope.is_port else None,
-    )
-    result = {
-        "accepted": 1, "rejected": [], "id": decl.id,
-        "mappingVersion": IMPORT_MAPPING_VERSION, "checksum": checksum,
-        "idempotent": False,
-    }
-    job = ImportJob(
-        organization_id=target_organization_id, import_kind="DECLARATION",
-        reporting_unit_id=scope.reporting_unit_id if scope.is_port else None,
-        source_checksum=checksum, mapping_version=IMPORT_MAPPING_VERSION,
-        accepted_count=1, rejected_count=0,
-        result_json=json.dumps(result, ensure_ascii=False),
-        created_by_user_id=user.id, created_at=now_iso(),
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(decl)
-    db.refresh(job)
-    result["importJobId"] = job.id
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# REPORTS (Appendix 1 / 2 / 3)
-# ══════════════════════════════════════════════════════════════════════════════
-
-ANALYTICS_PERIODS = {"week", "month", "quarter", "year"}
-ANALYTICS_SOURCES = {"live", "historical", "combined"}
-ACTIVE_HISTORICAL_STATUSES = ("COMMITTED", "REVIEW")
-
-
-def _month_shift(value: date, offset: int) -> date:
-    month_index = value.year * 12 + value.month - 1 + offset
-    return date(month_index // 12, month_index % 12 + 1, 1)
-
-
-def _analytics_period(period: str, anchor: date) -> dict[str, Any]:
-    if period == "week":
-        current_start = anchor - timedelta(days=anchor.weekday())
-        current_end = current_start + timedelta(days=6)
-        previous_start = current_start - timedelta(days=364)
-        labels = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
-        bucket = lambda value, start: (value - start).days
-        title = "Tổng hợp theo tuần"
-        trend_title = "Lượt tàu theo ngày"
-        compare = "Tuần này so với cùng kỳ năm trước"
-    elif period == "month":
-        current_start = anchor.replace(day=1)
-        current_end = _month_shift(current_start, 1) - timedelta(days=1)
-        previous_start = date(current_start.year - 1, current_start.month, 1)
-        labels = [f"Tuần {index}" for index in range(1, 6)]
-        bucket = lambda value, start: min(4, (value.day - 1) // 7)
-        title = "Tổng hợp theo tháng"
-        trend_title = "Lượt tàu theo tuần"
-        compare = f"Tháng {current_start.month}/{current_start.year} so với cùng kỳ {previous_start.year}"
-    elif period == "quarter":
-        quarter_month = ((anchor.month - 1) // 3) * 3 + 1
-        current_start = date(anchor.year, quarter_month, 1)
-        current_end = _month_shift(current_start, 3) - timedelta(days=1)
-        previous_start = date(current_start.year - 1, current_start.month, 1)
-        labels = [f"T{_month_shift(current_start, index).month}" for index in range(3)]
-        bucket = lambda value, start: (value.year - start.year) * 12 + value.month - start.month
-        title = "Tổng hợp theo quý"
-        trend_title = "Lượt tàu theo tháng"
-        compare = f"Quý {(quarter_month - 1) // 3 + 1}/{current_start.year} so với cùng kỳ {previous_start.year}"
-    else:
-        current_start = date(anchor.year, 1, 1)
-        current_end = date(anchor.year, 12, 31)
-        previous_start = date(anchor.year - 1, 1, 1)
-        labels = [f"T{index}" for index in range(1, 13)]
-        bucket = lambda value, start: value.month - 1
-        title = "Tổng hợp theo năm"
-        trend_title = "Lượt tàu theo tháng"
-        compare = f"Năm {anchor.year} so với {anchor.year - 1}"
-    if period == "week":
-        previous_end = previous_start + timedelta(days=6)
-    elif period == "month":
-        previous_end = _month_shift(previous_start, 1) - timedelta(days=1)
-    elif period == "quarter":
-        previous_end = _month_shift(previous_start, 3) - timedelta(days=1)
-    else:
-        previous_end = date(previous_start.year, 12, 31)
-    return {
-        "current_start": current_start,
-        "current_end": current_end,
-        "previous_start": previous_start,
-        "previous_end": previous_end,
-        "labels": labels,
-        "bucket": bucket,
-        "title": title,
-        "trend_title": trend_title,
-        "compare": compare,
-    }
-
-
-def _date_from_value(raw: Any) -> date | None:
-    if not raw:
-        return None
-    try:
-        return date.fromisoformat(str(raw)[:10])
-    except ValueError:
-        return None
-
-
-def _arrival_operating_date(declaration: Declaration) -> date | None:
-    for raw in (declaration.actual_arrival_at, declaration.eta):
-        value = _date_from_value(raw)
-        if value:
-            return value
-    return None
-
-
-def _departure_operating_date(declaration: Declaration) -> date | None:
-    for raw in (declaration.actual_departure_at, declaration.etd):
-        value = _date_from_value(raw)
-        if value:
-            return value
-    return None
-
-
-def _declaration_operating_date(declaration: Declaration) -> date | None:
-    values = (
-        (declaration.actual_departure_at, declaration.etd)
-        if declaration.movement_type == "DEPARTURE"
-        else (declaration.actual_arrival_at, declaration.eta)
-    )
-    for raw in values:
-        if not raw:
-            continue
-        value = _date_from_value(raw)
-        if value:
-            return value
-    return None
-
-
-def _declaration_metrics(declaration: Declaration) -> dict[str, float]:
-    def numeric(value: Any) -> float:
-        try:
-            return float(value or 0)
-        except (TypeError, ValueError):
-            return 0.0
-
-    tons = 0.0
-    teu = 0.0
-    for raw in (declaration.unload_json, declaration.load_json):
-        try:
-            item = json.loads(raw or "{}")
-        except (TypeError, json.JSONDecodeError):
-            item = {}
-        tons += numeric(item.get("tons"))
-        teu += numeric(item.get("teu"))
-    return {
-        "trips": 1.0,
-        "tons": tons,
-        "teu": teu,
-        "pax": numeric(declaration.passenger_count),
-    }
-
-
-def _month_key(value: date) -> str:
-    return value.strftime("%Y-%m")
-
-
-def _months_between(start: date, end: date) -> list[str]:
-    value = start.replace(day=1)
-    result = []
-    while value <= end:
-        result.append(_month_key(value))
-        value = _month_shift(value, 1)
-    return result
-
-
-def _historical_window(
-    db: Session, unit_id: int, start: date, end: date, labels: list[str], bucket,
-) -> dict[str, Any]:
-    """Aggregate only active, validated TOS facts using ATB as operating time.
-
-    PL.03 reported times are deliberately excluded: the approved business rule
-    makes matched TOS ATB/ATD authoritative. Missing TOS coverage remains
-    missing and is never converted to a numeric zero.
-    """
-    window_months = set(_months_between(start, end))
-    imports = db.query(HistoricalReportImport).filter(
-        HistoricalReportImport.reporting_unit_id == unit_id,
-        HistoricalReportImport.status.in_(ACTIVE_HISTORICAL_STATUSES),
-    ).all()
-    active_ids = {item.id for item in imports}
-    berth_imports = [item for item in imports
-                      if item.source_kind == "tos_berth_call" and item.reporting_period in window_months]
-    cargo_imports = [item for item in imports
-                     if item.source_kind == "tos_cargo_detail" and item.reporting_period in window_months]
-    berth_months = {item.reporting_period for item in berth_imports}
-    cargo_months = {item.reporting_period for item in cargo_imports}
-    reported_months = {
-        item.reporting_period for item in imports
-        if item.source_kind == "reported_pl03" and item.reporting_period in window_months
-    }
-    if not active_ids:
-        return {
-            "values": {"trips": None, "tons": None, "teu": None, "pax": None},
-            "available": {"trips": False, "tons": False, "teu": False, "pax": False},
-            "trend": [0] * len(labels), "months": {}, "coverageMonths": [],
-            "reportedMonths": sorted(reported_months), "hasCoverage": bool(reported_months),
-            "hasReview": False,
-        }
-
-    calls = db.query(HistoricalPortCall).filter(
-        HistoricalPortCall.reporting_unit_id == unit_id,
-        HistoricalPortCall.import_id.in_(active_ids),
-        HistoricalPortCall.validation_status == "VALID",
-        HistoricalPortCall.actual_berthing_at >= start.isoformat(),
-        HistoricalPortCall.actual_berthing_at < (end + timedelta(days=1)).isoformat(),
-    ).all()
-    call_ids = [item.id for item in calls]
-    cargo_rows = []
-    if call_ids:
-        cargo_rows = db.query(HistoricalCargoRow).filter(
-            HistoricalCargoRow.reporting_unit_id == unit_id,
-            HistoricalCargoRow.import_id.in_(active_ids),
-            HistoricalCargoRow.port_call_id.in_(call_ids),
-            HistoricalCargoRow.match_status == "MATCHED",
-            HistoricalCargoRow.validation_status == "VALID",
-        ).all()
-
-    trend = [0] * len(labels)
-    months: dict[str, dict[str, int]] = {}
-    for call in calls:
-        operating_date = _date_from_value(call.actual_berthing_at)
-        if operating_date is None:
-            continue
-        month = _month_key(operating_date)
-        months.setdefault(month, {"calls": 0, "cargoRows": 0})["calls"] += 1
-        index = bucket(operating_date, start)
-        if 0 <= index < len(trend):
-            trend[index] += 1
-    call_month_by_id = {call.id: call.reporting_month for call in calls}
-    for row in cargo_rows:
-        month = call_month_by_id.get(row.port_call_id)
-        if month:
-            months.setdefault(month, {"calls": 0, "cargoRows": 0})["cargoRows"] += 1
-            cargo_months.add(month)
-
-    berth_complete = bool(berth_months) and all(
-        item.status == "COMMITTED" and item.review_count == 0 for item in berth_imports
-    )
-    cargo_complete = bool(cargo_months) and all(
-        item.status == "COMMITTED" and item.review_count == 0 for item in cargo_imports
-    )
-    has_review = any(
-        item.status == "REVIEW" or item.review_count > 0 for item in berth_imports + cargo_imports
-    )
-    return {
-        "values": {
-            "trips": float(len(calls)) if berth_complete else None,
-            "tons": float(sum(row.weight_tonnes or 0 for row in cargo_rows)) if cargo_complete else None,
-            "teu": float(sum(row.teu_factor or 0 for row in cargo_rows)) if cargo_complete else None,
-            "pax": None,
-        },
-        "available": {
-            "trips": berth_complete, "tons": cargo_complete,
-            "teu": cargo_complete, "pax": False,
-        },
-        "trend": trend if berth_complete else [0] * len(labels), "months": months,
-        "coverageMonths": sorted(berth_months | cargo_months | reported_months),
-        "reportedMonths": sorted(reported_months),
-        "hasCoverage": bool(berth_months or cargo_months or reported_months),
-        "hasReview": has_review,
-    }
-
-
-def _analytics_payload(
-    db: Session, scope: Scope, period: str, anchor: date, source: str = "live",
-) -> dict[str, Any]:
-    config = _analytics_period(period, anchor)
-    query = db.query(Declaration).filter(Declaration.workflow_status == "APPROVED")
-    if scope.is_customer:
-        query = query.filter(Declaration.organization_id == scope.organization_id)
-    else:
-        org_ids = scope.member_org_ids
-        query = query.filter(Declaration.organization_id.in_(org_ids)) if org_ids else query.filter(sql_false())
-    declarations = query.all()
-    live_totals = {
-        "cur": {key: 0.0 for key in ("trips", "tons", "teu", "pax")},
-        "prev": {key: 0.0 for key in ("trips", "tons", "teu", "pax")},
-    }
-    live_trend_current = [0] * len(config["labels"])
-    live_trend_previous = [0] * len(config["labels"])
-    live_months: dict[str, int] = {}
-    for declaration in declarations:
-        operating_date = _declaration_operating_date(declaration)
-        if not operating_date:
-            continue
-        if config["current_start"] <= operating_date <= config["current_end"]:
-            group = "cur"
-            trend = live_trend_current
-            start = config["current_start"]
-        elif config["previous_start"] <= operating_date <= config["previous_end"]:
-            group = "prev"
-            trend = live_trend_previous
-            start = config["previous_start"]
-        else:
-            continue
-        for key, value in _declaration_metrics(declaration).items():
-            live_totals[group][key] += value
-        month = _month_key(operating_date)
-        live_months[month] = live_months.get(month, 0) + 1
-        index = config["bucket"](operating_date, start)
-        if 0 <= index < len(trend):
-            trend[index] += 1
-    historical = None
-    overlap_months: list[str] = []
-    warnings: list[str] = []
-    if source in {"historical", "combined"}:
-        if not scope.is_port:
-            raise HTTPException(
-                status_code=403,
-                detail="Dữ liệu lịch sử/TOS chỉ dành cho Nhân viên Cảng trong đúng đơn vị báo cáo.",
-            )
-        historical = {
-            "cur": _historical_window(
-                db, scope.reporting_unit_id, config["current_start"], config["current_end"],
-                config["labels"], config["bucket"],
-            ),
-            "prev": _historical_window(
-                db, scope.reporting_unit_id, config["previous_start"], config["previous_end"],
-                config["labels"], config["bucket"],
-            ),
-        }
-        historical_months = (
-            set(historical["cur"]["coverageMonths"]) | set(historical["prev"]["coverageMonths"])
-        )
-        overlap_months = sorted(set(live_months) & historical_months)
-        if overlap_months:
-            warnings.append(
-                "Có kỳ đồng thời chứa dữ liệu LIVE và LỊCH SỬ; tổng KẾT HỢP bị khóa cho đến khi đối soát nguồn."
-            )
-        if historical["cur"]["reportedMonths"] or historical["prev"]["reportedMonths"]:
-            warnings.append(
-                "PL.03 cũ chỉ được giữ làm dấu vết báo cáo; thống kê thời gian dùng ATB/ATD từ TOS."
-            )
-        if historical["cur"]["hasReview"] or historical["prev"]["hasReview"]:
-            warnings.append(
-                "Một hoặc nhiều lượt import còn dòng cần kiểm tra; chỉ tiêu liên quan không được hiển thị như tổng hoàn chỉnh."
-            )
-
-    combined_blocked = source == "combined" and bool(overlap_months)
-    kpis: dict[str, dict[str, float | None]] = {}
-    if source == "live":
-        kpis = {key: {"cur": live_totals["cur"][key], "prev": live_totals["prev"][key]}
-                for key in live_totals["cur"]}
-        trend_current, trend_previous = live_trend_current, live_trend_previous
-    elif source == "historical":
-        kpis = {key: {"cur": historical["cur"]["values"][key],
-                       "prev": historical["prev"]["values"][key]}
-                for key in live_totals["cur"]}
-        trend_current, trend_previous = historical["cur"]["trend"], historical["prev"]["trend"]
-    elif combined_blocked:
-        kpis = {key: {"cur": None, "prev": None} for key in live_totals["cur"]}
-        trend_current = trend_previous = [0] * len(config["labels"])
-    else:
-        for key in live_totals["cur"]:
-            values: dict[str, float | None] = {}
-            for group in ("cur", "prev"):
-                hist_value = historical[group]["values"][key]
-                # Never turn absent/incomplete historical coverage into zero.
-                # Passenger counts are absent from TOS, and any other metric is
-                # withheld while its relevant import still needs review.
-                if (historical[group]["hasCoverage"]
-                        and not historical[group]["available"][key]):
-                    values[group] = None
-                else:
-                    values[group] = live_totals[group][key] + (hist_value or 0)
-            kpis[key] = values
-        trend_current = [a + b for a, b in zip(live_trend_current, historical["cur"]["trend"])]
-        trend_previous = [a + b for a, b in zip(live_trend_previous, historical["prev"]["trend"])]
-
-    coverage_periods = []
-    all_months = _months_between(config["previous_start"], config["previous_end"])
-    all_months += [month for month in _months_between(config["current_start"], config["current_end"])
-                   if month not in all_months]
-    for month in all_months:
-        hist_month = None
-        if historical:
-            hist_month = historical["cur"]["months"].get(month) or historical["prev"]["months"].get(month)
-        coverage_periods.append({
-            "month": month, "liveApproved": live_months.get(month, 0),
-            "historicalCalls": (hist_month or {}).get("calls", 0),
-            "historicalCargoRows": (hist_month or {}).get("cargoRows", 0),
-            "overlap": month in overlap_months,
-        })
-    if combined_blocked:
-        coverage_status = "BLOCKED"
-    elif source == "live":
-        coverage_status = "COMPLETE"
-    elif historical and all(historical["cur"]["available"][key] for key in ("trips", "tons", "teu")):
-        coverage_status = "COMPLETE"
-    elif historical and historical["cur"]["hasCoverage"]:
-        coverage_status = "PARTIAL"
-    else:
-        coverage_status = "MISSING"
-
-    return {
-        "period": period,
-        "asOf": anchor.isoformat(),
-        "source": source,
-        "dataSource": "DEMO" if source == "live" and is_demo_data_active(db) else source.upper(),
-        "combinedAllowed": not combined_blocked,
-        "kpis": kpis,
-        "trend": {"labels": config["labels"], "cur": trend_current, "prev": trend_previous},
-        "coverage": {
-            "status": coverage_status, "periods": coverage_periods,
-            "overlapPeriods": overlap_months, "warnings": warnings,
-        },
-        "meta": {
-            "analyticsTitle": config["title"],
-            "trendTitle": config["trend_title"],
-            "trendSub": f"{config['current_start'].isoformat()} → {config['current_end'].isoformat()}",
-            "compareSub": config["compare"],
-        },
-    }
-
-
-@app.get("/api/reports/analytics")
-def report_analytics(
-    period: str = "month",
-    source: str = "live",
-    as_of: Optional[date] = None,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(resolve_scope),
-):
-    if period not in ANALYTICS_PERIODS:
-        raise HTTPException(status_code=422, detail="Kỳ thống kê phải là week, month, quarter hoặc year.")
-    if source not in ANALYTICS_SOURCES:
-        raise HTTPException(status_code=422, detail="Nguồn thống kê phải là live, historical hoặc combined.")
-    return _analytics_payload(db, scope, period, as_of or date.today(), source)
-
-
-@app.get("/api/reports/analytics/export")
-def export_analytics(
-    period: str = "month",
-    source: str = "live",
-    as_of: Optional[date] = None,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(resolve_scope),
-):
-    if period not in ANALYTICS_PERIODS:
-        raise HTTPException(status_code=422, detail="Kỳ thống kê không hợp lệ.")
-    if source not in ANALYTICS_SOURCES:
-        raise HTTPException(status_code=422, detail="Nguồn thống kê không hợp lệ.")
-    payload = _analytics_payload(db, scope, period, as_of or date.today(), source)
-    if not payload["combinedAllowed"]:
-        raise HTTPException(status_code=409, detail="Không thể xuất tổng kết hợp khi kỳ dữ liệu còn chồng lấn chưa đối soát.")
-    labels = {"trips": "Lượt tàu", "tons": "Khối lượng (tấn)", "teu": "TEU", "pax": "Hành khách"}
-    rows = [[labels[key], values["cur"], values["prev"],
-             None if values["cur"] is None or values["prev"] is None else values["cur"] - values["prev"]]
-            for key, values in payload["kpis"].items()]
-    content = make_xlsx(payload["meta"]["analyticsTitle"], ["Chỉ tiêu", "Kỳ này", "Kỳ trước", "Chênh lệch"], rows)
-    return Response(
-        content=content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="analytics_{source}_{period}_{payload["asOf"]}.xlsx"'},
-    )
-
-
-def _approved_report_query(db: Session, scope: Scope):
-    query = db.query(Declaration).filter(Declaration.workflow_status == "APPROVED")
-    if scope.is_customer:
-        query = query.filter(Declaration.organization_id == scope.organization_id)
-    else:
-        org_ids = scope.member_org_ids
-        query = query.filter(Declaration.organization_id.in_(org_ids)) if org_ids else query.filter(sql_false())
-    return query
-
-
-def _report_vessel(db: Session, declaration: Declaration) -> Optional[Vessel]:
-    if declaration.vessel_id:
-        vessel = db.query(Vessel).filter(Vessel.id == declaration.vessel_id).first()
-        if vessel:
-            return vessel
-    return db.query(Vessel).filter(
-        Vessel.registration_no == declaration.registration_no
-    ).first()
-
-
-def _report_static_value(vessel: Optional[Vessel], declaration: Optional[Declaration], field: str) -> Any:
-    if vessel is not None:
-        value = getattr(vessel, field, None)
-        if value not in (None, ""):
-            return value
-    return getattr(declaration, field, None) if declaration is not None else None
-
-
-def _report_base_vessels(db: Session, scope: Scope) -> list[Vessel]:
-    query = db.query(Vessel)
-    if scope.is_customer:
-        query = query.filter(Vessel.organization_id == scope.organization_id)
-    else:
-        # The tenant-scoped register (not the legacy global flag) bounds this unit's fleet.
-        register_ids = register_vessel_ids(db, scope.reporting_unit_id)
-        query = query.filter(Vessel.id.in_(register_ids)) if register_ids else query.filter(sql_false())
-    return query.order_by(Vessel.registration_no, Vessel.id).all()
-
-
-def _report_group_key(vessel_id: Optional[int], registration_no: str) -> str:
-    return f"id:{vessel_id}" if vessel_id else f"reg:{import_match_key(registration_no)}"
-
-
-def _declaration_report_group_key(db: Session, declaration: Declaration) -> str:
-    vessel = _report_vessel(db, declaration)
-    return _report_group_key(
-        vessel.id if vessel else declaration.vessel_id,
-        vessel.registration_no if vessel else declaration.registration_no,
-    )
-
-
-def _cargo_summary(item: dict[str, Any]) -> str:
-    parts = [str(item.get("cargo_name") or item.get("cargo_type") or "").strip()]
-    tons = float(item.get("tons") or 0)
-    teu = float(item.get("teu") or 0)
-    if tons:
-        parts.append(f"{tons:g} tấn")
-    if teu:
-        parts.append(f"{teu:g} TEU")
-    return " - ".join(part for part in parts if part)
-
-
-def _appendix1_rows(
-    db: Session,
-    declarations: list[Declaration],
-    vessels: Optional[list[Vessel]] = None,
-) -> list[list[Any]]:
-    groups: dict[str, list[Declaration]] = {}
-    for declaration in declarations:
-        groups.setdefault(_declaration_report_group_key(db, declaration), []).append(declaration)
-    base_vessels = vessels or []
-    vessel_by_key = {_report_group_key(vessel.id, vessel.registration_no): vessel for vessel in base_vessels}
-    ordered_keys = list(vessel_by_key)
-    ordered_keys.extend(key for key in groups if key not in vessel_by_key)
-
-    rows = []
-    for index, key in enumerate(ordered_keys, start=1):
-        group = groups.get(key, [])
-        group.sort(key=lambda item: (_declaration_operating_date(item) or date.max, item.id))
-        declaration = group[0] if group else None
-        vessel = vessel_by_key.get(key) or (_report_vessel(db, declaration) if declaration else None)
-        capacity_tons = _joined_profile_value(vessel, "cargo_capacity_tons") if vessel else None
-        capacity_teu = getattr(vessel, "container_capacity_teu", None) if vessel else None
-        capacity = " / ".join(
-            value for value in (
-                f"{capacity_tons} tấn" if capacity_tons not in (None, "") else "",
-                f"{capacity_teu:g} TEU" if isinstance(capacity_teu, (int, float)) and capacity_teu else "",
-            ) if value
-        )
-        master_name = getattr(vessel, "tracking_master_name", "") if vessel else ""
-        master_phone = getattr(vessel, "tracking_master_phone", "") if vessel else ""
-        rows.append([
-            index,
-            _report_static_value(vessel, declaration, "name") or (declaration.vessel_name if declaration else ""),
-            _report_static_value(vessel, declaration, "registration_no") or (declaration.registration_no if declaration else ""),
-            _report_static_value(vessel, declaration, "vessel_class") or "",
-            _report_static_value(vessel, declaration, "vessel_type") or "",
-            _report_static_value(vessel, declaration, "certificate_expiry_date") or "",
-            capacity,
-            getattr(vessel, "passenger_capacity", None) if vessel else None,
-            _distinct_join([item.working_port for item in group]),
-            _distinct_join([item.actual_arrival_at or item.eta for item in group]),
-            _distinct_join([item.departure_berth for item in group]),
-            _distinct_join([item.actual_departure_at or item.etd for item in group]),
-            _distinct_join([_cargo_summary(json.loads(item.unload_json or "{}")) for item in group]),
-            _distinct_join([_cargo_summary(json.loads(item.load_json or "{}")) for item in group]),
-            _distinct_join([f"{item.crew_count} / {item.passenger_count}" for item in group]),
-            " - ".join(value for value in (
-                master_name or (declaration.master_name if declaration else ""),
-                master_phone or (declaration.master_phone if declaration else ""),
-            ) if value),
-        ])
-    return rows
-
-
-def _report_period_metrics(declarations: list[Declaration]) -> dict[str, float | None]:
-    metrics = {
-        "container_tons": None, "container_teu": None,
-        "dry_tons": None, "liquid_tons": None, "foreign_tons": None,
-        "calls": None,
-        "passenger_calls": None, "passengers": None,
-    }
-
-    def add(key: str, value: float, *, applicable: bool = False) -> None:
-        if not applicable and not value:
-            return
-        metrics[key] = float(metrics[key] or 0) + value
-
-    for declaration in declarations:
-        if declaration.movement_type == "ARRIVAL":
-            add("calls", 1.0, applicable=True)
-        add("passengers", float(declaration.passenger_count or 0), applicable=bool(declaration.passenger_count))
-        if declaration.movement_type == "ARRIVAL" and declaration.is_passenger_call:
-            add("passenger_calls", 1.0, applicable=True)
-        for item in (json.loads(declaration.unload_json or "{}"), json.loads(declaration.load_json or "{}")):
-            cargo_key = import_match_key(item.get("cargo_type"))
-            movement_key = import_match_key(item.get("movement_type"))
-            tons = float(item.get("tons") or 0)
-            teu = float(item.get("teu") or 0)
-            if "CONTAINER" in cargo_key or "CONGTENO" in cargo_key:
-                add("container_tons", tons, applicable=bool(tons))
-                add("container_teu", teu, applicable=bool(teu))
-            elif "HANGKHO" in cargo_key or cargo_key == "KHO":
-                add("dry_tons", tons, applicable=bool(tons))
-            elif "HANGLONG" in cargo_key or cargo_key == "LONG":
-                add("liquid_tons", tons, applicable=bool(tons))
-            if "NHAPKHAU" in movement_key or "XUATKHAU" in movement_key:
-                add("foreign_tons", tons, applicable=bool(tons))
-    return metrics
-
-
-def _appendix2_rows(
-    current: list[Declaration],
-    cumulative: list[Declaration],
-    current_adjustments: Optional[dict[str, float]] = None,
-    cumulative_adjustments: Optional[dict[str, float]] = None,
-) -> list[list[Any]]:
-    current_metrics = _report_period_metrics(current)
-    cumulative_metrics = _report_period_metrics(cumulative)
-    for metrics, adjustments in (
-        (current_metrics, current_adjustments or {}),
-        (cumulative_metrics, cumulative_adjustments or {}),
-    ):
-        for key, delta in adjustments.items():
-            if key in metrics and delta:
-                metrics[key] = float(metrics[key] or 0) + float(delta)
-    values = [
-        current_metrics["container_tons"], current_metrics["container_teu"],
-        cumulative_metrics["container_tons"], cumulative_metrics["container_teu"],
-        current_metrics["dry_tons"], cumulative_metrics["dry_tons"],
-        current_metrics["liquid_tons"], cumulative_metrics["liquid_tons"],
-        current_metrics["foreign_tons"], cumulative_metrics["foreign_tons"],
-        current_metrics["calls"], cumulative_metrics["calls"],
-        current_metrics["passenger_calls"], current_metrics["passengers"],
-    ]
-    return [
-        ["I", "Bến cảng biển", *([None] * 14)],
-        [None, "- Cảng Tân Thuận", *values],
-        ["Tổng", None, *values],
-    ]
-
-
-def _cargo_column_start(movement_type: str, cargo_direction: str = "") -> int:
-    key = import_match_key(movement_type)
-    if "XUATKHAU" in key:
-        return 8
-    if "NHAPKHAU" in key:
-        return 11
-    if "NOIDIADEN" in key:
-        return 14
-    if "NOIDIAROI" in key:
-        return 17
-    if "NOIDIA" in key:
-        if cargo_direction == "unload":
-            return 14
-        if cargo_direction == "load":
-            return 17
-    if "CHUYENTAI" in key:
-        return 20
-    if "QUACANH" in key and ("BOCDO" in key or "XEPDO" in key):
-        return 22
-    if "QUACANH" in key or "QUACANG" in key:
-        return 24
-    raise ValueError(f"Không nhận diện được nhóm hàng hóa '{movement_type or '(trống)'}'.")
-
-
-def _distinct_join(values: list[Any]) -> str:
-    result: list[str] = []
-    for value in values:
-        text_value = str(value or "").strip()
-        if text_value and text_value not in result:
-            result.append(text_value)
-    return "\n".join(result)
-
-
-def _appendix3_rows(
-    db: Session,
-    declarations: list[Declaration],
-    vessels: Optional[list[Vessel]] = None,
-) -> list[list[Any]]:
-    rows: list[list[Any]] = []
-    groups: dict[str, list[Declaration]] = {}
-    for declaration in declarations:
-        key = _declaration_report_group_key(db, declaration)
-        groups.setdefault(key, []).append(declaration)
-
-    base_vessels = vessels or []
-    vessel_by_key = {_report_group_key(vessel.id, vessel.registration_no): vessel for vessel in base_vessels}
-    ordered_keys = list(vessel_by_key)
-    unmatched_keys = [key for key in groups if key not in vessel_by_key]
-    unmatched_keys.sort(key=lambda key: (_declaration_operating_date(groups[key][0]) or date.max, groups[key][0].id))
-    ordered_keys.extend(unmatched_keys)
-    for key in ordered_keys:
-        group = groups.get(key, [])
-        group.sort(key=lambda item: (_declaration_operating_date(item) or date.max, item.id))
-        declaration = group[0] if group else None
-        vessel = vessel_by_key.get(key) or (_report_vessel(db, declaration) if declaration else None)
-        row: list[Any] = [None] * 35
-        row[0] = len(rows) + 1
-        row[1] = _report_static_value(vessel, declaration, "name") or (declaration.vessel_name if declaration else "")
-        row[2] = _report_static_value(vessel, declaration, "registration_no") or (declaration.registration_no if declaration else "")
-        row[3] = _report_static_value(vessel, declaration, "vessel_type") or ""
-        row[4] = _report_static_value(vessel, declaration, "vessel_class") or ""
-        row[5] = _report_static_value(vessel, declaration, "length_m")
-        row[6] = _joined_profile_value(vessel, "deadweight_tons") if vessel else (declaration.deadweight_tons if declaration else None)
-        row[7] = _report_static_value(vessel, declaration, "gross_tonnage")
-        cargo_names: list[str] = []
-        for item_declaration in group:
-            for cargo_direction, item in (
-                ("unload", json.loads(item_declaration.unload_json or "{}")),
-                ("load", json.loads(item_declaration.load_json or "{}")),
-            ):
-                if not any((item.get("cargo_type"), item.get("cargo_name"), item.get("tons"), item.get("teu"), item.get("empty_teu"))):
-                    continue
-                cargo_start = _cargo_column_start(str(item.get("movement_type") or ""), cargo_direction)
-                for offset, item_key in ((0, "tons"), (1, "teu")):
-                    value = float(item.get(item_key) or 0)
-                    if value:
-                        row[cargo_start + offset] = float(row[cargo_start + offset] or 0) + value
-                if cargo_start in {8, 11, 14, 17}:
-                    empty_teu = float(item.get("empty_teu") or 0)
-                    if empty_teu:
-                        row[cargo_start + 2] = float(row[cargo_start + 2] or 0) + empty_teu
-                cargo_names.append(str(item.get("cargo_name") or item.get("cargo_type") or ""))
-        for item_declaration in group:
-            if item_declaration.passenger_count:
-                column = 26 if item_declaration.movement_type == "ARRIVAL" else 27
-                row[column] = int(row[column] or 0) + int(item_declaration.passenger_count)
-        row[28] = _distinct_join(cargo_names)
-        row[29] = _distinct_join([item.last_port for item in group])
-        row[30] = _distinct_join([item.working_port for item in group])
-        row[31] = _distinct_join([item.destination_port for item in group])
-        row[32] = _distinct_join([item.actual_arrival_at or item.eta for item in group])
-        row[33] = _distinct_join([item.actual_departure_at or item.etd for item in group])
-        row[34] = _distinct_join([item.agent_ptnd_name for item in group])
-        rows.append(row)
-    return rows
-
-
-def _report_adjustment_totals(
-    db: Session,
-    start_month: str,
-    end_month: str,
-    scope: Scope,
-) -> dict[str, float]:
-    query = db.query(ReportAdjustment).filter(
-        ReportAdjustment.report_kind == "appendix2",
-        ReportAdjustment.report_month >= start_month,
-        ReportAdjustment.report_month <= end_month,
-    )
-    if scope.is_customer:
-        query = query.filter(ReportAdjustment.organization_id == scope.organization_id)
-    else:
-        query = query.filter(ReportAdjustment.reporting_unit_id == scope.reporting_unit_id)
-    totals: dict[str, float] = {}
-    for adjustment in query.all():
-        totals[adjustment.metric] = totals.get(adjustment.metric, 0.0) + adjustment.delta
-    return totals
-
-
-@app.get("/api/reports/appendix2/adjustments")
-def list_appendix2_adjustments(
-    report_month: Optional[str] = None,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(require_port_scope),
-):
-    query = db.query(ReportAdjustment).filter(
-        ReportAdjustment.report_kind == "appendix2",
-        ReportAdjustment.reporting_unit_id == scope.reporting_unit_id,
-    )
-    if report_month:
-        try:
-            datetime.strptime(report_month, "%Y-%m")
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="Tháng báo cáo phải có định dạng YYYY-MM.") from exc
-        query = query.filter(ReportAdjustment.report_month == report_month)
-    return [
-        {column.name: getattr(item, column.name) for column in item.__table__.columns}
-        for item in query.order_by(ReportAdjustment.created_at.desc(), ReportAdjustment.id.desc()).all()
-    ]
-
-
-@app.post("/api/reports/appendix2/adjustments")
-def create_appendix2_adjustment(
-    payload: ReportAdjustmentRequest,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(require_port_scope),
-):
-    user = scope.user
-    if payload.organization_id is not None:
-        organization = db.query(Organization).filter(Organization.id == payload.organization_id).first()
-        if not organization:
-            raise HTTPException(status_code=404, detail="Không tìm thấy đơn vị cần điều chỉnh.")
-        scope.require_org(payload.organization_id)
-    adjustment = ReportAdjustment(
-        report_kind="appendix2",
-        report_month=payload.report_month,
-        metric=payload.metric,
-        delta=payload.delta,
-        reason=payload.reason,
-        organization_id=payload.organization_id,
-        reporting_unit_id=scope.reporting_unit_id,
-        actor_user_id=user.id,
-        created_at=now_iso(),
-    )
-    db.add(adjustment)
-    db.flush()
-    audit(
-        db, "REPORT_ADJUSTMENT", adjustment.id, "CREATE",
-        f"PL.02 {payload.report_month} {payload.metric} {payload.delta:+g}: {payload.reason}",
-        actor_user_id=user.id, organization_id=payload.organization_id,
-        reporting_unit_id=scope.reporting_unit_id,
-    )
-    db.commit()
-    db.refresh(adjustment)
-    return {column.name: getattr(adjustment, column.name) for column in adjustment.__table__.columns}
-
-@app.get("/api/reports/{kind}")
-def export_report(
-    kind: str,
-    from_: Optional[str] = Query(default=None, alias="from"),
-    to: Optional[str] = None,
-    db: Session = Depends(get_db),
-    scope: Scope = Depends(resolve_scope),
-):
-    user = scope.user
-    if kind not in ("appendix1", "appendix2", "appendix3"):
-        raise HTTPException(status_code=404, detail=f"Loại báo cáo '{kind}' không tồn tại.")
-
-    if to:
-        try:
-            report_end = date.fromisoformat(to)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="Ngày kết thúc báo cáo không hợp lệ.") from exc
-    else:
-        report_end = date.today()
-        to = report_end.isoformat()
-    if from_:
-        try:
-            report_start = date.fromisoformat(from_)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="Ngày bắt đầu báo cáo không hợp lệ.") from exc
-    else:
-        report_start = date(report_end.year, 1, 1)
-        from_ = report_start.isoformat()
-    if report_start > report_end:
-        raise HTTPException(status_code=422, detail="Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.")
-
-    query = _approved_report_query(db, scope)
-    approved = query.order_by(Declaration.id).all()
-
-    if kind == "appendix2":
-        report_start = date(report_end.year, report_end.month, 1)
-        report_end = date(report_end.year, report_end.month, monthrange(report_end.year, report_end.month)[1])
-        from_ = report_start.isoformat()
-        to = report_end.isoformat()
-        decls = [item for item in approved if (value := _arrival_operating_date(item)) and report_start <= value <= report_end]
-    else:
-        decls = [item for item in approved if (value := _declaration_operating_date(item)) and report_start <= value <= report_end]
-    decls.sort(key=lambda item: (_declaration_operating_date(item) or date.max, item.id))
-    base_vessels = _report_base_vessels(db, scope) if kind in {"appendix1", "appendix3"} else []
-
-    if kind == "appendix1":
-        rows = _appendix1_rows(db, decls, base_vessels)
-
-    elif kind == "appendix2":
-        cumulative_start = date(report_end.year, 1, 1)
-        cumulative = [
-            item for item in approved
-            if (value := _arrival_operating_date(item)) and cumulative_start <= value <= report_end
-        ]
-        month_key = report_end.strftime("%Y-%m")
-        rows = _appendix2_rows(
-            decls,
-            cumulative,
-            _report_adjustment_totals(db, month_key, month_key, scope),
-            _report_adjustment_totals(db, f"{report_end.year}-01", month_key, scope),
-        )
-
-    else:  # appendix3
-        try:
-            rows = _appendix3_rows(db, decls, base_vessels)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    if scope.is_customer:
-        reporting_unit_label = user.organization.name if user.organization else "CÔNG TY CỔ PHẦN CẢNG TÂN THUẬN"
-    else:
-        unit = db.get(ReportingUnit, scope.reporting_unit_id)
-        reporting_unit_label = unit.name if unit else "CÔNG TY CỔ PHẦN CẢNG TÂN THUẬN"
-    xlsx_bytes = make_report_xlsx(
-        kind,
-        rows,
-        appendix3_template=ROOT / "templates" / "Phụ lục 3.xlsx",
-        report_from=report_start,
-        report_to=report_end,
-        reporting_unit=reporting_unit_label,
-    )
-    filename = f"report_{kind}_{from_ or 'all'}_{to or 'all'}.xlsx"
-    return Response(
-        content=xlsx_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════

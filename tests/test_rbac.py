@@ -274,11 +274,20 @@ def test_missing_org_fails_closed(client):
     assert res.status_code == 403
     assert "chưa được liên kết với tổ chức" in res.json()["detail"]
 
+def _clear_login_attempts():
+    """Bộ đếm chặn dò mật khẩu nằm ở bảng login_attempts (không còn là dict RAM)."""
+    from backend.models import LoginAttempt
+    session = SessionLocal()
+    try:
+        session.query(LoginAttempt).delete()
+        session.commit()
+    finally:
+        session.close()
+
+
 def test_login_rate_limiting(client):
     """Failed login attempts block IP after 5 attempts."""
-    # Ensure fresh state
-    from backend.app import _login_attempts
-    _login_attempts.clear()
+    _clear_login_attempts()
 
     # Try wrong logins 5 times
     for _ in range(5):
@@ -291,7 +300,49 @@ def test_login_rate_limiting(client):
     assert "tạm khóa" in res.json()["detail"]
 
     # Reset for other tests
-    _login_attempts.clear()
+    _clear_login_attempts()
+
+
+def test_login_block_survives_process_restart(client):
+    """Bộ đếm phải nằm ở DB: trước đây lưu trong RAM nên chỉ cần restart server
+    là kẻ tấn công được cấp lại đủ lượt thử."""
+    from backend.models import LoginAttempt
+    _clear_login_attempts()
+    for _ in range(5):
+        client.post("/api/auth/login", json={"username": "cust_a", "password": "wrongpassword"})
+
+    # Trạng thái khóa nằm ở DB — không phụ thuộc tiến trình đang chạy.
+    session = SessionLocal()
+    try:
+        rows = session.query(LoginAttempt).all()
+        assert len(rows) == 1
+        assert rows[0].failures >= 5
+        assert rows[0].blocked_until  # đã đặt mốc hết khóa
+    finally:
+        session.close()
+
+    assert client.post(
+        "/api/auth/login", json={"username": "cust_a", "password": "wrongpassword"}
+    ).status_code == 429
+    _clear_login_attempts()
+
+
+def test_successful_login_clears_attempt_row(client):
+    """Đăng nhập đúng thì xóa hẳn dòng đếm, không để bảng phình mãi."""
+    from backend.models import LoginAttempt
+    _clear_login_attempts()
+    for _ in range(3):  # dưới ngưỡng, chưa bị khóa
+        client.post("/api/auth/login", json={"username": "cust_a", "password": "wrongpassword"})
+
+    assert client.post(
+        "/api/auth/login", json={"username": "cust_a", "password": "custpass"}
+    ).status_code == 200
+
+    session = SessionLocal()
+    try:
+        assert session.query(LoginAttempt).count() == 0
+    finally:
+        session.close()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. TENANT ISOLATION (CUSTOMER A vs CUSTOMER B)

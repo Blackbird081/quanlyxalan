@@ -30,6 +30,11 @@ class User(Base):
     # platform administrator may have no membership at all. See ReportingUnitUser.
     is_active = Column(Integer, nullable=False, default=1)  # 0/1 integer flag (legacy boolean encoding)
     notification_preferences_json = Column(Text, nullable=False, default='{"in_app_certificate_reminders": true}')
+    # Mốc lần đổi mật khẩu gần nhất — JWT phát hành TRƯỚC mốc này bị coi là hết
+    # hạn ngay lập tức, dù chưa tới exp. Không có cột này, đổi/reset mật khẩu
+    # (vd. nghi ngờ lộ mật khẩu, máy bị mất) không thu hồi được token cũ đang
+    # sống tới 24h — xem get_current_user và _issue_token_for_user trong app.py.
+    password_changed_at = Column(String, nullable=False, default=now_iso)
     created_at = Column(String, default=now_iso)
 
     organization = relationship("Organization", back_populates="users", lazy="select")
@@ -301,6 +306,26 @@ class AppSetting(Base):
     key = Column(String, primary_key=True)
     value = Column(Text, nullable=False, default="")
     updated_at = Column(String, nullable=False, default=now_iso)
+
+
+class LoginAttempt(Base):
+    """Bộ đếm đăng nhập sai theo IP, phục vụ chặn dò mật khẩu.
+
+    Trước đây đếm bằng dict trong RAM: restart server là mất sạch (kẻ tấn công
+    chỉ cần đợi một lần deploy), chạy nhiều worker thì mỗi worker đếm riêng nên
+    ngưỡng thực tế bị nhân lên, và dict phình mãi vì không bao giờ dọn.
+
+    Bảng này KHÔNG phải nhật ký — mỗi IP đúng một dòng, ghi đè tại chỗ. Lịch sử
+    đăng nhập sai vẫn nằm ở ``audit_events`` (action ``LOGIN_FAILURE``).
+    """
+    __tablename__ = "login_attempts"
+    ip = Column(String, primary_key=True)
+    failures = Column(Integer, nullable=False, default=0)
+    # ISO-8601 như mọi cột thời gian khác trong ứng dụng (xem now_iso).
+    blocked_until = Column(String, nullable=False, default="")
+    # Có index vì việc dọn định kỳ lọc theo cột này.
+    updated_at = Column(String, nullable=False, default=now_iso, index=True)
+
 
 class SyncJob(Base):
     __tablename__ = "sync_jobs"

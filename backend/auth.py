@@ -75,6 +75,18 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tài khoản đã bị vô hiệu hóa."
         )
+    # Token phát hành TRƯỚC lần đổi mật khẩu gần nhất bị coi là thu hồi — nếu
+    # không, đổi mật khẩu (vì nghi lộ, máy bị mất...) không có tác dụng thu hồi
+    # token cũ đang sống tới hết ACCESS_TOKEN_EXPIRE_MINUTES. So sánh dạng
+    # chuỗi ISO-8601 nên vẫn đúng thứ tự dù không parse datetime.
+    token_pwd_ts = payload.get("pwd_ts")
+    current_pwd_ts = user.password_changed_at
+    if current_pwd_ts and token_pwd_ts != current_pwd_ts:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Phiên đăng nhập đã hết hiệu lực do mật khẩu vừa được thay đổi. Vui lòng đăng nhập lại.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 def get_current_active_user(current_user: User = Depends(get_current_user)):

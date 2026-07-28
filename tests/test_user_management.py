@@ -195,3 +195,130 @@ def test_admin_cannot_disable_self(client):
     admin_id = next(u["id"] for u in users if u["username"] == "admin_um")
     res = client.post(f"/api/admin/users/{admin_id}/active", headers=headers, json={"is_active": False})
     assert res.status_code == 400
+
+
+# ── Self-service đổi mật khẩu (POST /api/me/password) ─────────────────────────
+# Tách hẳn khỏi luồng Admin reset ở trên: người dùng tự đổi thì BẮT BUỘC nhập
+# đúng mật khẩu hiện tại; Admin đặt lại hộ thì không cần.
+
+
+@pytest.fixture()
+def self_service_user(client):
+    """Tài khoản riêng cho nhóm test này — không đụng vào cust_um/port_um vì
+    các test phía trên đã đổi mật khẩu của chúng."""
+    username = "selfpass_um"
+    session = SessionLocal()
+    try:
+        existing = session.query(User).filter(User.username == username).first()
+        if existing:
+            existing.password_hash = get_password_hash("origpass1")
+            existing.is_active = 1
+        else:
+            session.add(User(
+                username=username, password_hash=get_password_hash("origpass1"),
+                full_name="Self Service", role="CUSTOMER",
+                organization_id=ORG_ID, is_active=1,
+            ))
+        session.commit()
+    finally:
+        session.close()
+    return username
+
+
+def test_change_own_password_then_login_with_it(client, self_service_user):
+    headers = _auth(client, self_service_user, "origpass1")
+    res = client.post(
+        "/api/me/password", headers=headers,
+        json={"current_password": "origpass1", "new_password": "brandnew123"},
+    )
+    assert res.status_code == 200, res.text
+    assert client.post("/api/auth/login", json={"username": self_service_user, "password": "origpass1"}).status_code == 401
+    assert client.post("/api/auth/login", json={"username": self_service_user, "password": "brandnew123"}).status_code == 200
+
+
+def test_change_password_revokes_tokens_issued_before_the_change(client, self_service_user):
+    """Trước đây đổi mật khẩu không thu hồi token JWT đã phát hành — một token
+    cũ (vd. bị lộ trên thiết bị khác, chính là lý do người dùng đổi mật khẩu)
+    vẫn dùng được tới hết hạn 24h. Token phải mất hiệu lực ngay sau khi đổi."""
+    old_token_headers = _auth(client, self_service_user, "origpass1")
+    # Token cũ dùng được trước khi đổi.
+    assert client.get("/api/auth/me", headers=old_token_headers).status_code == 200
+
+    res = client.post(
+        "/api/me/password", headers=old_token_headers,
+        json={"current_password": "origpass1", "new_password": "brandnew123"},
+    )
+    assert res.status_code == 200, res.text
+
+    # Token cũ (phát hành trước khi đổi) không còn dùng được, dù chưa hết hạn.
+    assert client.get("/api/auth/me", headers=old_token_headers).status_code == 401
+
+    # Token MỚI (đăng nhập lại bằng mật khẩu mới) hoạt động bình thường.
+    new_token_headers = _auth(client, self_service_user, "brandnew123")
+    assert client.get("/api/auth/me", headers=new_token_headers).status_code == 200
+
+
+def test_admin_reset_also_revokes_existing_tokens(client, self_service_user):
+    old_token_headers = _auth(client, self_service_user, "origpass1")
+    assert client.get("/api/auth/me", headers=old_token_headers).status_code == 200
+
+    admin_headers = _auth(client, "admin_um", "adminpass")
+    users = client.get("/api/admin/users", headers=admin_headers).json()["items"]
+    target_id = next(u["id"] for u in users if u["username"] == self_service_user)
+    res = client.post(
+        f"/api/admin/users/{target_id}/reset-password", headers=admin_headers,
+        json={"password": "adminset456"},
+    )
+    assert res.status_code == 200, res.text
+
+    assert client.get("/api/auth/me", headers=old_token_headers).status_code == 401
+
+
+def test_change_password_rejects_wrong_current_password(client, self_service_user):
+    headers = _auth(client, self_service_user, "origpass1")
+    res = client.post(
+        "/api/me/password", headers=headers,
+        json={"current_password": "not-my-password", "new_password": "brandnew123"},
+    )
+    assert res.status_code == 400
+    # Mật khẩu cũ vẫn còn hiệu lực sau khi bị từ chối.
+    assert client.post("/api/auth/login", json={"username": self_service_user, "password": "origpass1"}).status_code == 200
+
+
+def test_change_password_rejects_same_as_current(client, self_service_user):
+    headers = _auth(client, self_service_user, "origpass1")
+    res = client.post(
+        "/api/me/password", headers=headers,
+        json={"current_password": "origpass1", "new_password": "origpass1"},
+    )
+    assert res.status_code == 400
+
+
+def test_change_password_enforces_minimum_length(client, self_service_user):
+    headers = _auth(client, self_service_user, "origpass1")
+    res = client.post(
+        "/api/me/password", headers=headers,
+        json={"current_password": "origpass1", "new_password": "short"},
+    )
+    assert res.status_code == 422
+
+
+def test_change_password_requires_authentication(client):
+    res = client.post(
+        "/api/me/password",
+        json={"current_password": "origpass1", "new_password": "brandnew123"},
+    )
+    assert res.status_code == 401
+
+
+def test_admin_reset_does_not_need_current_password(client, self_service_user):
+    """Ranh giới giữa 2 luồng: Admin đặt lại hộ KHÔNG cần mật khẩu cũ."""
+    admin_headers = _auth(client, "admin_um", "adminpass")
+    users = client.get("/api/admin/users", headers=admin_headers).json()["items"]
+    target_id = next(u["id"] for u in users if u["username"] == self_service_user)
+    res = client.post(
+        f"/api/admin/users/{target_id}/reset-password", headers=admin_headers,
+        json={"password": "adminset123"},
+    )
+    assert res.status_code == 200, res.text
+    assert client.post("/api/auth/login", json={"username": self_service_user, "password": "adminset123"}).status_code == 200

@@ -191,7 +191,10 @@ function splitDateTime(value = '') {
   return { date: match[1], hour: match[2], minute };
 }
 
-function dateTimeField(name, label, value = '', extra = '') {
+// `minDate` (yyyy-mm-dd) chặn chọn ngày quá khứ ngay trên date picker và làm
+// checkValidity() fail — validateStep đã báo lỗi dựa vào đó, không cần thêm
+// nhánh kiểm tra riêng. Backend vẫn kiểm tra lại (không tin UI).
+function dateTimeField(name, label, value = '', extra = '', minDate = '') {
   const required = extra.includes('required');
   const { labelClass } = splitFieldExtra(extra);
   const { date, hour, minute } = splitDateTime(value);
@@ -206,11 +209,26 @@ function dateTimeField(name, label, value = '', extra = '') {
   return `<label${labelClass}>${required ? '* ' : ''}${label}
     <span class="datetime-field" data-dt-group="${name}">
       <input type="hidden" name="${name}" value="${esc(value)}">
-      <input type="date" class="datetime-date" data-dt-part="date" data-dt-name="${name}" value="${date}" ${required ? 'required' : ''} aria-label="${esc(label)} — ngày">
+      <input type="date" class="datetime-date" data-dt-part="date" data-dt-name="${name}" value="${date}" ${required ? 'required' : ''}${minDate ? ` min="${minDate}"` : ''} aria-label="${esc(label)} — ngày">
       <select class="datetime-hour" data-dt-part="hour" data-dt-name="${name}" aria-label="${esc(label)} — giờ">${hourOptions}</select>
       <span class="datetime-sep" aria-hidden="true">:</span>
       <select class="datetime-minute" data-dt-part="minute" data-dt-name="${name}" aria-label="${esc(label)} — phút">${minuteOptions}</select>
     </span></label>`;
+}
+
+// Ngày tối thiểu cho cả 4 mốc ETB/ETD/ATB/ATD = NGÀY TẠO PHIẾU: phiếu lập cho
+// ngày nào thì mọi mốc của lượt đó phải từ ngày ấy trở đi (backend kiểm tra lại
+// trong _require_times_not_before_declaration_date).
+//
+// Chỉ áp cho phiếu MỚI. Phiếu ĐÃ LƯU (phiếu cũ, dữ liệu import) có thể có mốc
+// sớm hơn ngày tạo — trả '' để không đặt min, nếu không người dùng sẽ không mở
+// và lưu lại được phiếu đó nữa.
+function declarationTimeMinDate(declaration = {}) {
+  if (declaration.id) return '';
+  const declarationDate = typeof declaration.declaration_date === 'string'
+    ? declaration.declaration_date.slice(0, 10)
+    : '';
+  return declarationDate || new Date().toISOString().slice(0, 10);
 }
 
 function syncDateTimeHidden(name, root = document) {
@@ -224,11 +242,27 @@ function syncDateTimeHidden(name, root = document) {
   hidden.value = date ? `${date}T${hour}:${minute}` : '';
 }
 
+// Thuộc tính `min` đã làm trình duyệt mờ/khóa các ngày cũ hơn ngay trên bảng
+// lịch. Nhưng người dùng vẫn GÕ TAY được một ngày sớm hơn (ô chỉ bị đánh dấu
+// invalid, giá trị vẫn nằm đó) — nên kéo về đúng `min` khi họ gõ xong. Chỉ xử
+// lý ở sự kiện `change`; nếu làm ở `input` thì giá trị nhảy loạn khi đang gõ dở.
+function clampDateToMin(input) {
+  const min = input.getAttribute('min');
+  if (!min || !input.value || input.value >= min) return false;
+  input.value = min;
+  return true;
+}
+
 function bindDateTimeFields(root = document) {
   $$('.datetime-field', root).forEach(group => {
     const name = group.dataset.dtGroup;
     $$('[data-dt-part]', group).forEach(control => {
-      control.addEventListener('change', () => syncDateTimeHidden(name, root));
+      control.addEventListener('change', () => {
+        if (control.dataset.dtPart === 'date' && clampDateToMin(control)) {
+          toast(`Ngày không được sớm hơn ${fmtDate(control.getAttribute('min'))} — đã tự điều chỉnh.`, true);
+        }
+        syncDateTimeHidden(name, root);
+      });
       control.addEventListener('input', () => syncDateTimeHidden(name, root));
     });
   });
@@ -497,11 +531,33 @@ function renderCancelQueue(queue) {
   $('#cancel-queue-title').textContent = `${queue.label} (${queue.count})`;
   $('#cancel-queue-content').innerHTML = queue.items.map(item => `<article><div><strong>${esc(item.reference_no)}</strong><small>${esc(item.vessel_name)} · ${workflowLabel(item.workflow_status)}</small></div><span class="cancel-queue-actions"><button type="button" class="soft-button" data-cancel-queue-approve="${item.id}">Duyệt hủy</button><button type="button" class="ghost-button" data-cancel-queue-reject="${item.id}">Từ chối</button></span></article>`).join('');
   $$('[data-cancel-queue-approve]', $('#cancel-queue-content')).forEach(button => {
-    button.onclick = () => openWorkflow(Number(button.dataset.cancelQueueApprove));
+    const id = Number(button.dataset.cancelQueueApprove);
+    const item = queue.items.find(row => row.id === id);
+    button.onclick = () => approveCancelRequest(id, item?.workflow_status);
   });
   $$('[data-cancel-queue-reject]', $('#cancel-queue-content')).forEach(button => {
     button.onclick = () => rejectCancelRequest(Number(button.dataset.cancelQueueReject));
   });
+}
+
+// Duyệt hủy ngay tại hàng đợi Tổng quan. Trước đây nút này gọi openWorkflow(),
+// nhưng openWorkflow tra phiếu trong state.declarations — chỉ được nạp khi vào
+// trang "Phiếu khai báo" — nên bấm từ Tổng quan là không có phản hồi gì.
+// Gọi thẳng endpoint workflow như nút "Từ chối" bên cạnh.
+async function approveCancelRequest(declarationId, workflowStatus) {
+  const action = workflowStatus === 'PENDING_REVIEW' ? 'CANCEL_FROM_PENDING'
+    : workflowStatus === 'APPROVED' ? 'CANCEL_FROM_APPROVED' : null;
+  if (!action) return toast('Phiếu không ở trạng thái hủy được.', true);
+  if (!confirm('Duyệt hủy phiếu này? Phiếu chuyển sang trạng thái Đã hủy.')) return;
+  try {
+    await api(`/api/declarations/${declarationId}/workflow`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action, note: 'Duyệt yêu cầu hủy phiếu.'}),
+    });
+    toast('Đã hủy phiếu.');
+    await loadDashboard();
+    refreshPendingBadge();
+  } catch (error) { toast(error.message, true); }
 }
 
 async function rejectCancelRequest(declarationId) {
@@ -723,6 +779,30 @@ async function saveMyProfile(event) {
     state.currentUser = { ...state.currentUser, ...profile };
     renderNotificationPreferences(state.dashboardCertificateWarnings);
     toast('Đã lưu thông báo của bạn.');
+  } catch (error) {
+    toast(error.message, true);
+  } finally { setSubmitting(form, event.submitter, false); }
+}
+
+// Người dùng tự đổi mật khẩu (trang Cài đặt). Admin đặt lại hộ dùng luồng
+// riêng ở trang Quản lý người dùng (submitResetPassword) — không cần mật khẩu cũ.
+async function changeMyPassword(event) {
+  event.preventDefault();
+  const form = event.target;
+  const currentPassword = form.elements.current_password.value;
+  const newPassword = form.elements.new_password.value;
+  const confirmPassword = form.elements.confirm_password.value;
+  if (newPassword !== confirmPassword) {
+    return toast('Mật khẩu mới nhập lại không khớp.', true);
+  }
+  setSubmitting(form, event.submitter, true, 'Đang đổi…');
+  try {
+    await api('/api/me/password', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({current_password: currentPassword, new_password: newPassword}),
+    });
+    form.reset();
+    toast('Đã đổi mật khẩu. Lần đăng nhập sau dùng mật khẩu mới.');
   } catch (error) {
     toast(error.message, true);
   } finally { setSubmitting(form, event.submitter, false); }
@@ -1733,10 +1813,10 @@ function renderDeclarationWizard() {
         ${field('working_port','Cảng / cầu bến đến làm hàng',d.working_port,'text','required list="ports-list"')}
         ${field('departure_berth','Cảng / cầu bến rời',d.departure_berth,'text','list="ports-list"')}
         ${field('destination_port','Cảng đích',d.destination_port,'text','list="ports-list"')}
-        ${dateTimeField('eta','Thời gian dự kiến cập cầu (ETB)',d.eta,'required')}
-        ${dateTimeField('etd','Thời gian dự kiến rời cầu (ETD)',d.etd,'required')}
-        ${dateTimeField('actual_arrival_at','Thời gian cập cầu thực tế (ATB)',d.actual_arrival_at)}
-        ${dateTimeField('actual_departure_at','Thời gian rời cầu thực tế (ATD)',d.actual_departure_at)}
+        ${dateTimeField('eta','Thời gian dự kiến cập cầu (ETB)',d.eta,'required',declarationTimeMinDate(d))}
+        ${dateTimeField('etd','Thời gian dự kiến rời cầu (ETD)',d.etd,'required',declarationTimeMinDate(d))}
+        ${dateTimeField('actual_arrival_at','Thời gian cập cầu thực tế (ATB)',d.actual_arrival_at,'',declarationTimeMinDate(d))}
+        ${dateTimeField('actual_departure_at','Thời gian rời cầu thực tế (ATD)',d.actual_departure_at,'',declarationTimeMinDate(d))}
         ${field('agent_ptnd_name','Đại lý PTND',d.agent_ptnd_name,'text','class="wide-field"')}
         <datalist id="ports-list"></datalist>
       </div></section>
@@ -3248,6 +3328,7 @@ async function init() {
   $('#declaration-form').addEventListener('submit', saveDeclaration);
   $('#workflow-form').addEventListener('submit', saveWorkflow);
   $('#my-profile-form')?.addEventListener('submit', saveMyProfile);
+  $('#change-password-form')?.addEventListener('submit', changeMyPassword);
   $('#port-email-form')?.addEventListener('submit', savePortEmail);
   $('#smtp-form')?.addEventListener('submit', saveSmtp);
   $('#smtp-test-btn')?.addEventListener('click', sendSmtpTest);

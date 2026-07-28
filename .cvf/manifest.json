@@ -1,12 +1,16 @@
 ﻿{
-    "cvfCorePath":  "../.Controlled-Vibe-Framework-CVF",
-    "cvfCoreCommit":  "9f39111",
-    "workspaceRoot":  "..",
-    "workspaceRulesPath":  "../WORKSPACE_RULES.md",
-    "projectPath":  ".",
+    "schemaVersion":  "2.0",
+    "cvfCoreRepository":  "https://github.com/Blackbird081/Controlled-Vibe-Framework-CVF.git",
+    "cvfCoreCommit":  "27137db4d9aa2aea931ddd2507185d5c24943080",
+    "workspaceLayout":  "SIBLING_HIDDEN_CORE",
+    "cvfCoreRelativePath":  "../.Controlled-Vibe-Framework-CVF",
+    "workspaceRulesRelativePath":  "../WORKSPACE_RULES.md",
+    "projectRelativePath":  ".",
     "phaseModel":  [
                        "INTAKE",
                        "DESIGN",
+                       "SPEC",
+                       "WORK_ORDER",
                        "BUILD",
                        "REVIEW",
                        "FREEZE"
@@ -16,14 +20,25 @@
     "requiredDocs":  [
                          ".cvf/manifest.json",
                          ".cvf/policy.json",
-                         "../WORKSPACE_RULES.md",
-                         "docs/archive/CVF_BOOTSTRAP_LOG_20260711.md"
+                         "scripts/initialize_cvf_clone.ps1",
+                         "..\\WORKSPACE_RULES.md",
+                         "docs/CVF_BOOTSTRAP_LOG_20260727.md",
+                         "CVF_SESSION_MEMORY.md",
+                         "CVF_SESSION/ACTIVE_SESSION_STATE.json",
+                         "docs/INDEX.md",
+                         "docs/catalog/MODULE_REGISTRY.json",
+                         "docs/catalog/MODULE_CATALOG.md",
+                         "IMPLEMENTATION_STATUS.json",
+                         "docs/catalog/ARTIFACT_REGISTRY.json",
+                         "docs/catalog/schemas/ARTIFACT_REGISTRY.schema.json",
+                         "docs/catalog/schemas/MODULE_REGISTRY.schema.json",
+                         "scripts/manage_cvf_downstream_catalog.ps1",
+                         "scripts/lib/downstream_catalog/CvfDownstreamCatalogLib.ps1"
                      ],
-    "bootstrapDate":  "2026-07-11",
-    "enforcementVersion":  "1.0",
+    "bootstrapDate":  "2026-07-27",
+    "enforcementVersion":  "3.1-governed-catalog",
     "bootstrapScript":  "scripts/new-cvf-workspace.ps1",
     "w112TrancheRef":  "CVF_W112_T1_WORKSPACE_AGENT_ENFORCEMENT_AND_WEB_CONTROL_UPLIFT_ROADMAP_2026-04-22.md",
     "knowledgePath":  "knowledge/",
-    "cvfPublicRemote":  "https://github.com/Blackbird081/Controlled-Vibe-Framework-CVF.git",
-    "publicCoreFreshnessRequired":  true
+    "catalogKitVersion":  "1.1"
 }

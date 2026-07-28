@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "cvf://downstream-catalog/module-registry-schema/1.1",
+  "title": "CVF Downstream Module Registry",
+  "description": "Closed-schema machine source of source-verified runtime modules. Begins empty at bootstrap; an empty registry makes no roadmap or runtime capability claim. The status vocabulary is source-backed only - no value may represent plan-only intent - and every entry must carry evidence justifying its status.",
+  "type": "object",
+  "required": ["schemaVersion", "projectName", "updatedAt", "claimBoundary", "modules"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0" },
+    "projectName": { "type": "string", "minLength": 1 },
+    "updatedAt": { "type": "string", "minLength": 1 },
+    "claimBoundary": { "type": "string", "minLength": 1 },
+    "modules": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/moduleEntry" }
+    }
+  },
+  "definitions": {
+    "moduleEntry": {
+      "type": "object",
+      "required": ["id", "name", "path", "status", "description", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Project-relative POSIX-style path. No drive letters, no backslashes, no path escape segments."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ENFORCED", "PARTIAL", "CONTRACT_ONLY", "STUB", "DEPRECATED"],
+          "description": "Source-backed only. ENFORCED: fully implemented and gated by tests/checks. PARTIAL: some enforcement exists now, not aspirational. CONTRACT_ONLY: a real, checked contract/schema/interface exists; behavior is not yet exercised. STUB: a minimal source placeholder exists. DEPRECATED: retired with a source-backed retirement record in `evidence`. Plan-only intent (e.g. PLANNED) is not representable."
+        },
+        "description": { "type": "string", "minLength": 1 },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concrete, source-backed justification for the selected status: a file/line or test/gate reference. Never a plan, prompt, or provider-local memory claim."
+        },
+        "controls": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^GC-[0-9]{3}$" },
+          "default": []
+        },
+        "dependencies": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Each value must equal the id of another module already present in this registry.",
+          "default": []
+        }
+      }
+    }
+  }
+}

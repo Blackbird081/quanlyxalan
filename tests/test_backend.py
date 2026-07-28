@@ -17,6 +17,7 @@ import tempfile
 import time
 import uuid
 import zipfile
+from datetime import date, timedelta
 from pathlib import Path
 
 # ── Set test DB FIRST, before any backend import ──────────────────────────────
@@ -30,6 +31,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 import backend.app as app_module
+import backend.user_management_api as user_management_module
 
 from backend.models import (
     AuditEvent, Base, Declaration, ImportJob, ReportAdjustment, User, Organization, Vessel,
@@ -165,17 +167,21 @@ def _reg() -> str:
 
 
 def _minimal_declaration(**overrides) -> dict:
+    # ETB/ETD phải là ngày tương lai: backend chặn lập phiếu MỚI với mốc dự kiến
+    # trong quá khứ (xem _require_future_planned_times). Dùng ngày động thay vì
+    # ngày cứng để fixture không "hết hạn" theo thời gian thực.
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     base = {
         "company_name": "Test Company",
-        "declaration_date": "2026-07-11",
+        "declaration_date": date.today().isoformat(),
         "vessel_name": "TT TEST",
         "registration_no": _reg(),
         "vessel_type": "Tàu container",
         "vessel_class": "VR-SI",
         "last_port": "Bến A",
         "working_port": "Cảng Tân Thuận",
-        "eta": "2026-07-11T08:00",
-        "etd": "2026-07-11T18:00",
+        "eta": f"{tomorrow}T08:00",
+        "etd": f"{tomorrow}T18:00",
         "master_name": "Nguyễn Văn A",
         "master_phone": "0900000000",
         "unload": {},
@@ -332,7 +338,9 @@ def test_static_frontend(client):
     assert "const crewContainer = $('#declaration-crew-container');" in app_js
     assert "name=\"crew_onboard_count\"" in app_js
     assert "node.setAttribute('role', error ? 'alert' : 'status')" in app_js
-    assert "Không thể nhập dòng này. Hãy kiểm tra định dạng số, ngày hoặc mã đăng ký trùng." in Path(__file__).resolve().parents[1].joinpath("backend", "app.py").read_text(encoding="utf-8")
+    # Thông báo này nằm ở backend/import_api.py kể từ khi khối IMPORT được tách
+    # khỏi app.py (chỉ di chuyển, nội dung không đổi).
+    assert "Không thể nhập dòng này. Hãy kiểm tra định dạng số, ngày hoặc mã đăng ký trùng." in Path(__file__).resolve().parents[1].joinpath("backend", "import_api.py").read_text(encoding="utf-8")
     assert "File đã được nhập trước đó" in app_js
     assert "Không tạo thêm bản ghi" in app_js
     assert "searchDashboardVessels(query, sequence)" in app_js
@@ -808,6 +816,79 @@ def test_declaration_draft_create(client, auth_headers):
     data = res.json()
     assert data["workflow_status"] == "DRAFT"
     assert "reference_no" in data
+
+
+# ── ETB/ETD không được ở quá khứ khi lập phiếu MỚI ───────────────────────────
+
+@pytest.mark.parametrize("field", ["eta", "etd", "actual_arrival_at", "actual_departure_at"])
+def test_new_declaration_rejects_time_before_declaration_date(client, auth_headers, field):
+    """Cả 4 mốc (ETB/ETD/ATB/ATD) đều không được sớm hơn ngày tạo phiếu."""
+    day_before = (date.today() - timedelta(days=1)).isoformat()
+    payload = _minimal_declaration(**{field: f"{day_before}T08:00"})
+    # ETB phải trước ETD (validator có sẵn) — khi thử ETD ở quá khứ thì phải kéo
+    # ETB xuống sớm hơn nữa, nếu không sẽ vướng validator kia trước và test này
+    # không còn kiểm tra đúng thứ nó định kiểm tra.
+    if field == "etd":
+        payload["eta"] = f"{(date.today() - timedelta(days=2)).isoformat()}T08:00"
+    res = client.post("/api/declarations", json=payload, headers=auth_headers)
+    assert res.status_code == 422
+    assert "sớm hơn ngày tạo phiếu" in res.json()["detail"]
+
+
+def test_new_declaration_uses_declaration_date_not_today_as_base(client, auth_headers):
+    """Gốc so sánh là declaration_date, KHÔNG phải ngày hệ thống: phiếu lập
+    cho ngày mai thì ETB hôm nay là sai, dù hôm nay chưa phải quá khứ."""
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    today = date.today().isoformat()
+    res = client.post(
+        "/api/declarations",
+        json=_minimal_declaration(
+            declaration_date=tomorrow,
+            eta=f"{today}T08:00",
+            etd=f"{tomorrow}T18:00",
+        ),
+        headers=auth_headers,
+    )
+    assert res.status_code == 422
+    assert "sớm hơn ngày tạo phiếu" in res.json()["detail"]
+
+
+def test_new_declaration_allows_times_on_declaration_date(client, auth_headers):
+    """So sánh theo NGÀY, không theo giờ — mọi mốc rơi đúng ngày tạo phiếu đều
+    hợp lệ kể cả khung giờ đã trôi qua."""
+    today = date.today().isoformat()
+    res = client.post(
+        "/api/declarations",
+        json=_minimal_declaration(
+            declaration_date=today,
+            eta=f"{today}T00:01",
+            etd=f"{today}T23:59",
+            actual_arrival_at=f"{today}T00:05",
+            actual_departure_at=f"{today}T23:00",
+        ),
+        headers=auth_headers,
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_existing_declaration_with_earlier_times_can_still_be_saved(client, auth_headers):
+    """Ràng buộc chỉ áp cho phiếu tạo mới. Phiếu đã lưu (phiếu cũ, dữ liệu
+    import) phải sửa/lưu lại được, nếu không sẽ bị khóa cứng vĩnh viễn."""
+    created = client.post("/api/declarations", json=_minimal_declaration(), headers=auth_headers)
+    assert created.status_code == 200, created.text
+    body = created.json()
+
+    day_before = (date.today() - timedelta(days=1)).isoformat()
+    update = _minimal_declaration(
+        eta=f"{day_before}T08:00",
+        etd=f"{day_before}T18:00",
+        registration_no=body["registration_no"],
+    )
+    update["id"] = body["id"]
+    update["version"] = body["version"]
+    res = client.post("/api/declarations", json=update, headers=auth_headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["eta"] == f"{day_before}T08:00"
 
 
 def test_platform_admin_can_delete_draft_declaration(client, auth_headers):
@@ -1628,9 +1709,13 @@ def test_appendix_month_ytd_operating_date_adjustment_and_vessel_grain(
 ):
     registration = _reg()
     created_ids = []
+    # Trọng tâm của test là báo cáo gom theo NGÀY VẬN HÀNH (ETB), không theo
+    # declaration_date — nên các mốc ETB/ETD dưới đây (tháng 1, tháng 7, tháng 8)
+    # là phần phải giữ nguyên. declaration_date chỉ cần không muộn hơn ETB để
+    # thỏa ràng buộc "mốc thời gian không sớm hơn ngày tạo phiếu".
     fixtures = (
         {
-            "declaration_date": "2045-07-20", "eta": "2045-01-15T08:00", "etd": "2045-01-15T18:00",
+            "declaration_date": "2045-01-10", "eta": "2045-01-15T08:00", "etd": "2045-01-15T18:00",
             "registration_no": registration, "agent_ptnd_name": "Đại lý A",
             "unload": {"cargo_type": "Container", "movement_type": "Nhập khẩu", "cargo_name": "Hàng tháng 1", "cont20_full": 1, "tons": 10},
         },
@@ -2313,7 +2398,7 @@ def test_admin_backup_routes_are_registered_and_role_scoped(
     client, auth_headers, customer_headers, tmp_path, monkeypatch,
 ):
     backup_dir = tmp_path / "backups"
-    monkeypatch.setattr(app_module, "BACKUP_DIR", backup_dir)
+    monkeypatch.setattr(user_management_module, "BACKUP_DIR", backup_dir)
     assert client.get("/api/admin/backups", headers=auth_headers).json() == []
     forbidden = client.get("/api/admin/backups", headers=customer_headers)
     assert forbidden.status_code == 403

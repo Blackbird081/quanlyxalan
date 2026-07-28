@@ -1,0 +1,27 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "projectName":  "quanlyxalan",
+    "overallStatus":  "COMPLETE",
+    "currentPhase":  "FREEZE",
+    "completedCapabilities":  [
+                                  "VESSELS routes extracted to backend/vessels_api.py with ordered route identity preserved.",
+                                  "USER MANAGEMENT routes extracted to backend/user_management_api.py with ordered route identity preserved.",
+                                  "Static unbound-name checker supports cross-shell glob expansion and encoding-safe failure diagnostics."
+                              ],
+    "activeWorkOrders":  [
+
+                         ],
+    "knownLimitations":  [
+                             "The PostgreSQL test suite requires a create-database-capable TEST_ADMIN_DATABASE_URL.",
+                             "Backup tests require PostgreSQL client tools such as pg_dump in PATH.",
+                             "Two existing openpyxl Data Validation warnings remain; all 254 tests pass."
+                         ],
+    "evidence":  [
+                     "docs/decisions/APP_ROUTE_EXTRACTION_DESIGN_20260727.md",
+                     "docs/specs/APP_ROUTE_EXTRACTION_SPEC_20260727.md",
+                     "docs/work_orders/WO_QLXL_APP_SPLIT_20260727.md",
+                     "docs/reviews/APP_ROUTE_EXTRACTION_REVIEW_20260727.md",
+                     "commit:1b2dd1089250dafc316c205645c22d454758952d"
+                 ],
+    "updatedAt":  "2026-07-27"
+}
