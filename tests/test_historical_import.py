@@ -200,6 +200,17 @@ def test_fresh_database_upgrades_to_single_head(monkeypatch, pg_url):
     assert "ck_attachments_exactly_one_owner" in {
         constraint["name"] for constraint in inspector.get_check_constraints("attachments")
     }
+    historical_uniques = {
+        constraint["name"]: constraint["column_names"]
+        for constraint in inspector.get_unique_constraints("historical_report_imports")
+    }
+    assert historical_uniques["uq_historical_import_idempotency"] == [
+        "reporting_unit_id",
+        "source_kind",
+        "source_checksum",
+        "mapping_version",
+        "reporting_period",
+    ]
 
 
 def test_pre_h2_database_preserved_through_migration(monkeypatch, pg_url):

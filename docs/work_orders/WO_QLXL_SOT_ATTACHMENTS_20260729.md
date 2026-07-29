@@ -2,7 +2,7 @@
 
 Work order: WO-QLXL-SOT-ATTACHMENTS-20260729
 
-Status: WIP_CHECKPOINT_REVIEWED_WITH_LIMITATIONS
+Status: REPAIR_REVIEWED_CHECKPOINT
 
 Risk: R2
 
@@ -22,7 +22,8 @@ Application and migration:
 - `backend/vessels_api.py`
 - `backend/historical_api.py`
 - `backend/app.py` only if shared attachment wiring must move
-- one successor migration under `alembic/versions/`
+- successor migrations under `alembic/versions/`; published revisions remain
+  immutable and repair schema changes require a new head
 - `frontend/app.js`
 - `frontend/index.html` for vessel-attachment UI wiring
 - `frontend/styles.css` only for attachment presentation
@@ -84,3 +85,19 @@ work can continue on another machine. Independent review disposition is
 `ACCEPT_CHECKPOINT_WITH_LIMITATIONS`. Commit/push is authorized only for this
 WIP branch checkpoint; PostgreSQL evidence and all open review findings remain
 mandatory before FREEZE or production approval.
+
+## Authorized Repair Scope
+
+The operator directed repair of every independent-review finding:
+
+1. scope PL.03 SOT duplicate identity to its reporting period;
+2. make full revision supersede every overlapping active incremental receipt;
+3. compensate storage when upload persistence fails;
+4. avoid deleting the stored object before the database delete commits;
+5. add regression tests and update review/continuity evidence.
+
+Role: REPAIR_WORKER. Phase: BUILD.
+
+Independent re-review found that published revision `x23f0f000023` must remain
+immutable. The repair therefore adds successor `y24f0f000024` for
+period-scoped historical idempotency.

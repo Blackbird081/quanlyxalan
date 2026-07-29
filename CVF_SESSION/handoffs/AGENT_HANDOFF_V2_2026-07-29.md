@@ -10,10 +10,10 @@ Status: IN_PROGRESS
 - Active phase: REVIEW
 - Active role: COMMIT_STEWARD
 - Risk: R2
-- Next allowed move: commit and push the independently reviewed WIP
-  continuation checkpoint to the current origin branch.
-- Parked operator checkpoint: repair the two HIGH and two MEDIUM reviewer
-  findings and run PostgreSQL/full-suite evidence before FREEZE.
+- Next allowed move: commit and push the independently accepted repair
+  checkpoint.
+- Parked operator checkpoint: run PostgreSQL/full-suite evidence when a
+  create-database-capable `TEST_ADMIN_DATABASE_URL` becomes available.
 
 ## Intake
 
@@ -81,6 +81,46 @@ confirmed SOT data, and will not commit or push without separate authority.
   storage/database; failed upload can leave an orphaned stored object.
 - PostgreSQL integration evidence remains parked.
 - Role transition: ORCHESTRATOR -> COMMIT_STEWARD after independent review.
+
+## Repair Tranche
+
+- Operator directed that all detected findings be repaired before continuing.
+- Phase return: REVIEW -> BUILD.
+- Role transition: COMMIT_STEWARD -> REPAIR_WORKER.
+- Authorized repair scope is limited to the two HIGH and two MEDIUM findings
+  above plus regression tests and governed evidence updates.
+- PostgreSQL evidence remains an environment limitation, not a waived
+  completion requirement.
+
+## Repair Result
+
+- PL.03 preview now requires an explicit reporting period; SOT retention,
+  checksum idempotency, conflict detection and legacy export dimensions are
+  period-scoped.
+- Historical import uniqueness now includes `reporting_period` and uses
+  PostgreSQL `NULLS NOT DISTINCT` to preserve idempotency for undetermined
+  periods. Published migration `x23f0f000023` remains immutable; successor
+  `y24f0f000024` applies this schema change.
+- Full revision validates a selected conflict without narrowing the complete
+  conflict set, so all overlapping active receipts are superseded.
+- Failed attachment upload rolls back the database and compensates storage.
+- Attachment delete commits the database removal before deleting storage and
+  reports/audits pending cleanup with the generated object key if storage
+  deletion fails.
+- Focused regression suite: 32 passed, 1 dependency deprecation warning.
+- PostgreSQL DDL compilation, Python compilation, JavaScript syntax and every
+  backend unbound-name check passed.
+- Phase return: BUILD -> REVIEW.
+- Role transition: REPAIR_WORKER -> ORCHESTRATOR for independent re-review.
+
+## Independent Repair Re-review
+
+- Disposition: `ACCEPT_REPAIR_CHECKPOINT_WITH_PG_LIMITATION`.
+- No source blocker remains in the four repaired findings.
+- Reviewer verified published `x23f0f000023` is byte-identical to the existing
+  Git revision and `y24f0f000024` is the single successor head.
+- PostgreSQL execution remains parked and is not claimed as passed.
+- Role transition: ORCHESTRATOR -> COMMIT_STEWARD.
 
 ## Claim Boundary
 

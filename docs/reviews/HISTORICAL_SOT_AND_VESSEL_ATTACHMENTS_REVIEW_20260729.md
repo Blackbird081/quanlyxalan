@@ -4,7 +4,7 @@ Review ID: REVIEW-QLXL-SOT-ATTACHMENTS-20260729
 
 Work order: WO-QLXL-SOT-ATTACHMENTS-20260729
 
-Disposition: ACCEPT_CHECKPOINT_WITH_LIMITATIONS
+Disposition: ACCEPT_REPAIR_CHECKPOINT_WITH_PG_LIMITATION
 
 Risk: R2
 
@@ -80,18 +80,35 @@ The independent R2 reviewer accepted publication only as a WIP continuation
 checkpoint. This is not a PASS disposition and does not authorize FREEZE,
 production deployment, or a functional-completion claim.
 
-### Open reviewer findings
+### Reviewer findings and repair disposition
 
-1. HIGH: PL.03 SOT duplicate identity is not period-scoped, so the same Salan
-   in a later reporting period can be suppressed as an old row.
-2. HIGH: full revision can supersede only one selected import while leaving
-   other active incremental receipts overlapping with the restaged full file.
-3. MEDIUM: attachment deletion removes storage before the database transaction
-   commits, so commit failure can leave a database row pointing to a missing
-   object.
-4. MEDIUM: attachment upload writes storage before database persistence and
-   lacks cleanup if scanning or persistence fails.
+1. HIGH, RESOLVED AT SOURCE: PL.03 SOT identity, checksum idempotency,
+   conflict detection and legacy export dimensions are period-scoped; the
+   database uniqueness constraint now includes `reporting_period`.
+2. HIGH, RESOLVED AT SOURCE: selecting one conflict no longer narrows
+   full-revision supersession; regression coverage expects every active receipt
+   in the period to be superseded.
+3. MEDIUM, RESOLVED AT SOURCE: attachment database deletion commits
+   before storage deletion; failed storage cleanup is returned and audited.
+4. MEDIUM, RESOLVED AT SOURCE: scanner/database failures roll back and
+   compensate the newly stored upload object.
 5. EVIDENCE: PostgreSQL migration, constraints and API flows remain unverified.
+
+Repair evidence: 32 focused tests passed; PostgreSQL DDL, Python compile,
+JavaScript syntax and backend unbound-name checks passed.
+
+### Re-review repair
+
+- Initial re-review BLOCKED mutation of already-published Alembic revision
+  `x23f0f000023`.
+- `x23f0f000023` was restored byte-for-byte to its published Git version.
+- New successor `y24f0f000024` carries the period-scoped uniqueness change and
+  downgrade refusal when cross-period rows cannot fit the older constraint.
+- `STORAGE_DELETE_PENDING` now records the generated storage object key so
+  cleanup retry can identify the orphan.
+- Alembic reports one head: `y24f0f000024`.
+- Independent re-review found no remaining source blocker and accepted the
+  repair checkpoint with the PostgreSQL execution limitation.
 
 The reviewer also accepted `frontend/index.html` as necessary UI wiring for
 this checkpoint; the work-order amendment records that scope clarification.

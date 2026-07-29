@@ -32,9 +32,10 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 import backend.app as app_module
 import backend.user_management_api as user_management_module
+import backend.vessels_api as vessels_module
 
 from backend.models import (
-    AuditEvent, Base, Declaration, ImportJob, ReportAdjustment, User, Organization, Vessel,
+    Attachment, AuditEvent, Base, Declaration, ImportJob, ReportAdjustment, User, Organization, Vessel,
     VesselOperatingProfile, ReportingUnit, ReportingUnitOrganization, ReportingUnitUser,
     ReportingUnitVessel,
     HistoricalCargoRow, HistoricalPortCall, HistoricalReportImport,
@@ -44,6 +45,7 @@ from backend.database import engine, SessionLocal, now_iso
 from backend.historical_tos_parser import normalize_vessel_name
 from backend.auth import get_password_hash
 from backend.app import app, get_db, DEMO_ORGANIZATION_TAX_CODE, remove_demo_data_for_real_input
+from backend.storage import LocalQuarantineStorage
 from backend.xlsx_io import make_xlsx, read_workbook, vessel_rows
 
 # ── Create all tables in test DB ──────────────────────────────────────────────
@@ -1269,8 +1271,23 @@ def test_attachment_size_rejection(client, auth_headers):
 
 
 def test_vessel_attachment_upload_list_tenant_guard_and_delete(
-    client, auth_headers, customer_headers,
+    client, auth_headers, customer_headers, tmp_path, monkeypatch,
 ):
+    deletion_saw_committed_row_removal: list[bool] = []
+
+    class InspectingStorage(LocalQuarantineStorage):
+        def delete(self, object_key: str) -> None:
+            check_db = SessionLocal()
+            try:
+                deletion_saw_committed_row_removal.append(
+                    check_db.query(Attachment).filter_by(stored_name=object_key).first() is None
+                )
+            finally:
+                check_db.close()
+            super().delete(object_key)
+
+    storage = InspectingStorage(tmp_path / "vessel-attachments")
+    monkeypatch.setattr(vessels_module, "attachment_storage", storage)
     registration = f"SG-ATT-{uuid.uuid4().hex[:8]}".upper()
     created = client.post("/api/vessels?port_register=true", headers=auth_headers, json={
         "organization_name": "TEST PORT REGISTER OWNER",
@@ -1304,12 +1321,54 @@ def test_vessel_attachment_upload_list_tenant_guard_and_delete(
         f"/api/vessels/{vessel_id}/attachments/{attachment['id']}", headers=auth_headers,
     )
     assert deleted.status_code == 200
+    assert deleted.json()["storageDeleted"] is True
+    assert deleted.json()["storageCleanupPending"] is False
+    assert deletion_saw_committed_row_removal == [True]
     assert client.get(
         f"/api/vessels/{vessel_id}/attachments", headers=auth_headers,
     ).json() == []
 
     db = SessionLocal()
     try:
+        db.query(Vessel).filter_by(id=vessel_id).delete()
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_vessel_attachment_upload_cleans_storage_when_scanner_fails(
+    client, auth_headers, tmp_path, monkeypatch,
+):
+    storage = LocalQuarantineStorage(tmp_path / "failed-vessel-attachments")
+
+    class FailingScanner:
+        def scan(self, object_key: str) -> str:
+            raise RuntimeError("scanner unavailable")
+
+    monkeypatch.setattr(vessels_module, "attachment_storage", storage)
+    monkeypatch.setattr(vessels_module, "attachment_scanner", FailingScanner())
+    registration = f"SG-ATT-FAIL-{uuid.uuid4().hex[:8]}".upper()
+    created = client.post("/api/vessels?port_register=true", headers=auth_headers, json={
+        "organization_name": "TEST PORT REGISTER OWNER",
+        "name": "SALAN TEST CLEANUP FILE",
+        "registration_no": registration,
+        "vessel_type": "CHỞ HÀNG KHÔ",
+        "vessel_class": "VR-SI",
+    })
+    assert created.status_code == 200, created.text
+    vessel_id = created.json()["id"]
+
+    with pytest.raises(RuntimeError, match="scanner unavailable"):
+        client.post(
+            f"/api/vessels/{vessel_id}/attachments?filename=GCN.pdf",
+            content=b"%PDF-1.4 vessel certificate",
+            headers={**auth_headers, "content-type": "application/pdf"},
+        )
+
+    assert list(storage.root.iterdir()) == []
+    db = SessionLocal()
+    try:
+        assert db.query(Attachment).filter_by(vessel_id=vessel_id).count() == 0
         db.query(Vessel).filter_by(id=vessel_id).delete()
         db.commit()
     finally:
@@ -2831,7 +2890,11 @@ def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
     }])
     pl03_preview = client.post(
         "/api/historical-imports/preview", content=original_pl03,
-        headers={**auth_headers, "X-Source-Filename": "pl03-original.xlsx"},
+        headers={
+            **auth_headers,
+            "X-Source-Filename": "pl03-original.xlsx",
+            "X-Reporting-Period": "2092-07",
+        },
     )
     assert pl03_preview.status_code == 200, pl03_preview.text
     pl03_id = pl03_preview.json()["id"]
@@ -2845,7 +2908,11 @@ def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
     ])
     pl03_delta = client.post(
         "/api/historical-imports/preview", content=cumulative_pl03,
-        headers={**auth_headers, "X-Source-Filename": "pl03-cumulative.xlsx"},
+        headers={
+            **auth_headers,
+            "X-Source-Filename": "pl03-cumulative.xlsx",
+            "X-Reporting-Period": "2092-07",
+        },
     )
     assert pl03_delta.status_code == 200, pl03_delta.text
     pl03_delta_body = pl03_delta.json()
@@ -2952,6 +3019,77 @@ def test_historical_corrected_mapping_supersedes_same_source_without_period(
         db.close()
 
 
+def test_pl03_full_revision_supersedes_all_active_incremental_receipts(
+    client, auth_headers,
+):
+    period = "2093-08"
+    suffix = uuid.uuid4().hex[:8]
+    first_row = {1: 1, 2: f"REV A {suffix}", 3: f"REV-A-{suffix}"}
+    second_row = {1: 2, 2: f"REV B {suffix}", 3: f"REV-B-{suffix}"}
+    third_row = {1: 3, 2: f"REV C {suffix}", 3: f"REV-C-{suffix}"}
+    headers = {
+        **auth_headers,
+        "X-Source-Filename": "pl03-revision.xlsx",
+        "X-Reporting-Period": period,
+    }
+
+    first = client.post(
+        "/api/historical-imports/preview",
+        content=_historical_pl03_fixture([first_row]),
+        headers=headers,
+    )
+    assert first.status_code == 200, first.text
+    first_id = first.json()["id"]
+    assert client.post(
+        f"/api/historical-imports/{first_id}/confirm", json={}, headers=auth_headers,
+    ).status_code == 200
+
+    incremental = client.post(
+        "/api/historical-imports/preview",
+        content=_historical_pl03_fixture([first_row, second_row]),
+        headers=headers,
+    )
+    assert incremental.status_code == 200, incremental.text
+    incremental_id = incremental.json()["id"]
+    assert client.post(
+        f"/api/historical-imports/{incremental_id}/confirm",
+        json={"conflict_action": "MERGE_NEW_RECORDS"},
+        headers=auth_headers,
+    ).status_code == 200
+
+    revision = client.post(
+        "/api/historical-imports/preview",
+        content=_historical_pl03_fixture([first_row, second_row, third_row]),
+        headers=headers,
+    )
+    assert revision.status_code == 200, revision.text
+    revision_id = revision.json()["id"]
+    assert set(revision.json()["conflictingImportIds"]) == {first_id, incremental_id}
+    activated = client.post(
+        f"/api/historical-imports/{revision_id}/confirm",
+        json={
+            "conflict_action": "ACTIVATE_NEW_REVISION",
+            "supersedes_import_id": first_id,
+            "reason": "Replace the complete period after correction",
+        },
+        headers=auth_headers,
+    )
+    assert activated.status_code == 200, activated.text
+
+    db = SessionLocal()
+    try:
+        assert db.get(HistoricalReportImport, first_id).status == "SUPERSEDED"
+        assert db.get(HistoricalReportImport, incremental_id).status == "SUPERSEDED"
+        assert db.get(HistoricalReportImport, revision_id).status == "COMMITTED"
+        assert db.query(HistoricalReportRow).filter_by(import_id=revision_id).count() == 3
+        db.query(HistoricalReportImport).filter(
+            HistoricalReportImport.id.in_([first_id, incremental_id, revision_id]),
+        ).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
 def test_historical_pl03_export_uses_tos_facts_and_legacy_dimensions(
     client, auth_headers,
 ):
@@ -2985,7 +3123,11 @@ def test_historical_pl03_export_uses_tos_facts_and_legacy_dimensions(
     }])
     legacy_preview = client.post(
         "/api/historical-imports/preview", content=legacy,
-        headers={**auth_headers, "X-Source-Filename": "legacy-pl03.xlsx"},
+        headers={
+            **auth_headers,
+            "X-Source-Filename": "legacy-pl03.xlsx",
+            "X-Reporting-Period": "2089-07",
+        },
     )
     assert legacy_preview.status_code == 200, legacy_preview.text
     legacy_id = legacy_preview.json()["id"]

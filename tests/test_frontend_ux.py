@@ -173,6 +173,7 @@ def test_historical_cumulative_import_explains_sot_incremental_merge():
     assert "newRowCount" in app_js
     assert "'MERGE_NEW_RECORDS'" in app_js
     assert "phát sinh mới" in app_js
+    assert "'X-Reporting-Period': pl03PeriodValue()" in app_js
 
 
 def test_report_dashboard_makes_source_coverage_and_overlap_explicit():

@@ -2592,7 +2592,11 @@ async function previewHistoricalImport(input) {
     try {
       const result = await api('/api/historical-imports/preview', {
         method: 'POST',
-        headers: {...IMPORT_FILE_HEADERS, 'X-Source-Filename': encodeURIComponent(file.name)},
+        headers: {
+          ...IMPORT_FILE_HEADERS,
+          'X-Source-Filename': encodeURIComponent(file.name),
+          'X-Reporting-Period': pl03PeriodValue(),
+        },
         body: file,
       });
       state.historicalBatch[index] = {filename: file.name, result};

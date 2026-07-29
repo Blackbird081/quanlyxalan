@@ -16,8 +16,7 @@
                              "Backup tests require PostgreSQL client tools such as pg_dump in PATH.",
                              "Two existing openpyxl Data Validation warnings remain in the last closed baseline.",
                              "WO-QLXL-SOT-ATTACHMENTS-20260729 is accepted only as a WIP continuation checkpoint; PostgreSQL integration remains pending.",
-                             "Independent review found PL.03 duplicate identity is not period-scoped and full revision can leave overlapping active incremental receipts.",
-                             "Independent review found attachment storage/database operations need compensating cleanup for transaction failures."
+                             "The four independent-review source findings were repaired and accepted at independent re-review; PostgreSQL execution evidence remains pending."
                          ],
     "evidence":  [
                      "docs/decisions/APP_ROUTE_EXTRACTION_DESIGN_20260727.md",

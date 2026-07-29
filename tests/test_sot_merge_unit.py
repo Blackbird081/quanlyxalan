@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from backend.database import now_iso
-from backend.historical_api import _filter_confirmed_sot_rows
+from backend.historical_api import _conflicts, _filter_confirmed_sot_rows
 from backend.historical_tos_parser import ParsedWorkbook, normalize_vessel_name
 from backend.models import (
     Attachment,
@@ -49,12 +49,13 @@ def _unit_and_user(db):
     return unit, user
 
 
-def _active_import(db, unit, user, source_kind, checksum):
+def _active_import(db, unit, user, source_kind, checksum, reporting_period=None):
     item = HistoricalReportImport(
         reporting_unit_id=unit.id,
         source_kind=source_kind,
         appendix_kind="PL.03" if source_kind == "reported_pl03" else "",
         mapping_version="unit-test-v1",
+        reporting_period=reporting_period,
         source_filename="source.xlsx",
         source_checksum=checksum,
         source_size_bytes=1,
@@ -154,7 +155,9 @@ def test_cargo_sot_matching_preserves_duplicate_multiplicity(db):
 
 def test_pl03_registration_identity_keeps_confirmed_row_even_if_file_value_changes(db):
     unit, user = _unit_and_user(db)
-    item = _active_import(db, unit, user, "reported_pl03", "pl03")
+    item = _active_import(
+        db, unit, user, "reported_pl03", "pl03", reporting_period="2092-07",
+    )
     db.add(HistoricalReportRow(
         reporting_unit_id=unit.id,
         import_id=item.id,
@@ -169,6 +172,7 @@ def test_pl03_registration_identity_keeps_confirmed_row_even_if_file_value_chang
     parsed = ParsedWorkbook(
         source_kind="reported_pl03",
         mapping_version="unit-test-v1",
+        reporting_period="2092-07",
         rows=[
             {"registration_raw": "SG-001", "vessel_name_raw": "CHANGED"},
             {"registration_raw": "SG-002", "vessel_name_raw": "SALAN B"},
@@ -182,6 +186,92 @@ def test_pl03_registration_identity_keeps_confirmed_row_even_if_file_value_chang
     assert retained == 1
     assert new_rows == [{"registration_raw": "SG-002", "vessel_name_raw": "SALAN B"}]
     assert import_ids == [item.id]
+
+
+def test_pl03_same_vessel_in_different_period_is_a_new_fact(db):
+    unit, user = _unit_and_user(db)
+    item = _active_import(
+        db, unit, user, "reported_pl03", "pl03-july", reporting_period="2092-07",
+    )
+    db.add(HistoricalReportRow(
+        reporting_unit_id=unit.id,
+        import_id=item.id,
+        source_sheet="S",
+        source_row=10,
+        normalized_registration=normalize_vessel_name("SG-001"),
+        mapped_dimensions_json='{"vesselNameRaw":"SALAN A"}',
+        validation_status="VALID",
+        created_at=now_iso(),
+    ))
+    db.commit()
+    source = {"registration_raw": "SG-001", "vessel_name_raw": "SALAN A"}
+    parsed = ParsedWorkbook(
+        source_kind="reported_pl03",
+        mapping_version="unit-test-v1",
+        reporting_period="2092-08",
+        rows=[source],
+    )
+
+    new_rows, retained, import_ids = _filter_confirmed_sot_rows(
+        db, unit_id=unit.id, parsed=parsed,
+    )
+
+    assert new_rows == [source]
+    assert retained == 0
+    assert import_ids == []
+
+
+def test_pl03_same_checksum_in_different_period_is_not_a_conflict(db):
+    unit, user = _unit_and_user(db)
+    _active_import(
+        db, unit, user, "reported_pl03", "same-checksum", reporting_period="2092-07",
+    )
+    august = HistoricalReportImport(
+        reporting_unit_id=unit.id,
+        source_kind="reported_pl03",
+        appendix_kind="PL.03",
+        mapping_version="unit-test-v1",
+        reporting_period="2092-08",
+        source_filename="source.xlsx",
+        source_checksum="same-checksum",
+        source_size_bytes=1,
+        status="PREVIEWED",
+        created_by_user_id=user.id,
+        created_at=now_iso(),
+        updated_at=now_iso(),
+    )
+    db.add(august)
+    db.commit()
+
+    assert _conflicts(db, august) == []
+
+
+def test_full_revision_conflict_set_contains_all_active_receipts_in_period(db):
+    unit, user = _unit_and_user(db)
+    first = _active_import(
+        db, unit, user, "reported_pl03", "first", reporting_period="2092-07",
+    )
+    second = _active_import(
+        db, unit, user, "reported_pl03", "second", reporting_period="2092-07",
+    )
+    revision = HistoricalReportImport(
+        reporting_unit_id=unit.id,
+        source_kind="reported_pl03",
+        appendix_kind="PL.03",
+        mapping_version="unit-test-v1",
+        reporting_period="2092-07",
+        source_filename="revision.xlsx",
+        source_checksum="revision",
+        source_size_bytes=1,
+        status="PREVIEWED",
+        created_by_user_id=user.id,
+        created_at=now_iso(),
+        updated_at=now_iso(),
+    )
+    db.add(revision)
+    db.commit()
+
+    assert [item.id for item in _conflicts(db, revision)] == [first.id, second.id]
 
 
 def test_attachment_requires_exactly_one_owner(db):

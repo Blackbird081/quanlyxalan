@@ -7,6 +7,7 @@ in the dependency graph and must never import backend.app.
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 from datetime import date
 from pathlib import Path
@@ -42,6 +43,7 @@ router = APIRouter()
 ROOT = Path(__file__).resolve().parents[1]
 attachment_storage = get_attachment_storage(ROOT / "data" / "attachments" / "quarantine")
 attachment_scanner = ScannerNotConfigured()
+logger = logging.getLogger(__name__)
 
 
 class ReportingUnitCreateRequest(BaseModel):
@@ -689,27 +691,37 @@ async def upload_vessel_attachment(
     validate_attachment_content(extension, content)
     safe_name = f"vessel_{vessel_id}_{uuid.uuid4().hex}{extension}"
     stored_name = attachment_storage.put_quarantined(safe_name, content)
-    scan_status = attachment_scanner.scan(stored_name)
-    item = Attachment(
-        vessel_id=vessel_id,
-        original_name=Path(filename).name[:255],
-        stored_name=stored_name,
-        content_type=request.headers.get("content-type", "application/octet-stream"),
-        size_bytes=len(content),
-        checksum_sha256=hashlib.sha256(content).hexdigest(),
-        scan_status=scan_status,
-        storage_backend=attachment_storage.backend_name,
-        created_at=now_iso(),
-    )
-    db.add(item)
-    db.flush()
-    audit(
-        db, "VESSEL_ATTACHMENT", item.id, "UPLOAD",
-        f"vessel={vessel_id}; file={item.original_name}; bytes={item.size_bytes}",
-        actor_user_id=scope.user.id, organization_id=vessel.organization_id,
-        reporting_unit_id=scope.reporting_unit_id if scope.is_port else None,
-    )
-    db.commit()
+    try:
+        scan_status = attachment_scanner.scan(stored_name)
+        item = Attachment(
+            vessel_id=vessel_id,
+            original_name=Path(filename).name[:255],
+            stored_name=stored_name,
+            content_type=request.headers.get("content-type", "application/octet-stream"),
+            size_bytes=len(content),
+            checksum_sha256=hashlib.sha256(content).hexdigest(),
+            scan_status=scan_status,
+            storage_backend=attachment_storage.backend_name,
+            created_at=now_iso(),
+        )
+        db.add(item)
+        db.flush()
+        audit(
+            db, "VESSEL_ATTACHMENT", item.id, "UPLOAD",
+            f"vessel={vessel_id}; file={item.original_name}; bytes={item.size_bytes}",
+            actor_user_id=scope.user.id, organization_id=vessel.organization_id,
+            reporting_unit_id=scope.reporting_unit_id if scope.is_port else None,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        try:
+            attachment_storage.delete(stored_name)
+        except Exception:
+            # Preserve the original scanner/database exception while retaining
+            # evidence that compensating storage cleanup itself failed.
+            logger.exception("Unable to remove orphaned vessel attachment %s", stored_name)
+        raise
     db.refresh(item)
     return _attachment_dict(item)
 
@@ -728,7 +740,8 @@ def delete_vessel_attachment(
     item = db.query(Attachment).filter_by(id=attachment_id, vessel_id=vessel_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Không tìm thấy file đính kèm.")
-    attachment_storage.delete(item.stored_name)
+    stored_name = item.stored_name
+    original_name = item.original_name
     audit(
         db, "VESSEL_ATTACHMENT", item.id, "DELETE",
         f"vessel={vessel_id}; file={item.original_name}",
@@ -737,7 +750,24 @@ def delete_vessel_attachment(
     )
     db.delete(item)
     db.commit()
-    return {"deleted": True, "id": attachment_id}
+    storage_deleted = True
+    try:
+        attachment_storage.delete(stored_name)
+    except Exception:
+        storage_deleted = False
+        audit(
+            db, "VESSEL_ATTACHMENT", attachment_id, "STORAGE_DELETE_PENDING",
+            f"vessel={vessel_id}; file={original_name}; stored={stored_name}",
+            actor_user_id=scope.user.id, organization_id=vessel.organization_id,
+            reporting_unit_id=scope.reporting_unit_id if scope.is_port else None,
+        )
+        db.commit()
+    return {
+        "deleted": True,
+        "id": attachment_id,
+        "storageDeleted": storage_deleted,
+        "storageCleanupPending": not storage_deleted,
+    }
 
 
 @router.delete("/api/vessels/{vessel_id}")

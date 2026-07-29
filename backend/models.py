@@ -512,7 +512,9 @@ class HistoricalReportImport(Base):
         # Tenant-scoped checksum idempotency.
         UniqueConstraint(
             "reporting_unit_id", "source_kind", "source_checksum", "mapping_version",
+            "reporting_period",
             name="uq_historical_import_idempotency",
+            postgresql_nulls_not_distinct=True,
         ),
         # Revision lineage stays inside one reporting unit: a superseding import
         # must share this import's reporting unit.

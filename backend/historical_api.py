@@ -176,7 +176,14 @@ def _filter_confirmed_sot_rows(
         HistoricalReportImport.reporting_unit_id == unit_id,
         HistoricalReportImport.source_kind == parsed.source_kind,
         HistoricalReportImport.status.in_(ACTIVE_IMPORT_STATUSES),
-    ).all()
+    )
+    if parsed.source_kind == "reported_pl03":
+        if not parsed.reporting_period:
+            raise ValueError("reported_pl03 requires an explicit reporting period")
+        active_imports = active_imports.filter(
+            HistoricalReportImport.reporting_period == parsed.reporting_period,
+        )
+    active_imports = active_imports.all()
     active_ids = [item.id for item in active_imports]
     if not active_ids:
         return list(parsed.rows), 0, []
@@ -517,7 +524,10 @@ def _restage_full_revision(db: Session, item: HistoricalReportImport) -> None:
         ).delete(synchronize_session=False)
     db.flush()
 
-    item.reporting_period = parsed.reporting_period
+    # PL.03 templates do not carry a trustworthy period in their cells.  Its
+    # period is supplied explicitly at preview time and must survive reparsing
+    # the archived workbook during a full revision.
+    item.reporting_period = parsed.reporting_period or item.reporting_period
     if item.source_kind == "tos_berth_call":
         _stage_berth(db, item, parsed)
     elif item.source_kind == "tos_cargo_detail":
@@ -553,9 +563,14 @@ def _conflicts(db: Session, item: HistoricalReportImport) -> list[HistoricalRepo
     # same immutable source checksum.  Treat the active older mapping as a
     # conflict even when a legacy report has no reliable reporting period, so
     # confirmation supersedes it instead of leaving two apparently active rows.
-    same_source = query.filter(
+    same_source_query = query.filter(
         HistoricalReportImport.source_checksum == item.source_checksum,
-    ).all()
+    )
+    if item.source_kind == "reported_pl03" and item.reporting_period:
+        same_source_query = same_source_query.filter(
+            HistoricalReportImport.reporting_period == item.reporting_period,
+        )
+    same_source = same_source_query.all()
     if same_source:
         found.update({entry.id: entry for entry in same_source})
     if item.reporting_period:
@@ -583,6 +598,7 @@ def _conflicts(db: Session, item: HistoricalReportImport) -> list[HistoricalRepo
 async def preview_historical_import(
     request: Request,
     x_source_filename: str | None = Header(default=None, alias="X-Source-Filename"),
+    x_reporting_period: str | None = Header(default=None, alias="X-Reporting-Period"),
     db: Session = Depends(get_db), scope: Scope = Depends(require_port_scope),
 ):
     _authorize(db, scope)
@@ -597,11 +613,23 @@ async def preview_historical_import(
         parsed = parse_workbook(content)
     except HistoricalWorkbookError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if parsed.source_kind == "reported_pl03":
+        if not x_reporting_period or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", x_reporting_period):
+            raise HTTPException(
+                status_code=422,
+                detail="Cần chọn kỳ báo cáo hợp lệ (YYYY-MM) cho file PL.03.",
+            )
+        parsed.reporting_period = x_reporting_period
     checksum = hashlib.sha256(content).hexdigest()
-    prior = db.query(HistoricalReportImport).filter_by(
+    prior_query = db.query(HistoricalReportImport).filter_by(
         reporting_unit_id=scope.reporting_unit_id, source_kind=parsed.source_kind,
         source_checksum=checksum, mapping_version=parsed.mapping_version,
-    ).first()
+    )
+    if parsed.source_kind == "reported_pl03":
+        prior_query = prior_query.filter(
+            HistoricalReportImport.reporting_period == parsed.reporting_period,
+        )
+    prior = prior_query.first()
     if prior:
         _archive_source(scope.reporting_unit_id, checksum, content)
         return {**_import_json(prior, conflicts=[i.id for i in _conflicts(db, prior)]), "idempotent": True}
@@ -739,7 +767,11 @@ def _historical_pl03_rows(
     # Legacy PL.03 is a dimension scaffold only. Its manual cargo metrics and
     # ETA-era time cells are deliberately ignored in the reconstructed report.
     legacy_imports = sorted(
-        [item for item in active_imports if item.source_kind == "reported_pl03"],
+        [
+            item for item in active_imports
+            if item.source_kind == "reported_pl03"
+            and item.reporting_period == reporting_period
+        ],
         key=lambda entry: entry.id,
     )
     legacy_rows = db.query(HistoricalReportRow).filter(
@@ -1032,8 +1064,7 @@ def confirm_historical_import(
         return {**_import_json(item), "idempotent": True}
     conflicts = _conflicts(db, item)
     if body.supersedes_import_id is not None:
-        conflicts = [entry for entry in conflicts if entry.id == body.supersedes_import_id]
-        if not conflicts:
+        if body.supersedes_import_id not in {entry.id for entry in conflicts}:
             raise HTTPException(status_code=409, detail="Bản được chọn không phải xung đột cùng đơn vị/nguồn/kỳ.")
     if conflicts and body.conflict_action is None:
         raise HTTPException(status_code=409, detail={
