@@ -194,6 +194,12 @@ def test_fresh_database_upgrades_to_single_head(monkeypatch, pg_url):
     assert "reporting_unit_id" not in {c["name"] for c in inspector.get_columns("organizations")}
     assert "reporting_unit_id" not in {c["name"] for c in inspector.get_columns("users")}
     assert "reporting_unit_id" in {c["name"] for c in inspector.get_columns("audit_events")}
+    attachment_columns = {c["name"]: c for c in inspector.get_columns("attachments")}
+    assert attachment_columns["declaration_id"]["nullable"] is True
+    assert attachment_columns["vessel_id"]["nullable"] is True
+    assert "ck_attachments_exactly_one_owner" in {
+        constraint["name"] for constraint in inspector.get_check_constraints("attachments")
+    }
 
 
 def test_pre_h2_database_preserved_through_migration(monkeypatch, pg_url):

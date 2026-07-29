@@ -151,6 +151,30 @@ def test_historical_import_is_visually_and_semantically_separate_from_live_impor
     assert "@media (max-width: 760px)" in styles_css
 
 
+def test_vessel_editor_supports_profile_attachments():
+    app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+    styles_css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+
+    assert "File đính kèm hồ sơ Salan" in app_js
+    assert 'name="vessel_attachments" type="file" multiple' in app_js
+    assert "function renderVesselAttachments(" in app_js
+    assert "/attachments?filename=${encodeURIComponent(file.name)}" in app_js
+    assert "data-delete-vessel-attachment" in app_js
+    assert ".vessel-attachment-list" in styles_css
+
+
+def test_historical_cumulative_import_explains_sot_incremental_merge():
+    index_html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="activate-historical-revision"' in index_html
+    assert "Database đã xác nhận là Source of Truth" in app_js
+    assert "sotRetainedCount" in app_js
+    assert "newRowCount" in app_js
+    assert "'MERGE_NEW_RECORDS'" in app_js
+    assert "phát sinh mới" in app_js
+
+
 def test_report_dashboard_makes_source_coverage_and_overlap_explicit():
     index_html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
     app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")

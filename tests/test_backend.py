@@ -38,8 +38,10 @@ from backend.models import (
     VesselOperatingProfile, ReportingUnit, ReportingUnitOrganization, ReportingUnitUser,
     ReportingUnitVessel,
     HistoricalCargoRow, HistoricalPortCall, HistoricalReportImport,
+    HistoricalReportRow, HistoricalVesselLink,
 )
 from backend.database import engine, SessionLocal, now_iso
+from backend.historical_tos_parser import normalize_vessel_name
 from backend.auth import get_password_hash
 from backend.app import app, get_db, DEMO_ORGANIZATION_TAX_CODE, remove_demo_data_for_real_input
 from backend.xlsx_io import make_xlsx, read_workbook, vessel_rows
@@ -221,7 +223,7 @@ def _historical_pl03_fixture(rows: list[dict[int, object]]) -> bytes:
     return output.getvalue()
 
 
-def _seed_historical_registered_vessel(name: str) -> None:
+def _seed_historical_registered_vessel(name: str) -> int:
     db = SessionLocal()
     try:
         vessel = Vessel(
@@ -236,6 +238,7 @@ def _seed_historical_registered_vessel(name: str) -> None:
             created_at=now_iso(),
         ))
         db.commit()
+        return vessel.id
     finally:
         db.close()
 
@@ -1263,6 +1266,54 @@ def test_attachment_size_rejection(client, auth_headers):
         headers={**auth_headers, "content-type": "application/pdf"},
     )
     assert res.status_code == 413
+
+
+def test_vessel_attachment_upload_list_tenant_guard_and_delete(
+    client, auth_headers, customer_headers,
+):
+    registration = f"SG-ATT-{uuid.uuid4().hex[:8]}".upper()
+    created = client.post("/api/vessels?port_register=true", headers=auth_headers, json={
+        "organization_name": "TEST PORT REGISTER OWNER",
+        "name": "SALAN CÓ HỒ SƠ ĐÍNH KÈM",
+        "registration_no": registration,
+        "vessel_type": "CHỞ HÀNG KHÔ",
+        "vessel_class": "VR-SI",
+    })
+    assert created.status_code == 200, created.text
+    vessel_id = created.json()["id"]
+
+    uploaded = client.post(
+        f"/api/vessels/{vessel_id}/attachments?filename=GCN-an-toan.pdf",
+        content=b"%PDF-1.4 vessel certificate",
+        headers={**auth_headers, "content-type": "application/pdf"},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    attachment = uploaded.json()
+    assert attachment["original_name"] == "GCN-an-toan.pdf"
+    assert attachment["scan_status"] == "QUARANTINED"
+    assert "stored_name" not in attachment
+
+    listed = client.get(f"/api/vessels/{vessel_id}/attachments", headers=auth_headers)
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [attachment["id"]]
+    assert client.get(
+        f"/api/vessels/{vessel_id}/attachments", headers=customer_headers,
+    ).status_code == 403
+
+    deleted = client.delete(
+        f"/api/vessels/{vessel_id}/attachments/{attachment['id']}", headers=auth_headers,
+    )
+    assert deleted.status_code == 200
+    assert client.get(
+        f"/api/vessels/{vessel_id}/attachments", headers=auth_headers,
+    ).json() == []
+
+    db = SessionLocal()
+    try:
+        db.query(Vessel).filter_by(id=vessel_id).delete()
+        db.commit()
+    finally:
+        db.close()
 
 
 def test_xlsx_rejects_external_relationship_and_zip_bomb_shape():
@@ -2658,6 +2709,187 @@ def test_historical_batch_order_rechecks_pending_cargo_after_berth_confirmation(
         ).delete(synchronize_session=False)
         vessel = db.query(Vessel).filter_by(name=vessel_name).one()
         db.delete(vessel)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
+    client, auth_headers,
+):
+    first_name = f"SOT BARGE A {uuid.uuid4().hex[:8]}"
+    second_name = f"SOT BARGE B {uuid.uuid4().hex[:8]}"
+    first_vessel_id = _seed_historical_registered_vessel(first_name)
+    second_vessel_id = _seed_historical_registered_vessel(second_name)
+    berth_headers = {2: "Năm", 3: "Chuyến", 5: "Tên tàu", 8: "Mã bến", 20: "ATB", 23: "ATD"}
+
+    original_berth = _historical_fixture(berth_headers, [{
+        2: "2092", 3: "0001", 5: first_name, 8: "K12",
+        20: "18/07/2092 08:30:00", 23: "18/07/2092 13:00:00",
+    }])
+    original_preview = client.post(
+        "/api/historical-imports/preview", content=original_berth,
+        headers={**auth_headers, "X-Source-Filename": "berth-original.xlsx"},
+    )
+    assert original_preview.status_code == 200, original_preview.text
+    original_id = original_preview.json()["id"]
+    original_link = client.get(
+        f"/api/historical-imports/{original_id}/vessel-links?status=PENDING",
+        headers=auth_headers,
+    ).json()["items"][0]
+    assert client.post(
+        f"/api/historical-imports/{original_id}/vessel-links/{original_link['id']}/resolve",
+        json={"decision": "ACCEPT", "candidate_vessel_id": first_vessel_id, "reason": "Manual SOT"},
+        headers=auth_headers,
+    ).status_code == 200
+    assert client.post(
+        f"/api/historical-imports/{original_id}/confirm", json={}, headers=auth_headers,
+    ).status_code == 200
+
+    cumulative_berth = _historical_fixture(berth_headers, [
+        {
+            2: "2092", 3: "0001", 5: first_name, 8: "CHANGED-MUST-NOT-WIN",
+            20: "19/07/2092 09:00:00", 23: "19/07/2092 14:00:00",
+        },
+        {
+            2: "2092", 3: "0002", 5: second_name, 8: "K13",
+            20: "20/07/2092 08:30:00", 23: "20/07/2092 13:00:00",
+        },
+    ])
+    cumulative_preview = client.post(
+        "/api/historical-imports/preview", content=cumulative_berth,
+        headers={**auth_headers, "X-Source-Filename": "berth-cumulative.xlsx"},
+    )
+    assert cumulative_preview.status_code == 200, cumulative_preview.text
+    body = cumulative_preview.json()
+    cumulative_id = body["id"]
+    assert body["sotRetainedCount"] == 1
+    assert body["newRowCount"] == 1
+    assert body["accepted"] == 1
+    assert body["conflictingImportIds"] == [original_id]
+    preview_rows = client.get(
+        f"/api/historical-imports/{cumulative_id}/rows", headers=auth_headers,
+    ).json()["items"]
+    assert [row["vesselName"] for row in preview_rows] == [second_name]
+    merged = client.post(
+        f"/api/historical-imports/{cumulative_id}/confirm",
+        json={"conflict_action": "MERGE_NEW_RECORDS"},
+        headers=auth_headers,
+    )
+    assert merged.status_code == 200, merged.text
+
+    cargo_headers = {
+        3: "Kích cỡ", 5: "F/E", 17: "Tên sà lan | Năm | Chuyến",
+        18: "Trọng lượng", 20: "Hàng nội/ ngoại", 23: "Phương án",
+    }
+    cargo_fact = {
+        3: "20GP", 5: "F", 17: f"{first_name} | 2092 | 0001", 18: "10.5",
+        20: "Hàng nội", 23: "Hạ bãi",
+    }
+    original_cargo = _historical_fixture(cargo_headers, [cargo_fact, cargo_fact])
+    cargo_preview = client.post(
+        "/api/historical-imports/preview", content=original_cargo,
+        headers={**auth_headers, "X-Source-Filename": "detail-original.xlsx"},
+    )
+    assert cargo_preview.status_code == 200, cargo_preview.text
+    cargo_id = cargo_preview.json()["id"]
+    assert client.post(
+        f"/api/historical-imports/{cargo_id}/confirm", json={}, headers=auth_headers,
+    ).status_code == 200
+
+    cumulative_cargo = _historical_fixture(cargo_headers, [
+        cargo_fact,
+        cargo_fact,
+        cargo_fact,
+        {
+            3: "40HC", 5: "E", 17: f"{second_name} | 2092 | 0002", 18: "4.0",
+            20: "Hàng nội", 23: "Hạ bãi",
+        },
+    ])
+    cargo_delta = client.post(
+        "/api/historical-imports/preview", content=cumulative_cargo,
+        headers={**auth_headers, "X-Source-Filename": "detail-cumulative.xlsx"},
+    )
+    assert cargo_delta.status_code == 200, cargo_delta.text
+    cargo_delta_body = cargo_delta.json()
+    assert cargo_delta_body["sotRetainedCount"] == 2
+    assert cargo_delta_body["newRowCount"] == 2
+    assert client.post(
+        f"/api/historical-imports/{cargo_delta_body['id']}/confirm",
+        json={"conflict_action": "MERGE_NEW_RECORDS"},
+        headers=auth_headers,
+    ).status_code == 200
+
+    db = SessionLocal()
+    try:
+        first_registration = db.get(Vessel, first_vessel_id).registration_no
+        second_registration = db.get(Vessel, second_vessel_id).registration_no
+    finally:
+        db.close()
+    original_pl03 = _historical_pl03_fixture([{
+        1: 1, 2: first_name, 3: first_registration, 4: "SOT type", 5: "SOT class",
+    }])
+    pl03_preview = client.post(
+        "/api/historical-imports/preview", content=original_pl03,
+        headers={**auth_headers, "X-Source-Filename": "pl03-original.xlsx"},
+    )
+    assert pl03_preview.status_code == 200, pl03_preview.text
+    pl03_id = pl03_preview.json()["id"]
+    assert client.post(
+        f"/api/historical-imports/{pl03_id}/confirm", json={}, headers=auth_headers,
+    ).status_code == 200
+
+    cumulative_pl03 = _historical_pl03_fixture([
+        {1: 1, 2: first_name, 3: first_registration, 4: "CHANGED-MUST-NOT-WIN"},
+        {1: 2, 2: second_name, 3: second_registration, 4: "New vessel"},
+    ])
+    pl03_delta = client.post(
+        "/api/historical-imports/preview", content=cumulative_pl03,
+        headers={**auth_headers, "X-Source-Filename": "pl03-cumulative.xlsx"},
+    )
+    assert pl03_delta.status_code == 200, pl03_delta.text
+    pl03_delta_body = pl03_delta.json()
+    assert pl03_delta_body["sotRetainedCount"] == 1
+    assert pl03_delta_body["newRowCount"] == 1
+    assert pl03_delta_body["conflictingImportIds"] == [pl03_id]
+    assert client.post(
+        f"/api/historical-imports/{pl03_delta_body['id']}/confirm",
+        json={"conflict_action": "MERGE_NEW_RECORDS"},
+        headers=auth_headers,
+    ).status_code == 200
+
+    db = SessionLocal()
+    try:
+        original_import = db.get(HistoricalReportImport, original_id)
+        original_call = db.query(HistoricalPortCall).filter_by(import_id=original_id).one()
+        original_link_record = db.query(HistoricalVesselLink).filter_by(import_id=original_id).one()
+        assert original_import.status == "COMMITTED"
+        assert original_call.arrival_berth == "K12"
+        assert original_call.vessel_id == first_vessel_id
+        assert original_link_record.link_status == "ACCEPTED"
+        active_pl03_rows = db.query(HistoricalReportRow).join(
+            HistoricalReportImport,
+            HistoricalReportImport.id == HistoricalReportRow.import_id,
+        ).filter(
+            HistoricalReportRow.reporting_unit_id == TEST_REPORTING_UNIT_ID,
+            HistoricalReportImport.status.in_(("COMMITTED", "REVIEW")),
+            HistoricalReportImport.source_kind == "reported_pl03",
+            HistoricalReportRow.normalized_registration.in_([
+                normalize_vessel_name(first_registration),
+                normalize_vessel_name(second_registration),
+            ]),
+        ).all()
+        assert len(active_pl03_rows) == 2
+        import_ids = [
+            original_id, cumulative_id, cargo_id, cargo_delta_body["id"],
+            pl03_id, pl03_delta_body["id"],
+        ]
+        db.query(HistoricalReportImport).filter(
+            HistoricalReportImport.id.in_(import_ids),
+        ).delete(synchronize_session=False)
+        db.query(Vessel).filter(Vessel.id.in_([first_vessel_id, second_vessel_id])).delete(
+            synchronize_session=False
+        )
         db.commit()
     finally:
         db.close()

@@ -5,6 +5,14 @@
     "claimBoundary":  "Registers only source-verified modules. Statuses describe current implementation and executable evidence, not roadmap intent.",
     "modules":  [
                     {
+                        "id":  "historical-import-api",
+                        "name":  "Historical Import API",
+                        "path":  "backend/historical_api.py",
+                        "status":  "PARTIAL",
+                        "description":  "Tenant-scoped historical TOS/PL.03 import with source-of-truth retention and incremental merge implemented; PostgreSQL integration and independent R2 review remain pending.",
+                        "evidence":  "docs/reviews/HISTORICAL_SOT_AND_VESSEL_ATTACHMENTS_REVIEW_20260729.md; tests/test_sot_merge_unit.py; tests/test_backend.py"
+                    },
+                    {
                         "id":  "user-management-api",
                         "name":  "User Management API",
                         "path":  "backend/user_management_api.py",
@@ -16,9 +24,9 @@
                         "id":  "vessels-api",
                         "name":  "Vessels API",
                         "path":  "backend/vessels_api.py",
-                        "status":  "ENFORCED",
-                        "description":  "Reporting-unit, port-register, and vessel API routes extracted from app.py.",
-                        "evidence":  "docs/reviews/APP_ROUTE_EXTRACTION_REVIEW_20260727.md; tests/test_backend.py; tests/test_rbac.py; tests/test_port_operations.py"
+                        "status":  "PARTIAL",
+                        "description":  "Reporting-unit, port-register and vessel API, including quarantined vessel attachments; the prior route extraction is enforced while new attachment PostgreSQL evidence remains pending.",
+                        "evidence":  "docs/reviews/APP_ROUTE_EXTRACTION_REVIEW_20260727.md; docs/reviews/HISTORICAL_SOT_AND_VESSEL_ATTACHMENTS_REVIEW_20260729.md; tests/test_backend.py; tests/test_sot_merge_unit.py"
                     }
                 ]
 }

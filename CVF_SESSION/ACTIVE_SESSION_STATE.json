@@ -1,8 +1,8 @@
 ﻿{
     "schemaVersion":  "1.0",
     "projectName":  "quanlyxalan",
-    "currentMode":  "FREEZE",
-    "activePhase":  "FREEZE",
+    "currentMode":  "REVIEW",
+    "activePhase":  "REVIEW",
     "phaseModel":  [
                        "INTAKE",
                        "DESIGN",
@@ -12,10 +12,10 @@
                        "REVIEW",
                        "FREEZE"
                    ],
-    "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V1_2026-07-27.md",
-    "nextAllowedMove":  "Tranche closed. Await the next governed request from INTAKE.",
-    "parkedOperatorCheckpoint":  null,
-    "activeRole":  "CLOSER",
+    "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
+    "nextAllowedMove":  "Commit and push the independently reviewed WIP continuation checkpoint to the current origin branch.",
+    "parkedOperatorCheckpoint":  "Repair the two HIGH and two MEDIUM independent-review findings and run PostgreSQL/full-suite evidence before FREEZE.",
+    "activeRole":  "COMMIT_STEWARD",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
-    "updatedAt":  "2026-07-27"
+    "updatedAt":  "2026-07-29"
 }
