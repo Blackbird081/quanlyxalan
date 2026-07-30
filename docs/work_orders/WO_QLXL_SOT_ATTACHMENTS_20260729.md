@@ -123,3 +123,23 @@ Acceptance:
    and the corrected CI failure cause.
 
 Merge and FREEZE remain out of scope.
+
+## Dashboard Warning Repair Amendment
+
+The operator authorized repair after the production dashboard counted every
+non-null certificate date as a warning. The bounded changed set additionally
+includes:
+
+- `backend/app.py` dashboard warning aggregation;
+- `tests/test_backend.py` tenant-scoped status/count regression coverage;
+- review, continuity, PR metadata, and CI evidence.
+
+Acceptance:
+
+1. only `EXPIRED` and `EXPIRING` vessel certificates count as warnings;
+2. `VALID`, `UNKNOWN`, null, and malformed dates do not count;
+3. customer/reporting-unit scope remains unchanged;
+4. detailed vessel status and dashboard count use the same canonical helper;
+5. focused and full GitHub tests pass.
+
+Production data changes, merge, and FREEZE remain out of scope.

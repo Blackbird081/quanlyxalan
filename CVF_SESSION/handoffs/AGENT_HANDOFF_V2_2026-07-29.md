@@ -8,11 +8,10 @@ Status: IN_PROGRESS
 - Tranche: `WO-QLXL-SOT-ATTACHMENTS-20260729`
 - Current mode: REVIEW
 - Active phase: REVIEW
-- Active role: ORCHESTRATOR
+- Active role: COMMIT_STEWARD
 - Risk: R2
-- Next allowed move: PR #7 is code-complete with a passing quality gate;
-  await canonical-repository owner review. Do not merge or FREEZE without
-  separate operator authority.
+- Next allowed move: commit/push the independently accepted dashboard warning
+  repair and monitor PR #7 full quality gate. Do not merge or FREEZE.
 - Parked operator checkpoint: none.
 
 ## Intake
@@ -172,6 +171,17 @@ confirmed SOT data, and will not commit or push without separate authority.
 - Phase return: BUILD -> REVIEW.
 - Role transition: REPAIR_WORKER -> ORCHESTRATOR for independent R2 review.
 - Independent reviewer: `/root/independent_ui_repair_review`.
+- Disposition: `PASS_WITH_LIMITATIONS`; no HIGH, MEDIUM, or LOW findings.
+- Reviewer independently verified canonical date boundaries, unchanged
+  customer/reporting-unit scope, scoped-column projection, regression cleanup,
+  2 focused PostgreSQL tests, existing RBAC coverage, helper assertions,
+  compile/diff checks, and workspace doctor 25/25.
+- Limitation: full GitHub quality-gate rerun remains pending after publication;
+  reporting-unit warning aggregation was source/RBAC reviewed rather than
+  covered by a second warning-specific test.
+- Role transition: ORCHESTRATOR -> COMMIT_STEWARD under the operator's
+  standing PR completion authority.
+- Independent reviewer: `/root/independent_ui_repair_review`.
 - Independent disposition: `PASS_WITH_LIMITATIONS`; no HIGH, MEDIUM, or LOW
   findings.
 - Reviewer reproduced the PGDG install in clean Ubuntu 24.04 and confirmed
@@ -320,3 +330,30 @@ confirmed SOT data, and will not commit or push without separate authority.
 
 This tranche changes application data/storage behavior. It does not claim live
 AI governance behavior.
+
+## Dashboard Certificate Warning Repair — 2026-07-30
+
+- Operator production screenshot showed 105 vessels and 104 certificate
+  warnings while the vessel list showed nearly every dated certificate as
+  valid.
+- Source diagnosis: `/api/dashboard` counted every vessel whose
+  `certificate_expiry_date` was non-null; the detailed list correctly used
+  `certificate_status()` and therefore disagreed with the dashboard.
+- The observed numbers match the defect exactly: 104 dated profiles were
+  counted and the single undated profile was excluded.
+- Phase return: REVIEW -> BUILD.
+- Role transition: ORCHESTRATOR -> REPAIR_WORKER.
+- BUILD acknowledgment: scope is limited to dashboard warning aggregation in
+  `backend/app.py`, tenant-scoped regression coverage in
+  `tests/test_backend.py`, governed evidence, PR publication, and CI
+  monitoring. Production data will not be changed. Merge and FREEZE are not
+  authorized.
+- Repair result: dashboard aggregation now projects only scoped certificate
+  values and classifies each with the same canonical `certificate_status()`
+  helper used by vessel rows; only `EXPIRING`/`EXPIRED` count.
+- Regression coverage adds valid (31 days), expiring (30 days), expired, null,
+  malformed, and out-of-scope cases. The expected warning delta is exactly 2.
+- Docker PostgreSQL 17 focused evidence: 2 passed.
+- Python compile and diff check: pass.
+- Phase return: BUILD -> REVIEW.
+- Role transition: REPAIR_WORKER -> ORCHESTRATOR for independent R2 review.
