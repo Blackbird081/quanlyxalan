@@ -303,3 +303,6 @@ Independent dashboard-repair review:
   boundary assertions, compile/diff checks, and workspace doctor 25/25 pass.
 - Remaining limitation: full GitHub quality-gate rerun is pending after
   publication.
+- PR #7 was merged by the canonical owner at `123bfa8` before this repair
+  could be appended. The warning repair is isolated on follow-up branch
+  `fix/dashboard-certificate-warning-count` at commit `76c7f12`.

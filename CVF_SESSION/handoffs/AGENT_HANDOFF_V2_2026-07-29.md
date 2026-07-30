@@ -10,8 +10,9 @@ Status: IN_PROGRESS
 - Active phase: REVIEW
 - Active role: COMMIT_STEWARD
 - Risk: R2
-- Next allowed move: commit/push the independently accepted dashboard warning
-  repair and monitor PR #7 full quality gate. Do not merge or FREEZE.
+- Next allowed move: push the independently accepted dashboard warning repair
+  on its clean follow-up branch, create a PR targeting canonical main, and
+  monitor the full quality gate. Do not merge or FREEZE.
 - Parked operator checkpoint: none.
 
 ## Intake
@@ -181,6 +182,13 @@ confirmed SOT data, and will not commit or push without separate authority.
   covered by a second warning-specific test.
 - Role transition: ORCHESTRATOR -> COMMIT_STEWARD under the operator's
   standing PR completion authority.
+- During publication, canonical owner merged PR #7 at merge commit `123bfa8`
+  while the warning repair was being prepared; PR #7 can no longer receive
+  new commits.
+- Created clean follow-up branch `fix/dashboard-certificate-warning-count`
+  from `upstream/main` and cherry-picked only the independently accepted repair
+  as `76c7f12`. The follow-up diff contains six bounded files and no prior PR
+  history.
 - Independent reviewer: `/root/independent_ui_repair_review`.
 - Independent disposition: `PASS_WITH_LIMITATIONS`; no HIGH, MEDIUM, or LOW
   findings.

@@ -13,7 +13,7 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "As COMMIT_STEWARD, commit/push the independently accepted dashboard warning repair and monitor PR #7 full quality gate. Do not merge or FREEZE.",
+    "nextAllowedMove":  "Push the independently accepted dashboard warning repair on its clean follow-up branch, create a PR targeting canonical main, and monitor the full quality gate. Do not merge or FREEZE.",
     "parkedOperatorCheckpoint":  null,
     "activeRole":  "COMMIT_STEWARD",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
