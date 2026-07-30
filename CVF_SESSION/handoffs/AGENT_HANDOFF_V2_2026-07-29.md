@@ -61,11 +61,11 @@ Status: IN_PROGRESS
 - Tranche: `WO-QLXL-VESSEL-ATTACHMENT-ACCESS-20260730`
 - Current mode: REVIEW
 - Active phase: REVIEW
-- Active role: COMMIT_STEWARD
+- Active role: ORCHESTRATOR
 - Risk: R2
-- Next allowed move: complete the rebase onto canonical `main` after merged
-  PR #8, force-with-lease the reviewed attachment branch, and monitor PR #9
-  quality gate. Do not merge or FREEZE.
+- Next allowed move: PR #9 is CI-green, clean, and mergeable; await
+  canonical-owner review. Do not merge or FREEZE without separate operator
+  authority.
 - Parked operator checkpoint: none.
 
 ## Intake
@@ -398,6 +398,26 @@ confirmed SOT data, and will not commit or push without separate authority.
 
 This tranche changes application data/storage behavior. It does not claim live
 AI governance behavior.
+
+## Vessel Attachment Access PR Receipt — 2026-07-30
+
+- Initial reviewed commit: `dbdeae2`.
+- Canonical `main` advanced when PR #8 was merged at `adafe65`; PR #9 initially
+  reported a conflict.
+- Rebased onto `adafe65`, resolved continuity conflicts by preserving both the
+  merged dashboard-warning receipts and the attachment-access tranche, then
+  reran 9 focused tests successfully.
+- Final reviewed source commit after rebase: `807e9d9`.
+- Pushed with `--force-with-lease` to
+  `Blackbird081/quanlyxalan:fix/vessel-attachment-download`.
+- Pull request: `https://github.com/hoangnmr/quanlyxalan/pull/9`.
+- GitHub quality gate `30517459808`: SUCCESS — 273 passed, 3 warnings,
+  0 failed; PostgreSQL 17 client check, compile, diff check, and secret guard
+  passed.
+- GitHub reports PR #9 `OPEN`, `CLEAN`, and `MERGEABLE`.
+- User-owned `.claude/` was not staged, committed, or pushed.
+- Role transition: COMMIT_STEWARD -> ORCHESTRATOR after publication handback.
+- Merge and FREEZE remain unauthorized.
 
 ## Dashboard Certificate Warning Repair — 2026-07-30
 

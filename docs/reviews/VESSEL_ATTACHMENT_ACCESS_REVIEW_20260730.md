@@ -67,6 +67,13 @@ server detail.
 Disposition: `PASS_WITH_LIMITATIONS`. The only limitation is the unavailable
 rendered browser session; no visual click/download proof is claimed.
 
+## Publication Evidence
+
+- Rebased source commit: `807e9d9`.
+- PR: `https://github.com/hoangnmr/quanlyxalan/pull/9`.
+- GitHub quality gate `30517459808`: 273 passed, 3 warnings, 0 failed.
+- PR state after the gate: OPEN, CLEAN, MERGEABLE.
+
 ## Claim Boundary
 
 No production data, deployment, commit, push, merge, or rendered browser proof
