@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "Push the independently accepted dashboard warning repair on its clean follow-up branch, create a PR targeting canonical main, and monitor the full quality gate. Do not merge or FREEZE.",
+    "nextAllowedMove":  "Dashboard warning follow-up PR #8 is CI-green and mergeable. Await canonical-owner review; do not merge or FREEZE without separate operator authority.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "COMMIT_STEWARD",
+    "activeRole":  "ORCHESTRATOR",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
     "updatedAt":  "2026-07-30"
 }

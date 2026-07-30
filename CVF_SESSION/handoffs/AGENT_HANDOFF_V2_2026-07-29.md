@@ -8,11 +8,11 @@ Status: IN_PROGRESS
 - Tranche: `WO-QLXL-SOT-ATTACHMENTS-20260729`
 - Current mode: REVIEW
 - Active phase: REVIEW
-- Active role: COMMIT_STEWARD
+- Active role: ORCHESTRATOR
 - Risk: R2
-- Next allowed move: push the independently accepted dashboard warning repair
-  on its clean follow-up branch, create a PR targeting canonical main, and
-  monitor the full quality gate. Do not merge or FREEZE.
+- Next allowed move: dashboard warning follow-up PR #8 is CI-green and
+  mergeable; await canonical-owner review. Do not merge or FREEZE without
+  separate operator authority.
 - Parked operator checkpoint: none.
 
 ## Intake
@@ -189,6 +189,13 @@ confirmed SOT data, and will not commit or push without separate authority.
   from `upstream/main` and cherry-picked only the independently accepted repair
   as `76c7f12`. The follow-up diff contains six bounded files and no prior PR
   history.
+- Follow-up PR: `https://github.com/hoangnmr/quanlyxalan/pull/8`.
+- GitHub quality-gate run `30515776754`: SUCCESS — 272 passed, 3 warnings,
+  0 failed; PostgreSQL client check, compile, diff check, and secret guard all
+  passed.
+- GitHub reports PR #8 `OPEN`, `CLEAN`, and `MERGEABLE`.
+- Role transition: COMMIT_STEWARD -> ORCHESTRATOR after publication handback.
+- Merge and FREEZE remain unauthorized.
 - Independent reviewer: `/root/independent_ui_repair_review`.
 - Independent disposition: `PASS_WITH_LIMITATIONS`; no HIGH, MEDIUM, or LOW
   findings.

@@ -306,3 +306,8 @@ Independent dashboard-repair review:
 - PR #7 was merged by the canonical owner at `123bfa8` before this repair
   could be appended. The warning repair is isolated on follow-up branch
   `fix/dashboard-certificate-warning-count` at commit `76c7f12`.
+- Follow-up PR: `https://github.com/hoangnmr/quanlyxalan/pull/8`.
+- GitHub quality gate `30515776754`: SUCCESS — 272 passed, 3 warnings,
+  0 failed; compile, diff check, and secret guard passed.
+- Status: PR #8 is CLEAN/MERGEABLE and awaits canonical-owner review. Merge,
+  FREEZE, and production deployment remain unauthorized.
