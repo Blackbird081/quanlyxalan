@@ -63,7 +63,9 @@
                      "docs/specs/HISTORICAL_VESSEL_SOT_REUSE_SPEC_20260730.md",
                      "docs/work_orders/WO_QLXL_HISTORICAL_VESSEL_SOT_REUSE_20260730.md",
                      "docs/reviews/HISTORICAL_VESSEL_SOT_REUSE_REVIEW_20260730.md",
-                     "commit:77bb8d8"
+                     "commit:77bb8d8",
+                     "https://github.com/hoangnmr/quanlyxalan/pull/10",
+                     "https://github.com/hoangnmr/quanlyxalan/actions/runs/30558812593"
                  ],
     "updatedAt":  "2026-07-30"
 }

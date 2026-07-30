@@ -687,3 +687,19 @@ AI governance behavior.
   `hoangnmr/quanlyxalan:main`, monitor the quality gate, and record the
   publication receipt.
 - Merge, deployment, and FREEZE remain unauthorized.
+
+## Vessel Preview and Historical Vessel SOT PR Receipt — 2026-07-30
+
+- Pushed branch:
+  `Blackbird081/quanlyxalan:fix/vessel-preview-sot-reuse`.
+- Canonical pull request:
+  `https://github.com/hoangnmr/quanlyxalan/pull/10`.
+- GitHub reported the PR as `OPEN` and `MERGEABLE`.
+- Quality gate `30558812593`: SUCCESS — PostgreSQL client 17.10 verified,
+  281 tests passed with 3 warnings and 0 failures; compile, diff check, and
+  secret guard passed.
+- User-owned untracked `.claude/` was not staged, committed, or pushed.
+- Role transition: COMMIT_STEWARD -> ORCHESTRATOR after publication handback.
+- Next governed move belongs to the canonical owner: review PR #10 and decide
+  whether to merge.
+- Merge, deployment, and FREEZE remain unauthorized in this session.

@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "As COMMIT_STEWARD, push fix/vessel-preview-sot-reuse to origin, create a PR to hoangnmr/quanlyxalan:main, monitor its quality gate, and record the publication receipt. Merge, deployment, and FREEZE remain unauthorized.",
+    "nextAllowedMove":  "As ORCHESTRATOR, hand PR #10 to the canonical owner for review and merge disposition. Merge, deployment, and FREEZE remain unauthorized in this session.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "COMMIT_STEWARD",
+    "activeRole":  "ORCHESTRATOR",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
     "updatedAt":  "2026-07-30"
 }
