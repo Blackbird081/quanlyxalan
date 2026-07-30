@@ -27,6 +27,8 @@ const fmtDate = value => value ? new Intl.DateTimeFormat('vi-VN', {dateStyle:'sh
 const API_BASE = new URL('.', document.baseURI).pathname.replace(/\/$/, '');
 
 async function api(path, options = {}) {
+  const responseType = options.responseType;
+  delete options.responseType;
   const token = localStorage.getItem('token');
   if (token) {
     options.headers = { ...options.headers, 'Authorization': `Bearer ${token}` };
@@ -40,7 +42,9 @@ async function api(path, options = {}) {
     throw new Error('Vui lòng đăng nhập.');
   }
   const type = response.headers.get('content-type') || '';
-  const body = type.includes('json') ? await response.json() : await response.blob();
+  const body = response.ok && responseType === 'blob'
+    ? await response.blob()
+    : (type.includes('json') ? await response.json() : await response.blob());
   if (!response.ok) {
     const details = body?.detail || body?.error;
     // Lỗi validation Pydantic 422 dạng [{loc:["body","field_name"], msg:"..."}]
@@ -843,11 +847,21 @@ async function loadVessels() {
   } catch (error) { toast(error.message, true); }
 }
 
-function vesselAttachmentIndicator(vessel) {
+function vesselAttachmentIndicator(vessel, portRegister = false) {
   const count = vessel.attachments?.length || 0;
   if (!count) return '';
   const label = `${count} file đính kèm`;
-  return `<span class="vessel-attachment-indicator" title="${label}" aria-label="${label}"><svg width="14" height="14" style="width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 0 1-2.8-2.8l8.9-8.9"></path></svg><span>${count}</span></span>`;
+  return `<button type="button" class="vessel-attachment-indicator" data-open-vessel-attachments="${vessel.id}" data-port-register="${portRegister ? '1' : '0'}" title="${label}" aria-label="Mở ${label}"><svg width="14" height="14" style="width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 0 1-2.8-2.8l8.9-8.9"></path></svg><span>${count}</span></button>`;
+}
+
+function bindVesselAttachmentIndicators(root = document) {
+  $$('[data-open-vessel-attachments]', root).forEach(button => {
+    button.onclick = () => openVessel(
+      Number(button.dataset.openVesselAttachments),
+      button.dataset.portRegister === '1',
+      true,
+    );
+  });
 }
 
 function renderVessels() {
@@ -865,6 +879,7 @@ function renderVessels() {
   $('#vessel-table').innerHTML = items.length ? `<table class="data-table responsive-table record-table vessel-record-table"><colgroup><col style="width:4%"><col style="width:20%"><col style="width:11%"><col style="width:17%"><col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:12%"><col style="width:6%"></colgroup><thead><tr><th>STT</th><th>Phương tiện</th><th>Số đăng ký</th><th>Công dụng</th><th>Cấp PT</th><th>Trọng tải</th><th>Hạn đăng kiểm</th><th>Trạng thái</th><th aria-label="Thao tác"></th></tr></thead><tbody>${pageItems.map((v, index) => `<tr><td data-label="STT">${offset + index + 1}</td><td data-label="Phương tiện"><span class="vessel-name-with-attachment"><strong>${esc(v.name)}</strong>${vesselAttachmentIndicator(v)}</span></td><td data-label="Số đăng ký">${esc(v.registration_no)}</td><td data-label="Công dụng">${esc(v.vessel_type)}</td><td data-label="Cấp PT">${esc(v.vessel_class)}</td><td data-label="Trọng tải">${number(v.deadweight_tons).toLocaleString('vi-VN')} tấn</td><td data-label="Hạn đăng kiểm" class="date-cell">${fmtDate(v.certificate_expiry_date)}</td><td data-label="Trạng thái"><span class="table-badge ${v.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(v.certificate_status)}</span></td><td data-label="Thao tác" class="action-cell"><button class="table-icon-button" data-edit-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button>${deleteButton(v)}</td></tr>`).join('')}</tbody></table>` : empty('Chưa có phương tiện', 'Thêm hồ sơ hoặc import file Excel mẫu.');
   $('#vessel-pagination').innerHTML = items.length > state.vesselPageSize ? `<span>Trang ${state.vesselPage}/${totalPages}</span><button type="button" class="ghost-button" data-vessel-page="${state.vesselPage - 1}" ${state.vesselPage === 1 ? 'disabled' : ''}>Trước</button><button type="button" class="ghost-button" data-vessel-page="${state.vesselPage + 1}" ${state.vesselPage === totalPages ? 'disabled' : ''}>Sau</button>` : '';
   $$('[data-edit-vessel]').forEach(button => button.onclick = () => openVessel(Number(button.dataset.editVessel)));
+  bindVesselAttachmentIndicators($('#vessel-table'));
   $$('[data-delete-vessel]').forEach(button => button.onclick = () => deleteVessel(Number(button.dataset.deleteVessel)));
   $$('[data-vessel-page]').forEach(button => button.onclick = () => {
     state.vesselPage = Number(button.dataset.vesselPage);
@@ -1247,13 +1262,36 @@ function renderVesselAttachments() {
   const items = state.editingVessel?.attachments || [];
   container.innerHTML = items.length
     ? items.map(item => `<div class="vessel-attachment-row">
-        <span><strong>${esc(item.original_name)}</strong><small>${number(item.size_bytes).toLocaleString('vi-VN')} byte · ${esc(item.scan_status)}</small></span>
+        <span><button type="button" class="vessel-attachment-download" data-download-vessel-attachment="${item.id}">${esc(item.original_name)}</button><small>${number(item.size_bytes).toLocaleString('vi-VN')} byte · ${esc(item.scan_status)}</small></span>
         <button type="button" class="table-icon-button danger-icon" data-delete-vessel-attachment="${item.id}" aria-label="Xóa file ${esc(item.original_name)}">×</button>
       </div>`).join('')
     : '<small>Chưa có file đính kèm cho hồ sơ này.</small>';
+  $$('[data-download-vessel-attachment]', container).forEach(button => {
+    button.onclick = () => downloadVesselAttachment(Number(button.dataset.downloadVesselAttachment));
+  });
   $$('[data-delete-vessel-attachment]', container).forEach(button => {
     button.onclick = () => deleteVesselAttachment(Number(button.dataset.deleteVesselAttachment));
   });
+}
+
+async function downloadVesselAttachment(attachmentId) {
+  const vesselId = state.editingVessel?.id;
+  const attachment = (state.editingVessel?.attachments || []).find(item => item.id === attachmentId);
+  if (!vesselId || !attachment) return;
+  try {
+    const blob = await api(
+      `/api/vessels/${vesselId}/attachments/${attachmentId}/download`,
+      {responseType:'blob'},
+    );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = attachment.original_name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) { toast(error.message, true); }
 }
 
 async function deleteVesselAttachment(attachmentId) {
@@ -1267,7 +1305,7 @@ async function deleteVesselAttachment(attachmentId) {
   } catch (error) { toast(error.message, true); }
 }
 
-function openVessel(id = null, portRegister = false) {
+function openVessel(id = null, portRegister = false, focusAttachments = false) {
   const records = portRegister ? state.portRegisterItems : state.vessels;
   const v = id ? records.find(item => item.id === id) : {};
   state.editingVessel = v || {};
@@ -1303,7 +1341,7 @@ function openVessel(id = null, portRegister = false) {
     ${field('tracking_master_phone','Số điện thoại liên hệ',v.tracking_master_phone,'tel')}
     <section class="form-section span-3 operating-profiles-section"><div class="panel-header"><div><h3>Vùng hoạt động và năng lực tương ứng</h3><p>Mỗi vùng giữ riêng trọng tải và khả năng khai thác.</p></div><button type="button" class="outline-button" id="add-operating-profile">+ Thêm vùng</button></div><div id="operating-profiles"></div></section>
     <label class="span-3">Ghi chú<textarea name="notes">${esc(v.notes || '')}</textarea></label>
-    <section class="form-section span-3 vessel-attachments-section">
+    <section id="vessel-attachments-section" class="form-section span-3 vessel-attachments-section" tabindex="-1">
       <div><h3>File đính kèm hồ sơ Salan</h3><p>Lưu giấy tờ hoặc bằng chứng bổ sung cùng hồ sơ. Mỗi file tối đa 12 MB.</p></div>
       <div id="vessel-attachment-list" class="vessel-attachment-list"></div>
       <label class="attachment-field">Thêm hình ảnh / PDF / Word / Excel
@@ -1317,6 +1355,11 @@ function openVessel(id = null, portRegister = false) {
     renderVesselProfiles();
   };
   $('#vessel-dialog').showModal();
+  if (focusAttachments) requestAnimationFrame(() => {
+    const section = $('#vessel-attachments-section');
+    section?.scrollIntoView({behavior: 'smooth', block: 'center'});
+    section?.focus({preventScroll: true});
+  });
 }
 
 async function saveVessel(event) {
@@ -1809,9 +1852,10 @@ function renderPortRegister() {
   $('#port-register-selection').hidden = selectedCount === 0;
   $('#port-register-selection').textContent = `Đã chọn ${selectedCount}`;
   $('#remove-selected-port-vessels').hidden = selectedCount === 0;
-  $('#port-register-table').innerHTML = items.length ? `<table class="data-table port-register-table"><thead><tr><th class="select-column"><input id="select-port-register-page" type="checkbox" ${allPageSelected ? 'checked' : ''} aria-label="Chọn tất cả Salan trên trang này"></th><th>STT</th><th>Tên phương tiện</th><th>Số đăng ký</th><th>Loại / công dụng</th><th>Vùng hoạt động</th><th>Chiều dài (m)</th><th>Trọng tải toàn phần (tấn)</th><th>Dung tích (m³)</th><th>Khả năng khai thác (tấn)</th><th>Khả năng khai thác (TEU)</th><th>Hạn GCN ATKT & BVMT</th><th>Số thuyền viên</th><th>Thuyền trưởng</th><th>Điện thoại</th><th>Lượt gần nhất</th><th aria-label="Thao tác"></th></tr></thead><tbody>${pageItems.map((v, index) => `<tr class="${state.portRegisterSelected.has(v.id) ? 'selected-row' : ''}"><td class="select-column"><input type="checkbox" data-select-port-vessel="${v.id}" ${state.portRegisterSelected.has(v.id) ? 'checked' : ''} aria-label="Chọn ${esc(v.name)}"></td><td>${offset + index + 1}</td><td><span class="vessel-name-with-attachment"><strong>${esc(v.name)}</strong>${vesselAttachmentIndicator(v)}</span></td><td>${esc(v.registration_no)}</td><td>${esc(v.vessel_type)}</td><td>${esc(profileText(v, 'activity_area', v.vessel_class))}</td><td>${esc(v.length_m ?? '')}</td><td>${esc(profileText(v, 'deadweight_tons', v.deadweight_tons ?? ''))}</td><td>${esc(v.gross_tonnage ?? '')}</td><td>${esc(profileText(v, 'cargo_capacity_tons', v.cargo_capacity_tons ?? ''))}</td><td>${esc(v.container_capacity_teu ?? '')}</td><td>${fmtDate(v.certificate_expiry_date)}</td><td>${esc(v.min_crew ?? '')}</td><td>${esc(v.tracking_master_name || '')}</td><td>${esc(v.tracking_master_phone || '')}</td><td>${latestCallCell(v.latest_call)}</td><td class="action-cell port-row-actions"><button class="table-icon-button" data-edit-port-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button><button class="table-icon-button danger-icon" data-remove-port-vessel="${v.id}" title="Gỡ ${esc(v.name)} khỏi sổ theo dõi" aria-label="Gỡ ${esc(v.name)} khỏi sổ theo dõi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5M14 11v5"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có dữ liệu Salan', 'Import file theo dõi hoặc thêm thủ công một Salan.');
+  $('#port-register-table').innerHTML = items.length ? `<table class="data-table port-register-table"><thead><tr><th class="select-column"><input id="select-port-register-page" type="checkbox" ${allPageSelected ? 'checked' : ''} aria-label="Chọn tất cả Salan trên trang này"></th><th>STT</th><th>Tên phương tiện</th><th>Số đăng ký</th><th>Loại / công dụng</th><th>Vùng hoạt động</th><th>Chiều dài (m)</th><th>Trọng tải toàn phần (tấn)</th><th>Dung tích (m³)</th><th>Khả năng khai thác (tấn)</th><th>Khả năng khai thác (TEU)</th><th>Hạn GCN ATKT & BVMT</th><th>Số thuyền viên</th><th>Thuyền trưởng</th><th>Điện thoại</th><th>Lượt gần nhất</th><th aria-label="Thao tác"></th></tr></thead><tbody>${pageItems.map((v, index) => `<tr class="${state.portRegisterSelected.has(v.id) ? 'selected-row' : ''}"><td class="select-column"><input type="checkbox" data-select-port-vessel="${v.id}" ${state.portRegisterSelected.has(v.id) ? 'checked' : ''} aria-label="Chọn ${esc(v.name)}"></td><td>${offset + index + 1}</td><td><span class="vessel-name-with-attachment"><strong>${esc(v.name)}</strong>${vesselAttachmentIndicator(v, true)}</span></td><td>${esc(v.registration_no)}</td><td>${esc(v.vessel_type)}</td><td>${esc(profileText(v, 'activity_area', v.vessel_class))}</td><td>${esc(v.length_m ?? '')}</td><td>${esc(profileText(v, 'deadweight_tons', v.deadweight_tons ?? ''))}</td><td>${esc(v.gross_tonnage ?? '')}</td><td>${esc(profileText(v, 'cargo_capacity_tons', v.cargo_capacity_tons ?? ''))}</td><td>${esc(v.container_capacity_teu ?? '')}</td><td>${fmtDate(v.certificate_expiry_date)}</td><td>${esc(v.min_crew ?? '')}</td><td>${esc(v.tracking_master_name || '')}</td><td>${esc(v.tracking_master_phone || '')}</td><td>${latestCallCell(v.latest_call)}</td><td class="action-cell port-row-actions"><button class="table-icon-button" data-edit-port-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button><button class="table-icon-button danger-icon" data-remove-port-vessel="${v.id}" title="Gỡ ${esc(v.name)} khỏi sổ theo dõi" aria-label="Gỡ ${esc(v.name)} khỏi sổ theo dõi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5M14 11v5"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có dữ liệu Salan', 'Import file theo dõi hoặc thêm thủ công một Salan.');
   $('#port-register-pagination').innerHTML = items.length > state.portRegisterPageSize ? `<span>Trang ${state.portRegisterPage}/${totalPages}</span><button type="button" class="ghost-button" data-port-register-page="${state.portRegisterPage - 1}" ${state.portRegisterPage === 1 ? 'disabled' : ''}>Trước</button><button type="button" class="ghost-button" data-port-register-page="${state.portRegisterPage + 1}" ${state.portRegisterPage === totalPages ? 'disabled' : ''}>Sau</button>` : '';
   $$('[data-edit-port-vessel]').forEach(button => button.onclick = () => openVessel(Number(button.dataset.editPortVessel), true));
+  bindVesselAttachmentIndicators($('#port-register-table'));
   $$('[data-remove-port-vessel]').forEach(button => button.onclick = () => {
     const id = Number(button.dataset.removePortVessel);
     const vessel = state.portRegisterItems.find(item => item.id === id);

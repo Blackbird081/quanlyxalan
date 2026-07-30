@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "Dashboard warning follow-up PR #8 is CI-green and mergeable. Await canonical-owner review; do not merge or FREEZE without separate operator authority.",
+    "nextAllowedMove":  "Complete the rebase onto canonical main after PR #8, force-with-lease the reviewed attachment branch, and monitor PR #9 quality gate. Do not merge or FREEZE.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "ORCHESTRATOR",
+    "activeRole":  "COMMIT_STEWARD",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
     "updatedAt":  "2026-07-30"
 }

@@ -2,17 +2,70 @@
 
 Status: IN_PROGRESS
 
+## Vessel Attachment Access Tranche — 2026-07-30
+
+- The operator reported that the attachment count is visible but cannot be
+  clicked to inspect the file.
+- Rehydration and workspace doctor passed 25/25.
+- Risk: R2 because stored file access must preserve tenant isolation.
+- Phase/role route: REVIEW/ORCHESTRATOR -> INTAKE/ORCHESTRATOR ->
+  DESIGN/SPEC_AUTHOR -> SPEC/SPEC_AUTHOR ->
+  WORK_ORDER/WORK_ORDER_AUTHOR -> BUILD/IMPLEMENTATION_WORKER.
+- Authorized work order:
+  `docs/work_orders/WO_QLXL_VESSEL_ATTACHMENT_ACCESS_20260730.md`.
+- BUILD acknowledgment: implementation is limited to an actionable indicator,
+  tenant-guarded forced download, storage read support, cache key, focused
+  tests, browser evidence, and governed truth updates. PR #8 remains parked;
+  commit, push, merge, deployment, and FREEZE are not authorized.
+- BUILD result: both list indicators are buttons; they open/focus the correct
+  vessel attachment section; filenames download through a canonical
+  vessel-scope guard; response headers force download and prevent sniffing.
+- Focused suite: 7 passed. Full Docker PostgreSQL 17 suite: 271 passed,
+  3 warnings, 0 failed. Compile, JavaScript syntax, catalog, and diff checks
+  passed. A live local request returned the exact PDF bytes and security
+  headers.
+- Browser skill setup found no available browser session, so rendered click
+  evidence is parked without substituting mock proof.
+- Phase/role transition: BUILD/IMPLEMENTATION_WORKER ->
+  REVIEW/ORCHESTRATOR for independent R2 review.
+- Independent disposition: BLOCKED with one MEDIUM and one LOW finding.
+- Accepted repair scope: translate MinIO missing-object errors to the endpoint's
+  controlled 404 contract; make the download call force blob handling on
+  successful responses while preserving JSON error parsing; add regression
+  coverage.
+- Phase/role return: REVIEW/ORCHESTRATOR -> BUILD/REPAIR_WORKER.
+- Repair result: MinIO `NoSuchKey`/`NoSuchObject` now becomes
+  `FileNotFoundError` for controlled endpoint 404 behavior; successful
+  attachment downloads explicitly request Blob handling while JSON error
+  responses remain parseable.
+- Post-repair focused suite: 8 passed. Full Docker PostgreSQL 17 suite:
+  272 passed, 3 warnings, 0 failed.
+- Phase/role transition: BUILD/REPAIR_WORKER -> REVIEW/ORCHESTRATOR for
+  independent re-review.
+- Independent re-review disposition: PASS_WITH_LIMITATIONS; no remaining
+  HIGH, MEDIUM, or LOW findings. Reviewer independently reproduced both MinIO
+  missing stages, connection cleanup, JSON-labelled PDF Blob handling, and
+  JSON error preservation.
+- The only limitation is unavailable rendered-browser evidence. Code is
+  complete locally; commit, push, PR, merge, deployment, and FREEZE remain
+  outside this request's authority.
+- The operator explicitly authorized commit and PR publication for this
+  tranche on 2026-07-30. Role transition: ORCHESTRATOR -> COMMIT_STEWARD.
+  Publication is limited to `fix/vessel-attachment-download`; user-owned
+  `.claude/` remains excluded. Merge, deployment, and FREEZE are not
+  authorized.
+
 ## Current State
 
 - Project: quanlyxalan
-- Tranche: `WO-QLXL-SOT-ATTACHMENTS-20260729`
+- Tranche: `WO-QLXL-VESSEL-ATTACHMENT-ACCESS-20260730`
 - Current mode: REVIEW
 - Active phase: REVIEW
-- Active role: ORCHESTRATOR
+- Active role: COMMIT_STEWARD
 - Risk: R2
-- Next allowed move: dashboard warning follow-up PR #8 is CI-green and
-  mergeable; await canonical-owner review. Do not merge or FREEZE without
-  separate operator authority.
+- Next allowed move: complete the rebase onto canonical `main` after merged
+  PR #8, force-with-lease the reviewed attachment branch, and monitor PR #9
+  quality gate. Do not merge or FREEZE.
 - Parked operator checkpoint: none.
 
 ## Intake
