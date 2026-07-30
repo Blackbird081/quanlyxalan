@@ -662,3 +662,28 @@ AI governance behavior.
 - Python compile and diff check: pass.
 - Phase return: BUILD -> REVIEW.
 - Role transition: REPAIR_WORKER -> ORCHESTRATOR for independent R2 review.
+
+## Vessel Preview and Historical Vessel SOT Publication — 2026-07-30
+
+- Independent review initially blocked publication because Port Staff decisions
+  could seed alias truth, a later Admin rejection did not tombstone an older
+  acceptance, and automated reconciliation could appear to carry a manual
+  reviewer identity.
+- Repairs restrict reusable alias truth to the latest active Platform Admin
+  decision, honor later Admin rejection, and leave automated review provenance
+  empty while preserving explicit manual reviewer attribution.
+- The same independent reviewer returned `PASS_WITH_LIMITATIONS` with no open
+  HIGH, MEDIUM, or LOW findings. Limitations are the unavailable rendered
+  browser preview and the local absence of `pg_dump`.
+- Reviewed source commit after rebasing onto `upstream/main`: `77bb8d8`
+  (`fix: preview attachments and reuse verified vessel identity`).
+- Post-rebase evidence: 32 focused tests passed; Python and JavaScript syntax,
+  diff, catalog, and workspace doctor 25/25 checks passed.
+- Earlier full PostgreSQL 17 regression evidence: 279 passed and 2 backup tests
+  deselected solely because local `pg_dump` is unavailable.
+- User-owned untracked `.claude/` remains excluded from staging and commits.
+- Next governed move: push
+  `Blackbird081/quanlyxalan:fix/vessel-preview-sot-reuse`, create a PR against
+  `hoangnmr/quanlyxalan:main`, monitor the quality gate, and record the
+  publication receipt.
+- Merge, deployment, and FREEZE remain unauthorized.

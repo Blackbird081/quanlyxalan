@@ -13,7 +13,7 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "As COMMIT_STEWARD, commit the exact independently reviewed set excluding .claude, rebase the new publication branch onto upstream/main, rerun checks, push to origin, and create a PR to hoangnmr/quanlyxalan. Merge, deployment, and FREEZE remain unauthorized.",
+    "nextAllowedMove":  "As COMMIT_STEWARD, push fix/vessel-preview-sot-reuse to origin, create a PR to hoangnmr/quanlyxalan:main, monitor its quality gate, and record the publication receipt. Merge, deployment, and FREEZE remain unauthorized.",
     "parkedOperatorCheckpoint":  null,
     "activeRole":  "COMMIT_STEWARD",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
