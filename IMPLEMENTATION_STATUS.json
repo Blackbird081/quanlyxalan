@@ -8,7 +8,8 @@
                                   "USER MANAGEMENT routes extracted to backend/user_management_api.py with ordered route identity preserved.",
                                   "Static unbound-name checker supports cross-shell glob expansion and encoding-safe failure diagnostics.",
                                   "Vessel editor omits blank optional imported-profile fields before save so attachment upload and audit can proceed.",
-                                  "Vessel and port-register lists show an accessible paperclip count only for Salan profiles that have attachments."
+                                  "Vessel and port-register lists show an accessible paperclip count only for Salan profiles that have attachments.",
+                                  "Dashboard certificate warnings count only tenant-scoped EXPIRED and EXPIRING vessels through the canonical status helper."
                               ],
     "activeWorkOrders":  [
                               "docs/work_orders/WO_QLXL_SOT_ATTACHMENTS_20260729.md"
@@ -32,7 +33,10 @@
                      "commit:31d2da4",
                      "commit:57b8bc6",
                      "https://github.com/hoangnmr/quanlyxalan/actions/runs/30509548693",
-                     "https://github.com/hoangnmr/quanlyxalan/pull/7"
+                     "https://github.com/hoangnmr/quanlyxalan/pull/7",
+                     "commit:76c7f12",
+                     "https://github.com/hoangnmr/quanlyxalan/actions/runs/30515776754",
+                     "https://github.com/hoangnmr/quanlyxalan/pull/8"
                  ],
     "updatedAt":  "2026-07-30"
 }

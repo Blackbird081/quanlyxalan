@@ -1165,7 +1165,10 @@ def get_dashboard(
     drafts_q = db.query(Declaration).filter(Declaration.workflow_status == "DRAFT")
     submitted_q = db.query(Declaration).filter(Declaration.workflow_status.notin_(["DRAFT", "CHANGES_REQUESTED", "CANCELLED"]))
     arriving_q = db.query(Declaration).filter(Declaration.eta.startswith(today_iso))
-    warnings_q = db.query(Vessel).filter(Vessel.certificate_expiry_date.isnot(None))
+    # Keep this query scoped exactly like the vessel list below, then classify
+    # each value with the same canonical helper used by `_vessel_dict`.
+    # Counting every non-null date made all valid certificates look overdue.
+    warnings_q = db.query(Vessel)
     recent_q = db.query(Declaration)
     vessel_search_q = db.query(Vessel)
 
@@ -1204,7 +1207,10 @@ def get_dashboard(
     drafts_count = drafts_q.with_entities(func.count(Declaration.id)).scalar()
     submitted_count = submitted_q.with_entities(func.count(Declaration.id)).scalar()
     arriving_today = arriving_q.with_entities(func.count(Declaration.id)).scalar()
-    cert_warnings = warnings_q.with_entities(func.count(Vessel.id)).scalar()
+    cert_warnings = sum(
+        certificate_status(expiry) in {"EXPIRING", "EXPIRED"}
+        for (expiry,) in warnings_q.with_entities(Vessel.certificate_expiry_date).all()
+    )
 
     recent_decls = recent_q.order_by(desc(Declaration.updated_at)).limit(8).all()
 

@@ -279,3 +279,35 @@ Final GitHub evidence:
   assign labels/assignees; owner review remains a GitHub permission checkpoint.
 - Status: code-complete and CI-green, pending canonical-owner review. Merge,
   FREEZE, and production deployment remain unauthorized.
+
+### Dashboard Certificate Warning Repair
+
+- Production screenshot showed 105 vessels and 104 warnings because
+  `/api/dashboard` counted every non-null certificate date.
+- The repair classifies scoped certificate values through the canonical
+  `certificate_status()` helper and counts only `EXPIRING`/`EXPIRED`.
+- Regression coverage includes valid (31 days), expiring (30 days), expired,
+  null, malformed, and out-of-scope values.
+- Docker PostgreSQL 17 focused tests: 2 passed.
+- Python compile and diff check: pass.
+- Status: pending independent R2 review and GitHub quality-gate rerun.
+
+Independent dashboard-repair review:
+
+- Disposition: `PASS_WITH_LIMITATIONS`.
+- Findings: none at HIGH, MEDIUM, or LOW.
+- Verified null/malformed, expired, today, 30-day, and 31-day boundaries;
+  unchanged customer/reporting-unit scope; scoped-column projection; and test
+  cleanup.
+- Evidence: 2 focused PostgreSQL tests, existing dashboard RBAC test, helper
+  boundary assertions, compile/diff checks, and workspace doctor 25/25 pass.
+- Remaining limitation: full GitHub quality-gate rerun is pending after
+  publication.
+- PR #7 was merged by the canonical owner at `123bfa8` before this repair
+  could be appended. The warning repair is isolated on follow-up branch
+  `fix/dashboard-certificate-warning-count` at commit `76c7f12`.
+- Follow-up PR: `https://github.com/hoangnmr/quanlyxalan/pull/8`.
+- GitHub quality gate `30515776754`: SUCCESS — 272 passed, 3 warnings,
+  0 failed; compile, diff check, and secret guard passed.
+- Status: PR #8 is CLEAN/MERGEABLE and awaits canonical-owner review. Merge,
+  FREEZE, and production deployment remain unauthorized.

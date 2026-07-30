@@ -279,6 +279,81 @@ def test_dashboard_attention_queue_is_role_scoped(client, customer_headers, port
     assert all(item["workflow_status"] == "PENDING_REVIEW" for item in reviewer.json()["attention"]["items"])
 
 
+def test_dashboard_certificate_warnings_only_count_expired_and_expiring_in_scope(
+    client, customer_headers,
+):
+    baseline = client.get("/api/dashboard", headers=customer_headers)
+    assert baseline.status_code == 200
+    baseline_count = baseline.json()["stats"]["certificateWarnings"]
+
+    db = SessionLocal()
+    vessel_ids: list[int] = []
+    foreign_org_id: int | None = None
+    try:
+        foreign_org = Organization(
+            name=f"Foreign warning org {uuid.uuid4().hex}",
+            tax_code=f"WARN-{uuid.uuid4().hex}",
+            created_at=now_iso(),
+            updated_at=now_iso(),
+        )
+        db.add(foreign_org)
+        db.flush()
+        foreign_org_id = foreign_org.id
+
+        cases = [
+            ("valid", (date.today() + timedelta(days=31)).isoformat()),
+            ("expiring", (date.today() + timedelta(days=30)).isoformat()),
+            ("expired", (date.today() - timedelta(days=1)).isoformat()),
+            ("unknown-null", None),
+            ("unknown-malformed", "khong-phai-ngay"),
+        ]
+        for label, expiry in cases:
+            vessel = Vessel(
+                organization_id=TEST_ORGANIZATION_ID,
+                name=f"Warning status {label}",
+                registration_no=_reg(),
+                vessel_type="Chở hàng khô",
+                vessel_class="VR-SI",
+                certificate_expiry_date=expiry,
+                created_at=now_iso(),
+                updated_at=now_iso(),
+            )
+            db.add(vessel)
+            db.flush()
+            vessel_ids.append(vessel.id)
+
+        foreign_vessel = Vessel(
+            organization_id=foreign_org.id,
+            name="Out-of-scope expired vessel",
+            registration_no=_reg(),
+            vessel_type="Chở hàng khô",
+            vessel_class="VR-SI",
+            certificate_expiry_date=(date.today() - timedelta(days=1)).isoformat(),
+            created_at=now_iso(),
+            updated_at=now_iso(),
+        )
+        db.add(foreign_vessel)
+        db.flush()
+        vessel_ids.append(foreign_vessel.id)
+        db.commit()
+
+        result = client.get("/api/dashboard", headers=customer_headers)
+        assert result.status_code == 200
+        assert result.json()["stats"]["certificateWarnings"] == baseline_count + 2
+    finally:
+        db.rollback()
+        if vessel_ids:
+            db.query(Vessel).filter(Vessel.id.in_(vessel_ids)).delete(
+                synchronize_session=False
+            )
+        if foreign_org_id is not None:
+            db.query(Organization).filter(Organization.id == foreign_org_id).delete(
+                synchronize_session=False
+            )
+        db.commit()
+        db.close()
+
+
 def test_static_frontend(client):
     res = client.get("/")
     assert res.status_code == 200
