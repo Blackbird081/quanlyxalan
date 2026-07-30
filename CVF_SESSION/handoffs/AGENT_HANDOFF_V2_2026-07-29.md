@@ -2,6 +2,80 @@
 
 Status: IN_PROGRESS
 
+## Admin-only Import/Reports UI Tranche — 2026-07-30
+
+- Operator requested that the `Import dữ liệu` and `Báo cáo hoạt động` tabs be
+  visible only to Platform Admin, with all other roles hiding them.
+- Operator also requested consistent Vietnamese terminology for the
+  user-visible word `Revision`.
+- Workspace doctor passed 25/25 before material work.
+- Risk: R2 because role-based navigation and direct-route behavior form an
+  access-control surface.
+- Phase/role transition: REVIEW/ORCHESTRATOR -> INTAKE/ORCHESTRATOR.
+- Existing user-owned edits in `frontend/app.js` and `frontend/index.html`
+  must be preserved. Untracked `.claude/` remains outside scope.
+- Intake boundary: frontend navigation visibility, direct hash-route guard,
+  user-visible Vietnamese terminology, focused regression tests, and governed
+  continuity/evidence only. Backend report/import authorization, production
+  data, deployment, merge, and unrelated UI copy are outside scope.
+- Phase/role route: INTAKE/ORCHESTRATOR -> DESIGN/SPEC_AUTHOR ->
+  SPEC/SPEC_AUTHOR -> WORK_ORDER/WORK_ORDER_AUTHOR ->
+  BUILD/IMPLEMENTATION_WORKER.
+- Governed artifacts:
+  - `docs/decisions/ADMIN_ONLY_DATA_TABS_DESIGN_20260730.md`
+  - `docs/specs/ADMIN_ONLY_DATA_TABS_SPEC_20260730.md`
+  - `docs/work_orders/WO_QLXL_ADMIN_ONLY_DATA_TABS_20260730.md`
+- BUILD acknowledgment: implementation is limited to the authorized frontend
+  navigation, direct hash-route guard, Vietnamese terminology, focused tests,
+  and governed truth updates. Existing user-owned edits will be preserved.
+  Backend authorization, commit, push, merge, deployment, and FREEZE remain
+  unauthorized.
+- BUILD result:
+  - both navigation links are hidden by default and unhidden only for
+    `PLATFORM_ADMIN`;
+  - direct non-admin `#import`/`#reports` hashes redirect to `#dashboard` for
+    Port Staff or `#declarations` for Customer before page loaders run;
+  - user-visible historical import copy consistently uses `Bản sửa đổi`;
+  - frontend cache keys advanced together to `1.13.6`;
+  - existing user-owned ETB, password, and audit-log copy edits were preserved.
+- Executable evidence: frontend UX 18/18; backend static shell 1/1 against
+  temporary PostgreSQL 17; JavaScript syntax, diff, catalog, and workspace
+  doctor 25/25 passed.
+- Phase/role transition: BUILD/IMPLEMENTATION_WORKER -> REVIEW/REVIEWER.
+- Review disposition: `PASS_WITH_LIMITATIONS`; no HIGH, MEDIUM, or LOW
+  findings. No connected production or rendered multi-role browser session was
+  used.
+- Review artifact:
+  `docs/reviews/ADMIN_ONLY_DATA_TABS_REVIEW_20260730.md`.
+- Role handback: REVIEWER -> ORCHESTRATOR. Commit, push, merge, deployment,
+  and FREEZE remain unauthorized.
+- Operator follow-up authorized a User Guide clarification and one local
+  commit. The guide must state that PL.03 from approved LIVE declarations and
+  PL.03 reconstructed from confirmed historical/TOS imports are separate
+  workflows that share the same output template.
+- The operator manually cleaned frontend copy after the first review. Those
+  edits are accepted as the intended working version; regression assertions
+  must be aligned without reverting the manual copy.
+- Phase/role transition: REVIEW/ORCHESTRATOR ->
+  BUILD/IMPLEMENTATION_WORKER for the bounded documentation/test repair.
+- Publication boundary: one local commit is authorized after review. Push,
+  merge, deployment, FREEZE, and untracked `.claude/` remain excluded.
+- Documentation repair result: `USER_GUIDE.md` now distinguishes LIVE PL.03
+  from historical/TOS PL.03, records their separate sources and overlap rule,
+  and reflects Platform Admin-only Import/Reports navigation.
+- Focused rerun after preserving the operator's manual copy cleanup:
+  18 frontend UX tests passed; JavaScript syntax and diff checks passed.
+- Phase/role transition: BUILD/IMPLEMENTATION_WORKER -> REVIEW/REVIEWER.
+- Review disposition remains `PASS_WITH_LIMITATIONS`; no new finding was
+  introduced by the documentation or copy cleanup.
+- Role transition: REVIEWER -> COMMIT_STEWARD under the operator's explicit
+  local-commit authority. The exact reviewed tracked set may be committed;
+  `.claude/`, push, merge, deployment, and FREEZE remain excluded.
+- Local commit completed on `fix/vessel-attachment-download` with message
+  `fix: restrict data workflows to admin`; the final commit identifier is
+  reported by Git after the continuity receipt is included.
+- Role handback: COMMIT_STEWARD -> ORCHESTRATOR. No push was performed.
+
 ## Vessel Attachment Access Tranche — 2026-07-30
 
 - The operator reported that the attachment count is visible but cannot be
@@ -58,14 +132,13 @@ Status: IN_PROGRESS
 ## Current State
 
 - Project: quanlyxalan
-- Tranche: `WO-QLXL-VESSEL-ATTACHMENT-ACCESS-20260730`
+- Tranche: Admin-only Import/Reports UI
 - Current mode: REVIEW
 - Active phase: REVIEW
 - Active role: ORCHESTRATOR
 - Risk: R2
-- Next allowed move: PR #9 is CI-green, clean, and mergeable; await
-  canonical-owner review. Do not merge or FREEZE without separate operator
-  authority.
+- Next allowed move: await operator direction. The reviewed tranche is
+  committed locally; push, merge, deployment, and FREEZE remain unauthorized.
 - Parked operator checkpoint: none.
 
 ## Intake

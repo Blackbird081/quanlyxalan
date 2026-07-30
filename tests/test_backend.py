@@ -427,6 +427,10 @@ def test_static_frontend(client):
     assert "dashboardTimer = setTimeout(() => loadDashboard" not in app_js
     assert "importNav.style.removeProperty('display')" in app_js
     assert "reportsNav.style.removeProperty('display')" in app_js
+    assert "importNav.hidden = !isAdmin" in app_js
+    assert "reportsNav.hidden = !isAdmin" in app_js
+    assert "const adminOnlyRoutes = ['import', 'reports'];" in app_js
+    assert "state.currentUser.role !== 'PLATFORM_ADMIN' && adminOnlyRoutes.includes(name)" in app_js
     assert "importNav.style.display = 'block'" not in app_js
     assert "reportsNav.style.display = 'block'" not in app_js
     assert "Giữ dữ liệu hiện có & tiếp tục" in app_js
