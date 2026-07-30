@@ -8,7 +8,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from backend.database import now_iso
-from backend.historical_api import _conflicts, _filter_confirmed_sot_rows
+from backend.historical_api import (
+    _accepted_vessel_sot, _conflicts, _filter_confirmed_sot_rows,
+    _reconcile_pending_vessel_sot, _vessel_sot_resolution,
+)
 from backend.historical_tos_parser import ParsedWorkbook, normalize_vessel_name
 from backend.models import (
     Attachment,
@@ -17,10 +20,221 @@ from backend.models import (
     HistoricalPortCall,
     HistoricalReportImport,
     HistoricalReportRow,
+    HistoricalVesselLink,
     ReportingUnit,
+    ReportingUnitVessel,
     User,
+    Vessel,
 )
 from backend.storage import LocalQuarantineStorage
+
+
+def test_unique_normalized_register_match_is_accepted_as_admin_sot():
+    vessel = type("VesselStub", (), {"id": 7, "name": "KIM GIA PHÁT 01"})()
+
+    candidate, method, confidence, warning, auto_accept = _vessel_sot_resolution(
+        [vessel], {vessel.id: vessel}, {}, "KIM GIA PHAT 01",
+    )
+
+    assert candidate.id == vessel.id
+    assert method == "NORMALIZED"
+    assert confidence == "MEDIUM"
+    assert warning == ""
+    assert auto_accept is True
+
+
+def test_latest_admin_rejection_keeps_alias_pending():
+    vessel = type("VesselStub", (), {"id": 7, "name": "CANONICAL A"})()
+
+    candidate, method, confidence, warning, auto_accept = _vessel_sot_resolution(
+        [vessel],
+        {vessel.id: vessel},
+        {"TOSALIAS": None},
+        "TOS ALIAS",
+    )
+
+    assert candidate is None
+    assert method == ""
+    assert confidence == "LOW"
+    assert warning == "UNMATCHED_VESSEL"
+    assert auto_accept is False
+
+
+def test_latest_admin_accepted_mapping_becomes_current_sot(db):
+    unit, user = _unit_and_user(db)
+    vessels = [
+        Vessel(
+            name="CANONICAL A", registration_no="SOT-A", vessel_type="Salan",
+            vessel_class="VR-SI", created_at=now_iso(), updated_at=now_iso(),
+        ),
+        Vessel(
+            name="CANONICAL B", registration_no="SOT-B", vessel_type="Salan",
+            vessel_class="VR-SI", created_at=now_iso(), updated_at=now_iso(),
+        ),
+    ]
+    db.add_all(vessels)
+    db.flush()
+    db.add_all([
+        ReportingUnitVessel(
+            reporting_unit_id=unit.id, vessel_id=vessel.id, created_at=now_iso(),
+        )
+        for vessel in vessels
+    ])
+    imports = [
+        _active_import(db, unit, user, "tos_berth_call", "older"),
+        _active_import(db, unit, user, "tos_berth_call", "newer"),
+    ]
+    db.add_all([
+        HistoricalVesselLink(
+            reporting_unit_id=unit.id, import_id=imports[0].id,
+            raw_vessel_name="TOS ALIAS", normalized_vessel_name="TOSALIAS",
+            candidate_vessel_id=vessels[0].id, match_method="MANUAL",
+            confidence="HIGH", link_status="ACCEPTED",
+            reviewed_by_user_id=user.id, reviewed_at="2026-07-29T10:00:00+00:00",
+            created_at="2026-07-29T09:00:00+00:00",
+        ),
+        HistoricalVesselLink(
+            reporting_unit_id=unit.id, import_id=imports[1].id,
+            raw_vessel_name="TOS ALIAS", normalized_vessel_name="TOSALIAS",
+            candidate_vessel_id=vessels[1].id, match_method="MANUAL",
+            confidence="HIGH", link_status="ACCEPTED",
+            reviewed_by_user_id=user.id, reviewed_at="2026-07-30T10:00:00+00:00",
+            created_at="2026-07-30T09:00:00+00:00",
+        ),
+    ])
+    db.commit()
+
+    accepted = _accepted_vessel_sot(
+        db, unit.id, {vessels[0].id, vessels[1].id},
+    )
+
+    assert accepted == {"TOSALIAS": vessels[1].id}
+
+
+def test_port_staff_acceptance_does_not_seed_admin_sot(db):
+    unit, admin = _unit_and_user(db)
+    port_staff = User(
+        username="sot-port-staff", password_hash="x", role="PORT_STAFF",
+        is_active=1, created_at=now_iso(), password_changed_at=now_iso(),
+    )
+    vessel = Vessel(
+        name="CANONICAL STAFF", registration_no="SOT-STAFF",
+        vessel_type="Salan", vessel_class="VR-SI",
+        created_at=now_iso(), updated_at=now_iso(),
+    )
+    db.add_all([port_staff, vessel])
+    db.flush()
+    db.add(ReportingUnitVessel(
+        reporting_unit_id=unit.id, vessel_id=vessel.id, created_at=now_iso(),
+    ))
+    item = _active_import(db, unit, admin, "tos_berth_call", "staff-decision")
+    db.add(HistoricalVesselLink(
+        reporting_unit_id=unit.id, import_id=item.id,
+        raw_vessel_name="STAFF ALIAS", normalized_vessel_name="STAFFALIAS",
+        candidate_vessel_id=vessel.id, match_method="MANUAL",
+        confidence="HIGH", link_status="ACCEPTED",
+        reviewed_by_user_id=port_staff.id,
+        reviewed_at="2026-07-30T10:00:00+00:00", created_at=now_iso(),
+    ))
+    db.commit()
+
+    assert _accepted_vessel_sot(db, unit.id, {vessel.id}) == {}
+
+
+def test_latest_admin_rejection_tombstones_older_acceptance(db):
+    unit, admin = _unit_and_user(db)
+    vessel = Vessel(
+        name="CANONICAL REJECT", registration_no="SOT-REJECT",
+        vessel_type="Salan", vessel_class="VR-SI",
+        created_at=now_iso(), updated_at=now_iso(),
+    )
+    db.add(vessel)
+    db.flush()
+    db.add(ReportingUnitVessel(
+        reporting_unit_id=unit.id, vessel_id=vessel.id, created_at=now_iso(),
+    ))
+    imports = [
+        _active_import(db, unit, admin, "tos_berth_call", "accepted-before-reject"),
+        _active_import(db, unit, admin, "tos_berth_call", "latest-reject"),
+    ]
+    db.add_all([
+        HistoricalVesselLink(
+            reporting_unit_id=unit.id, import_id=imports[0].id,
+            raw_vessel_name="REJECTED ALIAS", normalized_vessel_name="REJECTEDALIAS",
+            candidate_vessel_id=vessel.id, match_method="MANUAL",
+            confidence="HIGH", link_status="ACCEPTED",
+            reviewed_by_user_id=admin.id,
+            reviewed_at="2026-07-29T10:00:00+00:00", created_at=now_iso(),
+        ),
+        HistoricalVesselLink(
+            reporting_unit_id=unit.id, import_id=imports[1].id,
+            raw_vessel_name="REJECTED ALIAS", normalized_vessel_name="REJECTEDALIAS",
+            candidate_vessel_id=vessel.id, match_method="MANUAL",
+            confidence="HIGH", link_status="REJECTED",
+            reviewed_by_user_id=admin.id,
+            reviewed_at="2026-07-30T10:00:00+00:00", created_at=now_iso(),
+        ),
+    ])
+    db.commit()
+
+    assert _accepted_vessel_sot(
+        db, unit.id, {vessel.id},
+    ) == {"REJECTEDALIAS": None}
+
+
+def test_admin_triggered_auto_reconcile_does_not_seed_manual_alias_sot(db):
+    unit, admin = _unit_and_user(db)
+    vessel = Vessel(
+        name="KIM GIA PHÁT 01", registration_no="SOT-AUTO",
+        vessel_type="Salan", vessel_class="VR-SI",
+        created_at=now_iso(), updated_at=now_iso(),
+    )
+    db.add(vessel)
+    db.flush()
+    db.add(ReportingUnitVessel(
+        reporting_unit_id=unit.id, vessel_id=vessel.id, created_at=now_iso(),
+    ))
+    item = HistoricalReportImport(
+        reporting_unit_id=unit.id, source_kind="tos_berth_call",
+        appendix_kind="", mapping_version="unit-test-v1",
+        source_filename="auto-reconcile.xlsx", source_checksum="auto-reconcile",
+        source_size_bytes=1, status="PREVIEWED", created_by_user_id=admin.id,
+        created_at=now_iso(), updated_at=now_iso(),
+    )
+    db.add(item)
+    db.flush()
+    link = HistoricalVesselLink(
+        reporting_unit_id=unit.id, import_id=item.id,
+        raw_vessel_name="KIM GIA PHAT 01",
+        normalized_vessel_name=normalize_vessel_name("KIM GIA PHAT 01"),
+        candidate_vessel_id=vessel.id, match_method="NORMALIZED",
+        confidence="MEDIUM", link_status="PENDING",
+        reason="REVIEW_NORMALIZED_VESSEL_LINK", created_at=now_iso(),
+    )
+    db.add(link)
+    db.commit()
+
+    assert _reconcile_pending_vessel_sot(
+        db, unit.id, admin.id, import_ids={item.id},
+    ) == [item.id]
+    db.commit()
+    db.refresh(link)
+    assert link.link_status == "ACCEPTED"
+    assert link.reviewed_by_user_id is None
+    assert link.reviewed_at is None
+
+    item.status = "COMMITTED"
+    vessel.name = "RENAMED TO DIFFERENT IDENTITY"
+    db.commit()
+
+    registered = {vessel.id}
+    assert _accepted_vessel_sot(db, unit.id, registered) == {}
+    candidate, _, _, warning, auto_accept = _vessel_sot_resolution(
+        [vessel], {vessel.id: vessel}, {}, "KIM GIA PHAT 01",
+    )
+    assert candidate is None
+    assert warning == "UNMATCHED_VESSEL"
+    assert auto_accept is False
 
 
 @pytest.fixture()

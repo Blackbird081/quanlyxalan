@@ -13,6 +13,7 @@ const state = {
   reportingUnits: [], activeReportingUnitId: null, reportingUnitOrganizations: [],
   users: [], organizations: [], editingOrganization: null,
   auditLogPage: 1, auditLogEntityTypes: [],
+  vesselAttachmentPreview: null,
 };
 const CREW_ROLES = ['Thuyền trưởng', 'Máy trưởng', 'Thuyền viên', 'Thuyền phó'];
 
@@ -1267,36 +1268,109 @@ function renderVesselAttachments() {
   const items = state.editingVessel?.attachments || [];
   container.innerHTML = items.length
     ? items.map(item => `<div class="vessel-attachment-row">
-        <span><button type="button" class="vessel-attachment-download" data-download-vessel-attachment="${item.id}">${esc(item.original_name)}</button><small>${number(item.size_bytes).toLocaleString('vi-VN')} byte · ${esc(item.scan_status)}</small></span>
+        <span><button type="button" class="vessel-attachment-preview-link" data-preview-vessel-attachment="${item.id}" aria-label="Xem trước file ${esc(item.original_name)}">${esc(item.original_name)}</button><small>${number(item.size_bytes).toLocaleString('vi-VN')} byte · ${esc(item.scan_status)}</small></span>
         <button type="button" class="table-icon-button danger-icon" data-delete-vessel-attachment="${item.id}" aria-label="Xóa file ${esc(item.original_name)}">×</button>
       </div>`).join('')
     : '<small>Chưa có file đính kèm cho hồ sơ này.</small>';
-  $$('[data-download-vessel-attachment]', container).forEach(button => {
-    button.onclick = () => downloadVesselAttachment(Number(button.dataset.downloadVesselAttachment));
+  $$('[data-preview-vessel-attachment]', container).forEach(button => {
+    button.onclick = () => openVesselAttachmentPreview(Number(button.dataset.previewVesselAttachment));
   });
   $$('[data-delete-vessel-attachment]', container).forEach(button => {
     button.onclick = () => deleteVesselAttachment(Number(button.dataset.deleteVesselAttachment));
   });
 }
 
-async function downloadVesselAttachment(attachmentId) {
+const VESSEL_ATTACHMENT_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+
+function vesselAttachmentExtension(filename = '') {
+  const dot = filename.lastIndexOf('.');
+  return dot === -1 ? '' : filename.slice(dot).toLowerCase();
+}
+
+function clearVesselAttachmentPreview() {
+  if (state.vesselAttachmentPreview?.objectUrl) {
+    URL.revokeObjectURL(state.vesselAttachmentPreview.objectUrl);
+  }
+  state.vesselAttachmentPreview = null;
+  const content = $('#vessel-attachment-preview-content');
+  if (content) content.innerHTML = '';
+}
+
+async function openVesselAttachmentPreview(attachmentId) {
   const vesselId = state.editingVessel?.id;
   const attachment = (state.editingVessel?.attachments || []).find(item => item.id === attachmentId);
   if (!vesselId || !attachment) return;
+  clearVesselAttachmentPreview();
+  const previewRequest = {vesselId, attachment, blob: null, objectUrl: null};
+  state.vesselAttachmentPreview = previewRequest;
+  $('#vessel-attachment-preview-title').textContent = attachment.original_name;
+  $('#vessel-attachment-preview-meta').textContent = `${number(attachment.size_bytes).toLocaleString('vi-VN')} byte · ${attachment.scan_status}`;
+  $('#download-vessel-attachment').disabled = false;
+  const content = $('#vessel-attachment-preview-content');
+  const dialog = $('#vessel-attachment-preview-dialog');
+  content.innerHTML = '<div class="vessel-attachment-preview-state"><strong>Đang tải bản xem trước…</strong><p>File chưa được tải xuống thiết bị.</p></div>';
+  dialog.showModal();
+
+  const extension = vesselAttachmentExtension(attachment.original_name);
+  const isImage = VESSEL_ATTACHMENT_IMAGE_EXTENSIONS.has(extension);
+  const isPdf = extension === '.pdf';
+  if (!isImage && !isPdf) {
+    content.innerHTML = '<div class="vessel-attachment-preview-state"><strong>Không hỗ trợ xem trực tiếp định dạng này</strong><p>Word và Excel cần được tải xuống rồi mở bằng ứng dụng phù hợp.</p></div>';
+    return;
+  }
+
   try {
     const blob = await api(
       `/api/vessels/${vesselId}/attachments/${attachmentId}/download`,
       {responseType:'blob'},
     );
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = attachment.original_name;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) { toast(error.message, true); }
+    if (state.vesselAttachmentPreview !== previewRequest) return;
+    const objectUrl = URL.createObjectURL(blob);
+    state.vesselAttachmentPreview = {vesselId, attachment, blob, objectUrl};
+    content.innerHTML = isImage
+      ? `<img class="vessel-attachment-preview-image" src="${objectUrl}" alt="Bản xem trước ${esc(attachment.original_name)}">`
+      : `<iframe class="vessel-attachment-preview-frame" src="${objectUrl}" title="Bản xem trước ${esc(attachment.original_name)}" sandbox></iframe>`;
+  } catch (error) {
+    if (state.vesselAttachmentPreview !== previewRequest) return;
+    content.innerHTML = `<div class="vessel-attachment-preview-state error"><strong>Không thể mở bản xem trước</strong><p>${esc(error.message)}</p></div>`;
+  }
+}
+
+function saveVesselAttachmentBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadVesselAttachment(attachmentId, existingBlob = null) {
+  const vesselId = state.editingVessel?.id;
+  const attachment = (state.editingVessel?.attachments || []).find(item => item.id === attachmentId);
+  if (!vesselId || !attachment) return;
+  const button = $('#download-vessel-attachment');
+  const original = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Đang tải…';
+  }
+  try {
+    const blob = existingBlob || await api(
+      `/api/vessels/${vesselId}/attachments/${attachmentId}/download`,
+      {responseType:'blob'},
+    );
+    saveVesselAttachmentBlob(blob, attachment.original_name);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
 }
 
 async function deleteVesselAttachment(attachmentId) {
@@ -3456,6 +3530,14 @@ async function init() {
   });
   $('#crew-search').addEventListener('input', renderCrew);
   $('#vessel-form').addEventListener('submit', saveVessel);
+  ['close-vessel-attachment-preview', 'close-vessel-attachment-preview-bottom'].forEach(id => {
+    $(`#${id}`).onclick = () => $('#vessel-attachment-preview-dialog').close();
+  });
+  $('#vessel-attachment-preview-dialog').addEventListener('close', clearVesselAttachmentPreview);
+  $('#download-vessel-attachment').onclick = () => {
+    const preview = state.vesselAttachmentPreview;
+    if (preview) downloadVesselAttachment(preview.attachment.id, preview.blob);
+  };
   $('#crew-form').addEventListener('submit', saveCrew);
   $('#declaration-form').addEventListener('submit', saveDeclaration);
   $('#workflow-form').addEventListener('submit', saveWorkflow);

@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "The reviewed Admin-only Import/Reports and User Guide changed set is committed locally. Await operator direction; do not push, merge, deploy, or FREEZE.",
+    "nextAllowedMove":  "As COMMIT_STEWARD, commit the exact independently reviewed set excluding .claude, rebase the new publication branch onto upstream/main, rerun checks, push to origin, and create a PR to hoangnmr/quanlyxalan. Merge, deployment, and FREEZE remain unauthorized.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "ORCHESTRATOR",
+    "activeRole":  "COMMIT_STEWARD",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
     "updatedAt":  "2026-07-30"
 }

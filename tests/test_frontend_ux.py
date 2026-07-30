@@ -197,8 +197,8 @@ def test_vessel_editor_omits_blank_optional_fields_before_save_and_upload():
     assert save_block.index("data.organization = {name: data.organization_name};") < save_block.index(normalize)
     assert save_block.index(normalize) < save_block.index("saved = await api(path")
     assert save_block.index("saved = await api(path") < save_block.index("/attachments?filename=")
-    assert '<script src="app.js?v=1.13.6" defer></script>' in index_html
-    assert '<link rel="stylesheet" href="styles.css?v=1.13.6">' in index_html
+    assert '<script src="app.js?v=1.13.7" defer></script>' in index_html
+    assert '<link rel="stylesheet" href="styles.css?v=1.13.7">' in index_html
 
 
 def test_vessel_lists_show_accessible_attachment_indicator_only_when_files_exist():
@@ -216,17 +216,27 @@ def test_vessel_lists_show_accessible_attachment_indicator_only_when_files_exist
     assert "${vesselAttachmentIndicator(v)}" in app_js
     assert "${vesselAttachmentIndicator(v, true)}" in app_js
     assert "function bindVesselAttachmentIndicators(root = document)" in app_js
-    assert "function downloadVesselAttachment(attachmentId)" in app_js
+    assert "async function openVesselAttachmentPreview(attachmentId)" in app_js
+    assert "function downloadVesselAttachment(attachmentId, existingBlob = null)" in app_js
     assert "/attachments/${attachmentId}/download" in app_js
     assert "response.ok && responseType === 'blob'" in app_js
     assert "{responseType:'blob'}" in app_js
-    assert 'class="vessel-attachment-download"' in app_js
+    assert 'class="vessel-attachment-preview-link"' in app_js
+    assert 'data-preview-vessel-attachment="${item.id}"' in app_js
+    assert "openVesselAttachmentPreview(Number(button.dataset.previewVesselAttachment))" in app_js
+    assert "VESSEL_ATTACHMENT_IMAGE_EXTENSIONS" in app_js
+    assert "sandbox></iframe>" in app_js
+    assert "Word và Excel cần được tải xuống" in app_js
+    assert "saveVesselAttachmentBlob(blob, attachment.original_name)" in app_js
+    assert "URL.revokeObjectURL(state.vesselAttachmentPreview.objectUrl)" in app_js
+    assert 'id="vessel-attachment-preview-dialog"' in index_html
+    assert 'id="download-vessel-attachment">Tải xuống</button>' in index_html
     assert 'id="vessel-attachments-section"' in app_js
     assert ".vessel-name-with-attachment" in styles_css
     assert ".vessel-attachment-indicator svg" in styles_css
-    assert ".vessel-attachment-download" in styles_css
-    assert '<script src="app.js?v=1.13.6" defer></script>' in index_html
-    assert '<link rel="stylesheet" href="styles.css?v=1.13.6">' in index_html
+    assert ".vessel-attachment-preview-dialog" in styles_css
+    assert '<script src="app.js?v=1.13.7" defer></script>' in index_html
+    assert '<link rel="stylesheet" href="styles.css?v=1.13.7">' in index_html
 
 
 def test_historical_cumulative_import_explains_sot_incremental_merge():
