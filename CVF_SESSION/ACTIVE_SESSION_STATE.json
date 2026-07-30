@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "Commit and push the independently accepted repair checkpoint.",
-    "parkedOperatorCheckpoint":  "Run PostgreSQL/full-suite evidence when a create-database-capable TEST_ADMIN_DATABASE_URL becomes available.",
+    "nextAllowedMove":  "As COMMIT_STEWARD, verify and commit the independently reviewed changed set, push the feature branch through the Blackbird081 fork, and create or update a PR targeting hoangnmr/quanlyxalan main. FREEZE remains unauthorized.",
+    "parkedOperatorCheckpoint":  null,
     "activeRole":  "COMMIT_STEWARD",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
-    "updatedAt":  "2026-07-29"
+    "updatedAt":  "2026-07-30"
 }

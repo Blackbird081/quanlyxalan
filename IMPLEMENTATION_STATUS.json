@@ -6,17 +6,18 @@
     "completedCapabilities":  [
                                   "VESSELS routes extracted to backend/vessels_api.py with ordered route identity preserved.",
                                   "USER MANAGEMENT routes extracted to backend/user_management_api.py with ordered route identity preserved.",
-                                  "Static unbound-name checker supports cross-shell glob expansion and encoding-safe failure diagnostics."
+                                  "Static unbound-name checker supports cross-shell glob expansion and encoding-safe failure diagnostics.",
+                                  "Vessel editor omits blank optional imported-profile fields before save so attachment upload and audit can proceed.",
+                                  "Vessel and port-register lists show an accessible paperclip count only for Salan profiles that have attachments."
                               ],
     "activeWorkOrders":  [
                               "docs/work_orders/WO_QLXL_SOT_ATTACHMENTS_20260729.md"
                          ],
     "knownLimitations":  [
-                             "The PostgreSQL test suite requires a create-database-capable TEST_ADMIN_DATABASE_URL.",
-                             "Backup tests require PostgreSQL client tools such as pg_dump in PATH.",
+                             "Local backup execution requires PostgreSQL client tools such as pg_dump in PATH; Docker test evidence used a matching PostgreSQL 17 client and server.",
                              "Two existing openpyxl Data Validation warnings remain in the last closed baseline.",
-                             "WO-QLXL-SOT-ATTACHMENTS-20260729 is accepted only as a WIP continuation checkpoint; PostgreSQL integration remains pending.",
-                             "The four independent-review source findings were repaired and accepted at independent re-review; PostgreSQL execution evidence remains pending."
+                             "Independent R2 review of the 2026-07-30 vessel-editor and attachment-indicator repairs returned PASS_WITH_LIMITATIONS: no connected browser or Playwright runtime was available for a rendered screenshot/computed-style check.",
+                             "WO-QLXL-SOT-ATTACHMENTS-20260729 remains in REVIEW pending operator disposition; commit, push, and FREEZE are not yet authorized."
                          ],
     "evidence":  [
                      "docs/decisions/APP_ROUTE_EXTRACTION_DESIGN_20260727.md",
@@ -29,5 +30,5 @@
                      "docs/work_orders/WO_QLXL_SOT_ATTACHMENTS_20260729.md",
                      "docs/reviews/HISTORICAL_SOT_AND_VESSEL_ATTACHMENTS_REVIEW_20260729.md"
                  ],
-    "updatedAt":  "2026-07-29"
+    "updatedAt":  "2026-07-30"
 }

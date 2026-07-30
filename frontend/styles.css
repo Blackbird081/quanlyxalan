@@ -341,6 +341,9 @@ nav a span svg {
 
 .port-register-wrap { max-width: 100%; overflow-x: auto; }
 .port-register-list-meta { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+.vessel-name-with-attachment { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.vessel-attachment-indicator { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; color: var(--cvf-accent-hover); font-size: 10px; font-weight: 700; line-height: 1; }
+.vessel-attachment-indicator svg { display: block; width: 14px; height: 14px; }
 .table-icon-button { display: inline-grid; place-items: center; width: 32px; min-width: 32px; height: 32px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--cvf-accent-hover); cursor: pointer; }
 .table-icon-button:hover { background: var(--cvf-accent-soft); }
 .table-icon-button svg { width: 16px; height: 16px; }

@@ -118,3 +118,108 @@ this checkpoint; the work-order amendment records that scope clarification.
 This pending review records source and local executable evidence only. It does
 not claim production deployment, successful PostgreSQL migration, or live CVF
 provider governance.
+
+## 2026-07-30 Vessel Editor Repair Evidence
+
+Status: EXECUTABLE_EVIDENCE_COMPLETE_PENDING_INDEPENDENT_R2_REVIEW
+
+- Direct UI reproduction on imported vessel `AG-15445` proved the vessel save
+  stopped with status 422 before the attachment endpoint was called.
+- The rejected optional numeric fields were `build_year`, `width_m`,
+  `side_height_m`, `draft_m`, `engine_power_cv`,
+  `container_capacity_teu`, and `passenger_capacity`; the browser form sent
+  each blank as `""`.
+- The repair removes blank optional top-level vessel form values after the
+  organization payload is preserved and before `POST /api/vessels`.
+- `python -m pytest -q tests/test_frontend_ux.py`: 16 passed.
+- `node --check frontend/app.js`: pass.
+- `git diff --check`: pass.
+- Direct Docker PostgreSQL 17 verification on `AG-15445`:
+  - vessel save: 200, version advanced to 2;
+  - attachment upload: 200, `scan_status=QUARANTINED`;
+  - attachment listing: uploaded file present;
+  - audit listing: `VESSEL_ATTACHMENT / UPLOAD` present.
+- Complete Docker suite with matching PostgreSQL 17 client/server:
+  `269 passed`, 3 warnings, 0 failed.
+- This evidence closes the prior PostgreSQL execution limitation locally. It
+  does not self-approve the new repair; an independent R2 reviewer remains
+  required before commit/closure.
+
+### Browser cache follow-up
+
+- Repeated UI attempts still returned 422 because `index.html` retained
+  `app.js?v=1.13.1`; the browser reused the pre-repair asset URL.
+- The cache key is now `app.js?v=1.13.2`.
+- Regression coverage asserts the repaired save logic is loaded through the
+  new cache key.
+- Targeted frontend suite: 16 passed.
+- Fresh live responses verified that the index references `1.13.2` and the
+  versioned JavaScript response contains the blank-field normalization.
+
+### Vessel-list attachment indicator
+
+- Both the customer vessel list and the port-register list now show a
+  paperclip badge with the attachment count beside the Salan name.
+- The helper returns no markup for a zero attachment count, so unattached
+  profiles retain the existing row presentation.
+- The badge exposes the same Vietnamese count through `title` and
+  `aria-label`.
+- Frontend cache key advanced to `app.js?v=1.13.3`.
+- `python -m pytest -q tests/test_frontend_ux.py`: 17 passed.
+- `node --check frontend/app.js`: pass.
+- `git diff --check`: pass.
+- Fresh live index and JavaScript responses returned 200; the index references
+  `1.13.3`, and the served asset contains both indicator integrations.
+- Status remains pending independent R2 review; this implementation evidence
+  does not authorize commit, push, FREEZE, or production deployment.
+
+#### Visual cache repair
+
+- Operator evidence showed the new SVG rendered with the cached pre-indicator
+  stylesheet (`styles.css?v=1.13.1`) and expanded to an unacceptable size.
+- The repaired indicator is a plain 14 px paperclip plus count, without a
+  badge background or border.
+- Explicit SVG dimensions in markup provide a safe presentation before CSS is
+  available; CSS and JavaScript are both cache-busted to `1.13.4`.
+- Targeted frontend suite: 17 passed. JavaScript syntax and diff checks pass.
+- Fresh live responses returned 200 and contain both `1.13.4` asset references,
+  the compact CSS rule, and the inline 14 px SVG dimensions.
+
+### Independent UI Repair Review
+
+Reviewer: `/root/independent_ui_repair_review`
+
+Disposition: `PASS_WITH_LIMITATIONS`
+
+No HIGH, MEDIUM, or LOW findings were reported.
+
+The independent reviewer verified:
+
+- blank optional vessel fields are removed before vessel save and attachment
+  upload;
+- the indicator is absent at zero attachments and present in both list
+  renderers;
+- accessibility text and 14 px inline/CSS size constraints are present;
+- CSS and JavaScript cache keys both use `1.13.4`;
+- tenant guards, quarantined storage, and attachment audit behavior remain
+  intact.
+
+Independent evidence:
+
+- workspace doctor: 25/25;
+- frontend tests: 17/17;
+- attachment backend tests: 2/2;
+- JavaScript syntax, Python compileall, and diff checks: pass;
+- live index/CSS/JavaScript responses: HTTP 200 with expected repair content;
+- Docker DB: `AG-15445` has one quarantined attachment and matching
+  `VESSEL_ATTACHMENT / UPLOAD` audit attribution;
+- full host suite: 268 passed, 2 failures caused solely by unavailable host
+  `pg_dump`.
+
+Limitation: no connected browser or Playwright runtime was available for an
+independent rendered screenshot/computed-style check. The inline 14 px SVG
+dimensions, matching cache-busted stylesheet, and live served-asset evidence
+directly mitigate the reported oversized-icon failure.
+
+This is local review evidence only. It does not authorize commit, push,
+FREEZE, production deployment, or a live CVF-governance claim.

@@ -10,10 +10,11 @@ Status: IN_PROGRESS
 - Active phase: REVIEW
 - Active role: COMMIT_STEWARD
 - Risk: R2
-- Next allowed move: commit and push the independently accepted repair
-  checkpoint.
-- Parked operator checkpoint: run PostgreSQL/full-suite evidence when a
-  create-database-capable `TEST_ADMIN_DATABASE_URL` becomes available.
+- Next allowed move: verify and commit the independently reviewed changed set,
+  push the feature branch through the `Blackbird081` fork, and create or
+  update a PR targeting `hoangnmr/quanlyxalan:main`. FREEZE remains
+  unauthorized.
+- Parked operator checkpoint: none.
 
 ## Intake
 
@@ -121,6 +122,133 @@ confirmed SOT data, and will not commit or push without separate authority.
   Git revision and `y24f0f000024` is the single successor head.
 - PostgreSQL execution remains parked and is not claimed as passed.
 - Role transition: ORCHESTRATOR -> COMMIT_STEWARD.
+
+## UI Repair Continuation — 2026-07-30
+
+- PostgreSQL 17 Docker evidence is now available: the complete application
+  suite passed with `268 passed`, including migration, backup and restore.
+- Direct UI reproduction on imported vessel `AG-15445` showed three
+  `POST /api/vessels` responses with status 422 before any attachment request.
+- The reproduced payload sent blank optional numeric controls as empty strings.
+  Pydantic rejected `build_year`, `width_m`, `side_height_m`, `draft_m`,
+  `engine_power_cv`, `container_capacity_teu`, and `passenger_capacity`.
+- Because the vessel save failed before returning `saved.id`, the frontend
+  correctly never reached the attachment upload loop; consequently neither an
+  attachment row nor `VESSEL_ATTACHMENT/UPLOAD` audit evidence existed.
+- Operator explicitly directed repair on 2026-07-30.
+- Phase return: REVIEW -> BUILD.
+- Role transition: COMMIT_STEWARD -> REPAIR_WORKER.
+- BUILD acknowledgment: the repair worker re-read the active continuity
+  surfaces and accepts scope limited to frontend blank optional-field
+  normalization, regression coverage, and executable save/upload/audit
+  verification. No commit or push is authorized by this instruction.
+- Repair result: `saveVessel()` now removes blank optional form values after
+  preserving the nested organization payload and before the vessel API call.
+- Regression coverage verifies normalization occurs before save and before the
+  attachment upload loop.
+- Targeted frontend tests: `16 passed`; JavaScript syntax and `git diff
+  --check`: pass.
+- Direct Docker PostgreSQL reproduction on imported vessel `AG-15445`:
+  vessel update returned 200/version 2; attachment upload returned 200 with
+  `QUARANTINED`; attachment listing returned the uploaded file; audit listing
+  returned `VESSEL_ATTACHMENT / UPLOAD`.
+- Full Docker PostgreSQL 17 suite after repair: `269 passed`, 3 dependency/data
+  validation warnings, 0 failed.
+- Phase return: BUILD -> REVIEW.
+- Role transition: REPAIR_WORKER -> ORCHESTRATOR for independent R2 review
+  routing. The repair worker has not self-approved or authorized commit/push.
+- Follow-up UI reproduction still returned 422 because `index.html` retained
+  the pre-repair `app.js?v=1.13.1` cache key; the server asset contained the
+  fix, but the browser reused the old URL after a 304 page response.
+- Operator reported the repeated failure and continued repair authority.
+- Phase return: REVIEW -> BUILD.
+- Role transition: ORCHESTRATOR -> REPAIR_WORKER.
+- BUILD acknowledgment: scope is limited to cache-busting the repaired
+  JavaScript asset, regression coverage, and served-asset verification.
+- Cache key advanced from `app.js?v=1.13.1` to `app.js?v=1.13.2`.
+- Regression coverage binds the vessel blank-field repair to the new cache key.
+- Targeted frontend tests: `16 passed`; JavaScript syntax and diff checks pass.
+- Live server verification: fresh index response references `1.13.2`; the
+  `app.js?v=1.13.2` response contains the blank-field normalization repair.
+- Phase return: BUILD -> REVIEW.
+- Role transition: REPAIR_WORKER -> ORCHESTRATOR for independent R2 review.
+- Operator requested a visible icon when a Salan profile already has one or
+  more attachments.
+- Phase return: REVIEW -> BUILD.
+- Role transition: ORCHESTRATOR -> IMPLEMENTATION_WORKER.
+- BUILD acknowledgment: scope is limited to the existing vessel-list and
+  port-register row renderers, attachment-indicator presentation, frontend
+  cache key, regression tests, and governed evidence synchronization.
+- Both vessel list renderers now place a paperclip badge and attachment count
+  beside the Salan name when `attachments.length > 0`; rows without attachments
+  render no indicator.
+- The indicator includes matching title and accessible-label text such as
+  `1 file đính kèm`.
+- Frontend cache key advanced from `app.js?v=1.13.2` to `1.13.3`.
+- Targeted frontend suite: `17 passed`; JavaScript syntax and diff checks pass.
+- Live server responses returned 200, referenced `1.13.3`, contained the
+  indicator helper, and contained both list integrations.
+- Phase return: BUILD -> REVIEW.
+- Role transition: IMPLEMENTATION_WORKER -> ORCHESTRATOR for independent R2
+  review. No commit or push is authorized by this operator instruction.
+- Operator visual feedback showed the JavaScript `1.13.3` indicator rendered
+  against cached `styles.css?v=1.13.1`, leaving the paperclip SVG unconstrained
+  and oversized.
+- Phase return: REVIEW -> BUILD; role transition: ORCHESTRATOR ->
+  REPAIR_WORKER for the bounded visual repair.
+- The indicator is now a plain compact 14 px icon and count without the pill
+  background/border. SVG width and height are also present in the markup so a
+  stale stylesheet cannot enlarge it again.
+- Both stylesheet and JavaScript cache keys advanced to `1.13.4`.
+- Targeted frontend suite remains `17 passed`; syntax, diff, and live served
+  asset checks pass.
+- Phase return: BUILD -> REVIEW; role transition: REPAIR_WORKER ->
+  ORCHESTRATOR. No commit or push is authorized.
+- Continuity drift identified on 2026-07-30: the active-state pointer was
+  `REVIEW / ORCHESTRATOR`, while this handoff's summary header still described
+  the earlier `BUILD / IMPLEMENTATION_WORKER` checkpoint.
+- Operator explicitly authorized reconciliation and independent review. The
+  header is synchronized to `REVIEW / ORCHESTRATOR`; the detailed transition
+  history above remains unchanged.
+
+## Independent UI Repair Review — 2026-07-30
+
+- Independent reviewer: `/root/independent_ui_repair_review`.
+- Reviewer role was isolated from the implementation worker; the reviewer
+  performed read-only inspection and made no source or governance edits.
+- Disposition: `PASS_WITH_LIMITATIONS`.
+- Findings: none at HIGH, MEDIUM, or LOW severity.
+- Verified the blank optional-value normalization ordering, both attachment
+  indicator integrations, zero-count suppression, accessible title/label,
+  inline and CSS 14 px constraints, matching `1.13.4` CSS/JavaScript cache
+  keys, tenant guards, quarantine behavior, and audit flow.
+- Independent executable evidence:
+  - workspace doctor: 25/25;
+  - frontend tests: 17/17;
+  - attachment backend tests: 2/2;
+  - JavaScript syntax, Python compileall, and diff checks: pass;
+  - live index/CSS/JavaScript assets: HTTP 200 with the expected `1.13.4`
+    references and compact indicator rules;
+  - Docker DB: `AG-15445` has one quarantined attachment and a corresponding
+    `VESSEL_ATTACHMENT / UPLOAD` audit with organization/reporting-unit
+    attribution.
+- Full host suite: 268 passed, 2 environment-only failures because host
+  `pg_dump` is unavailable; neither failure touches the reviewed changes.
+- Limitation: no connected browser or Playwright runtime was available for an
+  independent rendered screenshot/computed-style check. Source constraints
+  and live asset checks directly cover the oversized-SVG regression.
+- Claim boundary: local Docker/test/runtime evidence only; no production,
+  deployment, or live CVF-governance claim.
+- Active role remains ORCHESTRATOR after reviewer handback. Commit, push, and
+  FREEZE remain unauthorized pending operator direction.
+- Operator authorized commit and PR creation targeting the canonical
+  `hoangnmr/quanlyxalan` repository.
+- Role transition: ORCHESTRATOR -> COMMIT_STEWARD.
+- Commit scope is limited to the eight tracked reviewed files. User-owned
+  untracked `.claude/` remains excluded. Publication must use the
+  `Blackbird081` fork branch and target `hoangnmr/quanlyxalan:main`; the
+  COMMIT_STEWARD must detect and update an existing PR instead of creating a
+  duplicate.
 
 ## Claim Boundary
 
