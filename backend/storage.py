@@ -9,6 +9,7 @@ from typing import Protocol
 class ObjectStorage(Protocol):
     backend_name: str
     def put_quarantined(self, object_key: str, content: bytes) -> str: ...
+    def delete(self, object_key: str) -> None: ...
 
 
 class LocalQuarantineStorage:
@@ -24,6 +25,12 @@ class LocalQuarantineStorage:
             raise ValueError("Object key nằm ngoài quarantine root.")
         target.write_bytes(content)
         return object_key
+
+    def delete(self, object_key: str) -> None:
+        target = (self.root / object_key).resolve()
+        if self.root not in target.parents:
+            raise ValueError("Object key nằm ngoài quarantine root.")
+        target.unlink(missing_ok=True)
 
 
 class MinioQuarantineStorage:
@@ -49,6 +56,9 @@ class MinioQuarantineStorage:
             self.client.make_bucket(self.bucket)
         self.client.put_object(self.bucket, key, BytesIO(content), len(content))
         return key
+
+    def delete(self, object_key: str) -> None:
+        self.client.remove_object(self.bucket, object_key)
 
 
 def get_attachment_storage(local_root: Path) -> ObjectStorage:

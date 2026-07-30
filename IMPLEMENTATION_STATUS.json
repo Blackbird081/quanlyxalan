@@ -1,27 +1,38 @@
 ﻿{
     "schemaVersion":  "1.0",
     "projectName":  "quanlyxalan",
-    "overallStatus":  "COMPLETE",
-    "currentPhase":  "FREEZE",
+    "overallStatus":  "IN_PROGRESS",
+    "currentPhase":  "REVIEW",
     "completedCapabilities":  [
                                   "VESSELS routes extracted to backend/vessels_api.py with ordered route identity preserved.",
                                   "USER MANAGEMENT routes extracted to backend/user_management_api.py with ordered route identity preserved.",
-                                  "Static unbound-name checker supports cross-shell glob expansion and encoding-safe failure diagnostics."
+                                  "Static unbound-name checker supports cross-shell glob expansion and encoding-safe failure diagnostics.",
+                                  "Vessel editor omits blank optional imported-profile fields before save so attachment upload and audit can proceed.",
+                                  "Vessel and port-register lists show an accessible paperclip count only for Salan profiles that have attachments."
                               ],
     "activeWorkOrders":  [
-
+                              "docs/work_orders/WO_QLXL_SOT_ATTACHMENTS_20260729.md"
                          ],
     "knownLimitations":  [
-                             "The PostgreSQL test suite requires a create-database-capable TEST_ADMIN_DATABASE_URL.",
-                             "Backup tests require PostgreSQL client tools such as pg_dump in PATH.",
-                             "Two existing openpyxl Data Validation warnings remain; all 254 tests pass."
+                             "Local backup execution requires PostgreSQL client tools such as pg_dump in PATH; Docker test evidence used a matching PostgreSQL 17 client and server.",
+                             "Two existing openpyxl Data Validation warnings remain in the last closed baseline.",
+                             "Independent R2 review of the 2026-07-30 vessel-editor and attachment-indicator repairs returned PASS_WITH_LIMITATIONS: no connected browser or Playwright runtime was available for a rendered screenshot/computed-style check.",
+                             "WO-QLXL-SOT-ATTACHMENTS-20260729 is code-complete in hoangnmr/quanlyxalan PR #7 with a passing GitHub quality gate; canonical-owner review, merge, and FREEZE remain pending."
                          ],
     "evidence":  [
                      "docs/decisions/APP_ROUTE_EXTRACTION_DESIGN_20260727.md",
                      "docs/specs/APP_ROUTE_EXTRACTION_SPEC_20260727.md",
                      "docs/work_orders/WO_QLXL_APP_SPLIT_20260727.md",
                      "docs/reviews/APP_ROUTE_EXTRACTION_REVIEW_20260727.md",
-                     "commit:1b2dd1089250dafc316c205645c22d454758952d"
+                     "commit:1b2dd1089250dafc316c205645c22d454758952d",
+                     "docs/decisions/HISTORICAL_SOT_AND_VESSEL_ATTACHMENTS_DESIGN_20260729.md",
+                     "docs/specs/HISTORICAL_SOT_AND_VESSEL_ATTACHMENTS_SPEC_20260729.md",
+                     "docs/work_orders/WO_QLXL_SOT_ATTACHMENTS_20260729.md",
+                     "docs/reviews/HISTORICAL_SOT_AND_VESSEL_ATTACHMENTS_REVIEW_20260729.md",
+                     "commit:31d2da4",
+                     "commit:57b8bc6",
+                     "https://github.com/hoangnmr/quanlyxalan/actions/runs/30509548693",
+                     "https://github.com/hoangnmr/quanlyxalan/pull/7"
                  ],
-    "updatedAt":  "2026-07-27"
+    "updatedAt":  "2026-07-30"
 }

@@ -105,6 +105,7 @@ class Vessel(Base):
         cascade="all, delete-orphan",
         order_by="VesselOperatingProfile.sequence",
     )
+    attachments = relationship("Attachment", back_populates="vessel", cascade="all, delete-orphan")
 
 
 class VesselOperatingProfile(Base):
@@ -272,8 +273,16 @@ class DeclarationCrew(Base):
 
 class Attachment(Base):
     __tablename__ = "attachments"
+    __table_args__ = (
+        CheckConstraint(
+            "(declaration_id IS NOT NULL AND vessel_id IS NULL) OR "
+            "(declaration_id IS NULL AND vessel_id IS NOT NULL)",
+            name="ck_attachments_exactly_one_owner",
+        ),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
-    declaration_id = Column(Integer, ForeignKey("declarations.id", ondelete="CASCADE"), nullable=False)
+    declaration_id = Column(Integer, ForeignKey("declarations.id", ondelete="CASCADE"), nullable=True)
+    vessel_id = Column(Integer, ForeignKey("vessels.id", ondelete="CASCADE"), nullable=True)
     original_name = Column(String, nullable=False)
     stored_name = Column(String, nullable=False, unique=True)
     content_type = Column(String, nullable=False)
@@ -284,6 +293,7 @@ class Attachment(Base):
     scanned_at = Column(String)
     created_at = Column(String, nullable=False, default=now_iso)
     declaration = relationship("Declaration", back_populates="attachments")
+    vessel = relationship("Vessel", back_populates="attachments")
 
 class IntegrationConnector(Base):
     __tablename__ = "integration_connectors"
@@ -502,7 +512,9 @@ class HistoricalReportImport(Base):
         # Tenant-scoped checksum idempotency.
         UniqueConstraint(
             "reporting_unit_id", "source_kind", "source_checksum", "mapping_version",
+            "reporting_period",
             name="uq_historical_import_idempotency",
+            postgresql_nulls_not_distinct=True,
         ),
         # Revision lineage stays inside one reporting unit: a superseding import
         # must share this import's reporting unit.

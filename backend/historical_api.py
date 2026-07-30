@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import re
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
@@ -42,7 +42,9 @@ SOURCE_ARCHIVE_ROOT = Path(os.environ.get("HISTORICAL_SOURCE_DIR", ROOT / "data"
 
 
 class ConfirmHistoricalImport(BaseModel):
-    conflict_action: Literal["KEEP_EXISTING", "ACTIVATE_NEW_REVISION"] | None = None
+    conflict_action: Literal[
+        "KEEP_EXISTING", "MERGE_NEW_RECORDS", "ACTIVATE_NEW_REVISION",
+    ] | None = None
     reason: str = Field(default="", max_length=500)
     supersedes_import_id: int | None = None
 
@@ -88,7 +90,15 @@ def _archive_source(reporting_unit_id: int, checksum: str, content: bytes) -> st
     return str(target.relative_to(SOURCE_ARCHIVE_ROOT)).replace("\\", "/")
 
 
+def _mapping_receipt(item: HistoricalReportImport) -> dict[str, Any]:
+    try:
+        return json.loads(item.mapping_receipt_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+
+
 def _import_json(item: HistoricalReportImport, *, conflicts: list[int] | None = None) -> dict[str, Any]:
+    receipt = _mapping_receipt(item)
     return {
         "id": item.id, "reportingUnitId": item.reporting_unit_id,
         "sourceKind": item.source_kind, "appendixKind": item.appendix_kind,
@@ -99,6 +109,8 @@ def _import_json(item: HistoricalReportImport, *, conflicts: list[int] | None = 
         "accepted": item.accepted_count, "review": item.review_count,
         "rejected": item.rejected_count, "createdAt": item.created_at,
         "conflictingImportIds": conflicts or [],
+        "sotRetainedCount": int(receipt.get("sotRetainedCount") or 0),
+        "newRowCount": int(receipt.get("newRowCount") or 0),
     }
 
 
@@ -120,6 +132,120 @@ def _candidate_link(vessels: list[Vessel], vessel_name: str) -> tuple[Vessel | N
     if not candidates:
         return None, "", "LOW", "UNMATCHED_VESSEL"
     return None, "", "LOW", "AMBIGUOUS_VESSEL"
+
+
+def _cargo_fact_key(row: dict[str, Any] | HistoricalCargoRow) -> tuple[Any, ...]:
+    def value(name: str, default: Any = "") -> Any:
+        if isinstance(row, dict):
+            return row.get(name, default)
+        return getattr(row, name, default)
+
+    numeric_weight = value("weight_tonnes", None)
+    return (
+        str(value("call_key_normalized")).strip(),
+        normalize_token(value("container_size_code_raw")),
+        normalize_token(value("full_empty_code_raw")),
+        normalize_token(value("trade_scope_raw")),
+        normalize_token(value("movement_method_raw")),
+        str(value("derived_direction")).strip().lower(),
+        str(value("weight_state")).strip().upper(),
+        round(float(numeric_weight), 9) if numeric_weight is not None else None,
+        normalize_token(value("weight_raw")) if numeric_weight is None else "",
+    )
+
+
+def _pl03_identity(row: dict[str, Any] | HistoricalReportRow) -> str:
+    if isinstance(row, HistoricalReportRow):
+        if row.normalized_registration:
+            return f"r:{row.normalized_registration}"
+        dimensions = json.loads(row.mapped_dimensions_json or "{}")
+        return f"n:{normalize_vessel_name(dimensions.get('vesselNameRaw'))}"
+    registration = normalize_vessel_name(row.get("registration_raw"))
+    if registration:
+        return f"r:{registration}"
+    return f"n:{normalize_vessel_name(row.get('vessel_name_raw'))}"
+
+
+def _filter_confirmed_sot_rows(
+    db: Session,
+    *,
+    unit_id: int,
+    parsed: ParsedWorkbook,
+) -> tuple[list[dict[str, Any]], int, list[int]]:
+    active_imports = db.query(HistoricalReportImport).filter(
+        HistoricalReportImport.reporting_unit_id == unit_id,
+        HistoricalReportImport.source_kind == parsed.source_kind,
+        HistoricalReportImport.status.in_(ACTIVE_IMPORT_STATUSES),
+    )
+    if parsed.source_kind == "reported_pl03":
+        if not parsed.reporting_period:
+            raise ValueError("reported_pl03 requires an explicit reporting period")
+        active_imports = active_imports.filter(
+            HistoricalReportImport.reporting_period == parsed.reporting_period,
+        )
+    active_imports = active_imports.all()
+    active_ids = [item.id for item in active_imports]
+    if not active_ids:
+        return list(parsed.rows), 0, []
+
+    retained = 0
+    retained_import_ids: set[int] = set()
+    new_rows: list[dict[str, Any]] = []
+    if parsed.source_kind == "tos_berth_call":
+        existing = {
+            row.call_key_normalized: row.import_id
+            for row in db.query(HistoricalPortCall).filter(
+                HistoricalPortCall.reporting_unit_id == unit_id,
+                HistoricalPortCall.import_id.in_(active_ids),
+                HistoricalPortCall.validation_status != "REJECTED",
+            ).all()
+            if row.call_key_normalized
+        }
+        for source in parsed.rows:
+            owner = existing.get(source.get("call_key_normalized", ""))
+            if owner is None:
+                new_rows.append(source)
+            else:
+                retained += 1
+                retained_import_ids.add(owner)
+    elif parsed.source_kind == "reported_pl03":
+        existing = {
+            _pl03_identity(row): row.import_id
+            for row in db.query(HistoricalReportRow).filter(
+                HistoricalReportRow.reporting_unit_id == unit_id,
+                HistoricalReportRow.import_id.in_(active_ids),
+                HistoricalReportRow.validation_status != "REJECTED",
+            ).all()
+            if _pl03_identity(row) not in {"r:", "n:"}
+        }
+        for source in parsed.rows:
+            owner = existing.get(_pl03_identity(source))
+            if owner is None:
+                new_rows.append(source)
+            else:
+                retained += 1
+                retained_import_ids.add(owner)
+    else:
+        owners: dict[tuple[Any, ...], list[int]] = {}
+        for row in db.query(HistoricalCargoRow).filter(
+            HistoricalCargoRow.reporting_unit_id == unit_id,
+            HistoricalCargoRow.import_id.in_(active_ids),
+            HistoricalCargoRow.validation_status != "REJECTED",
+        ).order_by(HistoricalCargoRow.id).all():
+            owners.setdefault(_cargo_fact_key(row), []).append(row.import_id)
+        remaining = Counter({key: len(import_ids) for key, import_ids in owners.items()})
+        used = Counter()
+        for source in parsed.rows:
+            key = _cargo_fact_key(source)
+            if remaining[key] <= 0:
+                new_rows.append(source)
+                continue
+            owner = owners[key][used[key]]
+            used[key] += 1
+            remaining[key] -= 1
+            retained += 1
+            retained_import_ids.add(owner)
+    return new_rows, retained, sorted(retained_import_ids)
 
 
 def _active_calls_by_key(
@@ -342,6 +468,82 @@ def _reconcile_active_cargo_links(db: Session, unit_id: int, actor_user_id: int)
     return updated_import_ids
 
 
+def _restage_full_revision(db: Session, item: HistoricalReportImport) -> None:
+    receipt = _mapping_receipt(item)
+    archive_key = str(receipt.get("sourceArchiveKey") or "")
+    archive_root = SOURCE_ARCHIVE_ROOT.resolve()
+    source_path = (archive_root / archive_key).resolve()
+    if not archive_key or archive_root not in source_path.parents or not source_path.is_file():
+        raise HTTPException(
+            status_code=409,
+            detail="Không thể tạo revision vì file nguồn lưu trữ không còn khả dụng.",
+        )
+    content = source_path.read_bytes()
+    if hashlib.sha256(content).hexdigest() != item.source_checksum:
+        raise HTTPException(
+            status_code=409,
+            detail="Không thể tạo revision vì checksum file nguồn không khớp.",
+        )
+    try:
+        parsed = parse_workbook(content)
+    except HistoricalWorkbookError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if parsed.source_kind != item.source_kind:
+        raise HTTPException(status_code=409, detail="Loại dữ liệu file nguồn đã thay đổi.")
+
+    if item.source_kind == "tos_berth_call":
+        call_ids = [row[0] for row in db.query(HistoricalPortCall.id).filter_by(
+            reporting_unit_id=item.reporting_unit_id, import_id=item.id,
+        ).all()]
+        external_cargo = db.query(HistoricalCargoRow.id).filter(
+            HistoricalCargoRow.reporting_unit_id == item.reporting_unit_id,
+            HistoricalCargoRow.import_id != item.id,
+            HistoricalCargoRow.port_call_id.in_(call_ids or [-1]),
+        ).first()
+        if external_cargo:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể restage revision vì lượt preview đã có dữ liệu khác liên kết.",
+            )
+        db.query(HistoricalVesselLink).filter_by(
+            reporting_unit_id=item.reporting_unit_id, import_id=item.id,
+        ).delete(synchronize_session=False)
+        db.query(HistoricalPortCall).filter_by(
+            reporting_unit_id=item.reporting_unit_id, import_id=item.id,
+        ).delete(synchronize_session=False)
+    elif item.source_kind == "tos_cargo_detail":
+        db.query(HistoricalCargoRow).filter_by(
+            reporting_unit_id=item.reporting_unit_id, import_id=item.id,
+        ).delete(synchronize_session=False)
+    else:
+        db.query(HistoricalReportMetric).filter_by(
+            reporting_unit_id=item.reporting_unit_id, import_id=item.id,
+        ).delete(synchronize_session=False)
+        db.query(HistoricalReportRow).filter_by(
+            reporting_unit_id=item.reporting_unit_id, import_id=item.id,
+        ).delete(synchronize_session=False)
+    db.flush()
+
+    # PL.03 templates do not carry a trustworthy period in their cells.  Its
+    # period is supplied explicitly at preview time and must survive reparsing
+    # the archived workbook during a full revision.
+    item.reporting_period = parsed.reporting_period or item.reporting_period
+    if item.source_kind == "tos_berth_call":
+        _stage_berth(db, item, parsed)
+    elif item.source_kind == "tos_cargo_detail":
+        _stage_cargo(db, item, parsed)
+    else:
+        _stage_pl03(db, item, parsed)
+    db.flush()
+    _refresh_counts(db, item)
+    receipt.update({
+        "activationMode": "FULL_REVISION",
+        "newRowCount": len(parsed.rows),
+        "sotRetainedCount": 0,
+    })
+    item.mapping_receipt_json = json_dumps(receipt)
+
+
 def _conflicts(db: Session, item: HistoricalReportImport) -> list[HistoricalReportImport]:
     query = db.query(HistoricalReportImport).filter(
         HistoricalReportImport.reporting_unit_id == item.reporting_unit_id,
@@ -349,18 +551,34 @@ def _conflicts(db: Session, item: HistoricalReportImport) -> list[HistoricalRepo
         HistoricalReportImport.id != item.id,
         HistoricalReportImport.status.in_(("COMMITTED", "REVIEW")),
     )
+    found: dict[int, HistoricalReportImport] = {}
+    sot_import_ids = [
+        int(value) for value in _mapping_receipt(item).get("sotImportIds", [])
+        if str(value).isdigit()
+    ]
+    if sot_import_ids:
+        for entry in query.filter(HistoricalReportImport.id.in_(sot_import_ids)).all():
+            found[entry.id] = entry
     # A parser/mapping correction intentionally creates a new receipt for the
     # same immutable source checksum.  Treat the active older mapping as a
     # conflict even when a legacy report has no reliable reporting period, so
     # confirmation supersedes it instead of leaving two apparently active rows.
-    same_source = query.filter(
+    same_source_query = query.filter(
         HistoricalReportImport.source_checksum == item.source_checksum,
-    ).all()
+    )
+    if item.source_kind == "reported_pl03" and item.reporting_period:
+        same_source_query = same_source_query.filter(
+            HistoricalReportImport.reporting_period == item.reporting_period,
+        )
+    same_source = same_source_query.all()
     if same_source:
-        return same_source
+        found.update({entry.id: entry for entry in same_source})
     if item.reporting_period:
-        return query.filter(HistoricalReportImport.reporting_period == item.reporting_period).all()
-    if item.source_kind == "tos_cargo_detail":
+        same_period = query.filter(
+            HistoricalReportImport.reporting_period == item.reporting_period,
+        ).all()
+        found.update({entry.id: entry for entry in same_period})
+    elif item.source_kind == "tos_cargo_detail":
         ids = [row[0] for row in db.query(HistoricalCargoRow.import_id)
                .filter(HistoricalCargoRow.import_id != item.id,
                        HistoricalCargoRow.reporting_unit_id == item.reporting_unit_id,
@@ -368,16 +586,19 @@ def _conflicts(db: Session, item: HistoricalReportImport) -> list[HistoricalRepo
                            db.query(HistoricalCargoRow.call_key_normalized).filter(
                                HistoricalCargoRow.import_id == item.id,
                                HistoricalCargoRow.reporting_unit_id == item.reporting_unit_id,
-                           )
-                       )).distinct().all()]
-        return query.filter(HistoricalReportImport.id.in_(ids)).all() if ids else []
-    return []
+                            )
+                        )).distinct().all()]
+        if ids:
+            overlap = query.filter(HistoricalReportImport.id.in_(ids)).all()
+            found.update({entry.id: entry for entry in overlap})
+    return [found[key] for key in sorted(found)]
 
 
 @router.post("/preview")
 async def preview_historical_import(
     request: Request,
     x_source_filename: str | None = Header(default=None, alias="X-Source-Filename"),
+    x_reporting_period: str | None = Header(default=None, alias="X-Reporting-Period"),
     db: Session = Depends(get_db), scope: Scope = Depends(require_port_scope),
 ):
     _authorize(db, scope)
@@ -392,17 +613,42 @@ async def preview_historical_import(
         parsed = parse_workbook(content)
     except HistoricalWorkbookError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if parsed.source_kind == "reported_pl03":
+        if not x_reporting_period or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", x_reporting_period):
+            raise HTTPException(
+                status_code=422,
+                detail="Cần chọn kỳ báo cáo hợp lệ (YYYY-MM) cho file PL.03.",
+            )
+        parsed.reporting_period = x_reporting_period
     checksum = hashlib.sha256(content).hexdigest()
-    prior = db.query(HistoricalReportImport).filter_by(
+    prior_query = db.query(HistoricalReportImport).filter_by(
         reporting_unit_id=scope.reporting_unit_id, source_kind=parsed.source_kind,
         source_checksum=checksum, mapping_version=parsed.mapping_version,
-    ).first()
+    )
+    if parsed.source_kind == "reported_pl03":
+        prior_query = prior_query.filter(
+            HistoricalReportImport.reporting_period == parsed.reporting_period,
+        )
+    prior = prior_query.first()
     if prior:
         _archive_source(scope.reporting_unit_id, checksum, content)
         return {**_import_json(prior, conflicts=[i.id for i in _conflicts(db, prior)]), "idempotent": True}
     archive_key = _archive_source(scope.reporting_unit_id, checksum, content)
+    full_row_count = len(parsed.rows)
+    new_rows, sot_retained_count, sot_import_ids = _filter_confirmed_sot_rows(
+        db, unit_id=scope.reporting_unit_id, parsed=parsed,
+    )
+    parsed.rows = new_rows
     receipt = dict(parsed.receipt)
-    receipt.update({"sourceArchiveKey": archive_key, "checksumAlgorithm": "sha256"})
+    receipt.update({
+        "sourceArchiveKey": archive_key,
+        "checksumAlgorithm": "sha256",
+        "sourceRowCount": full_row_count,
+        "sotRetainedCount": sot_retained_count,
+        "newRowCount": len(new_rows),
+        "sotImportIds": sot_import_ids,
+        "activationMode": "INCREMENTAL_PREVIEW",
+    })
     item = HistoricalReportImport(
         reporting_unit_id=scope.reporting_unit_id, source_kind=parsed.source_kind,
         appendix_kind=parsed.appendix_kind, mapping_version=parsed.mapping_version,
@@ -520,13 +766,23 @@ def _historical_pl03_rows(
 
     # Legacy PL.03 is a dimension scaffold only. Its manual cargo metrics and
     # ETA-era time cells are deliberately ignored in the reconstructed report.
-    legacy_import = next((
-        item for item in sorted(active_imports, key=lambda entry: entry.id, reverse=True)
-        if item.source_kind == "reported_pl03"
-    ), None)
-    legacy_rows = db.query(HistoricalReportRow).filter_by(
-        reporting_unit_id=unit_id, import_id=legacy_import.id,
-    ).order_by(HistoricalReportRow.appendix_row_no, HistoricalReportRow.id).all() if legacy_import else []
+    legacy_imports = sorted(
+        [
+            item for item in active_imports
+            if item.source_kind == "reported_pl03"
+            and item.reporting_period == reporting_period
+        ],
+        key=lambda entry: entry.id,
+    )
+    legacy_rows = db.query(HistoricalReportRow).filter(
+        HistoricalReportRow.reporting_unit_id == unit_id,
+        HistoricalReportRow.import_id.in_([item.id for item in legacy_imports] or [-1]),
+        HistoricalReportRow.validation_status != "REJECTED",
+    ).order_by(
+        HistoricalReportRow.import_id,
+        HistoricalReportRow.appendix_row_no,
+        HistoricalReportRow.id,
+    ).all()
 
     register_ids = [row[0] for row in db.query(ReportingUnitVessel.vessel_id).filter_by(
         reporting_unit_id=unit_id,
@@ -629,7 +885,8 @@ def _historical_pl03_rows(
     return rows, {
         "berthImportIds": [item.id for item in berth_imports],
         "cargoImportIds": sorted({row.import_id for row in cargo_rows}),
-        "legacyPl03ImportId": legacy_import.id if legacy_import else None,
+        "legacyPl03ImportId": legacy_imports[-1].id if legacy_imports else None,
+        "legacyPl03ImportIds": [item.id for item in legacy_imports],
         "callCount": len(calls), "cargoRowCount": len(cargo_rows), "reportRowCount": len(rows),
     }
 
@@ -807,12 +1064,11 @@ def confirm_historical_import(
         return {**_import_json(item), "idempotent": True}
     conflicts = _conflicts(db, item)
     if body.supersedes_import_id is not None:
-        conflicts = [entry for entry in conflicts if entry.id == body.supersedes_import_id]
-        if not conflicts:
+        if body.supersedes_import_id not in {entry.id for entry in conflicts}:
             raise HTTPException(status_code=409, detail="Bản được chọn không phải xung đột cùng đơn vị/nguồn/kỳ.")
     if conflicts and body.conflict_action is None:
         raise HTTPException(status_code=409, detail={
-            "message": "Dữ liệu trùng phạm vi đã lưu; cần chọn giữ bản cũ hoặc kích hoạt revision mới.",
+            "message": "Dữ liệu trùng phạm vi đã lưu; cần chọn giữ SOT, bổ sung phát sinh mới hoặc kích hoạt revision mới.",
             "conflictingImportIds": [entry.id for entry in conflicts],
         })
     if conflicts and body.conflict_action == "KEEP_EXISTING":
@@ -823,17 +1079,39 @@ def confirm_historical_import(
               item.supersede_reason, actor_user_id=scope.user.id, reporting_unit_id=scope.reporting_unit_id)
         db.commit()
         return _import_json(item, conflicts=[entry.id for entry in conflicts])
-    if conflicts:
+    if conflicts and body.conflict_action == "MERGE_NEW_RECORDS":
+        receipt = _mapping_receipt(item)
+        if int(receipt.get("newRowCount") or 0) <= 0:
+            raise HTTPException(
+                status_code=409,
+                detail="File không có phát sinh mới; hãy chọn giữ dữ liệu SOT hiện có.",
+            )
+        item.status = "REVIEW" if item.review_count else "COMMITTED"
+        item.supersede_reason = body.reason.strip() or "Bổ sung phát sinh mới; giữ nguyên SOT đã xác nhận."
+        item.updated_at = now_iso()
+        receipt["activationMode"] = "INCREMENTAL_MERGE"
+        item.mapping_receipt_json = json_dumps(receipt)
+        audit(
+            db, "historical_report_import", item.id, "IMPORT_INCREMENTAL_MERGE",
+            f"{receipt.get('sotRetainedCount', 0)} SOT retained; "
+            f"{receipt.get('newRowCount', 0)} new rows",
+            actor_user_id=scope.user.id, reporting_unit_id=scope.reporting_unit_id,
+        )
+    elif conflicts:
         if not body.reason.strip():
             raise HTTPException(status_code=422, detail="Cần ghi lý do khi kích hoạt revision mới.")
+        _restage_full_revision(db, item)
         item.revision_no = max(entry.revision_no for entry in conflicts) + 1
         for prior in conflicts:
             prior.status = "SUPERSEDED"
             prior.superseded_by_import_id = item.id
             prior.supersede_reason = body.reason.strip()
             prior.updated_at = now_iso()
-    item.status = "REVIEW" if item.review_count else "COMMITTED"
-    item.supersede_reason = body.reason.strip()
+        item.status = "REVIEW" if item.review_count else "COMMITTED"
+        item.supersede_reason = body.reason.strip()
+    else:
+        item.status = "REVIEW" if item.review_count else "COMMITTED"
+        item.supersede_reason = body.reason.strip()
     item.updated_at = now_iso()
     audit(db, "historical_report_import", item.id, "IMPORT_CONFIRMED",
           f"{item.source_kind} revision {item.revision_no}; {item.accepted_count} valid, "

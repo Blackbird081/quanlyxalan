@@ -63,7 +63,7 @@
                       {
                           "id":  "continuity-initial-handoff",
                           "family":  "continuity",
-                          "path":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V1_2026-07-27.md",
+                          "path":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
                           "status":  "ACTIVE",
                           "description":  "Initial agent handoff."
                       },

@@ -30,6 +30,19 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc |
+            sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" |
+            sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - name: Verify PostgreSQL client
+        run: pg_dump --version | grep -E ' 17\.'
       - run: python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - run: python -m compileall -q backend
       - run: python -m pytest -q

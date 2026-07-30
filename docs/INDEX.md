@@ -5,7 +5,7 @@ Machine-readable source: `docs/catalog/ARTIFACT_REGISTRY.json`
 ## Start Here
 
 - Active session/phase/role state.: `CVF_SESSION/ACTIVE_SESSION_STATE.json`
-- Initial agent handoff.: `CVF_SESSION/handoffs/AGENT_HANDOFF_V1_2026-07-27.md`
+- Initial agent handoff.: `CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md`
 - Project continuity front door.: `CVF_SESSION_MEMORY.md`
 - CVF enforcement manifest.: `.cvf/manifest.json`
 - CVF governance policy.: `.cvf/policy.json`

@@ -843,6 +843,13 @@ async function loadVessels() {
   } catch (error) { toast(error.message, true); }
 }
 
+function vesselAttachmentIndicator(vessel) {
+  const count = vessel.attachments?.length || 0;
+  if (!count) return '';
+  const label = `${count} file đính kèm`;
+  return `<span class="vessel-attachment-indicator" title="${label}" aria-label="${label}"><svg width="14" height="14" style="width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 0 1-2.8-2.8l8.9-8.9"></path></svg><span>${count}</span></span>`;
+}
+
 function renderVessels() {
   const term = ($('#vessel-search').value || '').toLowerCase();
   const items = state.vessels.filter(v => `${v.name} ${v.registration_no}`.toLowerCase().includes(term));
@@ -855,7 +862,7 @@ function renderVessels() {
   const canDelete = state.currentUser?.role === 'PLATFORM_ADMIN';
   const deleteButton = v => canDelete ? `<button class="table-icon-button danger-icon" data-delete-vessel="${v.id}" title="Xóa ${esc(v.name)}" aria-label="Xóa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5M14 11v5"></path></svg></button>` : '';
   $('#vessel-count').textContent = term ? `${items.length} / ${state.vessels.length} phương tiện` : `${items.length} phương tiện`;
-  $('#vessel-table').innerHTML = items.length ? `<table class="data-table responsive-table record-table vessel-record-table"><colgroup><col style="width:4%"><col style="width:20%"><col style="width:11%"><col style="width:17%"><col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:12%"><col style="width:6%"></colgroup><thead><tr><th>STT</th><th>Phương tiện</th><th>Số đăng ký</th><th>Công dụng</th><th>Cấp PT</th><th>Trọng tải</th><th>Hạn đăng kiểm</th><th>Trạng thái</th><th aria-label="Thao tác"></th></tr></thead><tbody>${pageItems.map((v, index) => `<tr><td data-label="STT">${offset + index + 1}</td><td data-label="Phương tiện"><strong>${esc(v.name)}</strong></td><td data-label="Số đăng ký">${esc(v.registration_no)}</td><td data-label="Công dụng">${esc(v.vessel_type)}</td><td data-label="Cấp PT">${esc(v.vessel_class)}</td><td data-label="Trọng tải">${number(v.deadweight_tons).toLocaleString('vi-VN')} tấn</td><td data-label="Hạn đăng kiểm" class="date-cell">${fmtDate(v.certificate_expiry_date)}</td><td data-label="Trạng thái"><span class="table-badge ${v.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(v.certificate_status)}</span></td><td data-label="Thao tác" class="action-cell"><button class="table-icon-button" data-edit-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button>${deleteButton(v)}</td></tr>`).join('')}</tbody></table>` : empty('Chưa có phương tiện', 'Thêm hồ sơ hoặc import file Excel mẫu.');
+  $('#vessel-table').innerHTML = items.length ? `<table class="data-table responsive-table record-table vessel-record-table"><colgroup><col style="width:4%"><col style="width:20%"><col style="width:11%"><col style="width:17%"><col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:12%"><col style="width:6%"></colgroup><thead><tr><th>STT</th><th>Phương tiện</th><th>Số đăng ký</th><th>Công dụng</th><th>Cấp PT</th><th>Trọng tải</th><th>Hạn đăng kiểm</th><th>Trạng thái</th><th aria-label="Thao tác"></th></tr></thead><tbody>${pageItems.map((v, index) => `<tr><td data-label="STT">${offset + index + 1}</td><td data-label="Phương tiện"><span class="vessel-name-with-attachment"><strong>${esc(v.name)}</strong>${vesselAttachmentIndicator(v)}</span></td><td data-label="Số đăng ký">${esc(v.registration_no)}</td><td data-label="Công dụng">${esc(v.vessel_type)}</td><td data-label="Cấp PT">${esc(v.vessel_class)}</td><td data-label="Trọng tải">${number(v.deadweight_tons).toLocaleString('vi-VN')} tấn</td><td data-label="Hạn đăng kiểm" class="date-cell">${fmtDate(v.certificate_expiry_date)}</td><td data-label="Trạng thái"><span class="table-badge ${v.certificate_status === 'VALID' ? 'submitted' : 'draft'}">${certificateLabel(v.certificate_status)}</span></td><td data-label="Thao tác" class="action-cell"><button class="table-icon-button" data-edit-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button>${deleteButton(v)}</td></tr>`).join('')}</tbody></table>` : empty('Chưa có phương tiện', 'Thêm hồ sơ hoặc import file Excel mẫu.');
   $('#vessel-pagination').innerHTML = items.length > state.vesselPageSize ? `<span>Trang ${state.vesselPage}/${totalPages}</span><button type="button" class="ghost-button" data-vessel-page="${state.vesselPage - 1}" ${state.vesselPage === 1 ? 'disabled' : ''}>Trước</button><button type="button" class="ghost-button" data-vessel-page="${state.vesselPage + 1}" ${state.vesselPage === totalPages ? 'disabled' : ''}>Sau</button>` : '';
   $$('[data-edit-vessel]').forEach(button => button.onclick = () => openVessel(Number(button.dataset.editVessel)));
   $$('[data-delete-vessel]').forEach(button => button.onclick = () => deleteVessel(Number(button.dataset.deleteVessel)));
@@ -1234,6 +1241,32 @@ function renderVesselProfiles() {
   });
 }
 
+function renderVesselAttachments() {
+  const container = $('#vessel-attachment-list');
+  if (!container) return;
+  const items = state.editingVessel?.attachments || [];
+  container.innerHTML = items.length
+    ? items.map(item => `<div class="vessel-attachment-row">
+        <span><strong>${esc(item.original_name)}</strong><small>${number(item.size_bytes).toLocaleString('vi-VN')} byte · ${esc(item.scan_status)}</small></span>
+        <button type="button" class="table-icon-button danger-icon" data-delete-vessel-attachment="${item.id}" aria-label="Xóa file ${esc(item.original_name)}">×</button>
+      </div>`).join('')
+    : '<small>Chưa có file đính kèm cho hồ sơ này.</small>';
+  $$('[data-delete-vessel-attachment]', container).forEach(button => {
+    button.onclick = () => deleteVesselAttachment(Number(button.dataset.deleteVesselAttachment));
+  });
+}
+
+async function deleteVesselAttachment(attachmentId) {
+  const vesselId = state.editingVessel?.id;
+  if (!vesselId || !window.confirm('Xóa file đính kèm này khỏi hồ sơ Salan?')) return;
+  try {
+    await api(`/api/vessels/${vesselId}/attachments/${attachmentId}`, {method:'DELETE'});
+    state.editingVessel.attachments = (state.editingVessel.attachments || []).filter(item => item.id !== attachmentId);
+    renderVesselAttachments();
+    toast('Đã xóa file đính kèm.');
+  } catch (error) { toast(error.message, true); }
+}
+
 function openVessel(id = null, portRegister = false) {
   const records = portRegister ? state.portRegisterItems : state.vessels;
   const v = id ? records.find(item => item.id === id) : {};
@@ -1269,8 +1302,16 @@ function openVessel(id = null, portRegister = false) {
     ${field('tracking_master_name','Thuyền trưởng theo dõi',v.tracking_master_name)}
     ${field('tracking_master_phone','Số điện thoại liên hệ',v.tracking_master_phone,'tel')}
     <section class="form-section span-3 operating-profiles-section"><div class="panel-header"><div><h3>Vùng hoạt động và năng lực tương ứng</h3><p>Mỗi vùng giữ riêng trọng tải và khả năng khai thác.</p></div><button type="button" class="outline-button" id="add-operating-profile">+ Thêm vùng</button></div><div id="operating-profiles"></div></section>
-    <label class="span-3">Ghi chú<textarea name="notes">${esc(v.notes || '')}</textarea></label>`;
+    <label class="span-3">Ghi chú<textarea name="notes">${esc(v.notes || '')}</textarea></label>
+    <section class="form-section span-3 vessel-attachments-section">
+      <div><h3>File đính kèm hồ sơ Salan</h3><p>Lưu giấy tờ hoặc bằng chứng bổ sung cùng hồ sơ. Mỗi file tối đa 12 MB.</p></div>
+      <div id="vessel-attachment-list" class="vessel-attachment-list"></div>
+      <label class="attachment-field">Thêm hình ảnh / PDF / Word / Excel
+        <input name="vessel_attachments" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx">
+      </label>
+    </section>`;
   renderVesselProfiles();
+  renderVesselAttachments();
   $('#add-operating-profile').onclick = () => {
     state.editingVesselProfiles.push({activity_area: '', deadweight_tons: '', cargo_capacity_tons: ''});
     renderVesselProfiles();
@@ -1282,6 +1323,8 @@ async function saveVessel(event) {
   event.preventDefault();
   const form = $('#vessel-form');
   const data = values(form);
+  const files = [...form.elements.vessel_attachments.files];
+  delete data.vessel_attachments;
   data.operating_profiles = $$('.operating-profile-row', form).map((row, index) => ({
     sequence: index + 1,
     activity_area: $('[name="activity_area"]', row).value.trim(),
@@ -1297,19 +1340,43 @@ async function saveVessel(event) {
   delete data.profile_cargo_capacity_tons;
   data.organization = {name: data.organization_name};
   delete data.organization_name;
+  // Imported/historical vessel profiles legitimately leave many optional
+  // controls blank. FormData represents those blanks as "", which Pydantic
+  // cannot coerce to Optional[int]/Optional[float]. Omit them so the backend
+  // receives its declared default (None) before the attachment upload begins.
+  Object.keys(data).forEach(key => { if (data[key] === '') delete data[key]; });
   if (state.editingVessel?.id) {
     data.id = state.editingVessel.id;
     data.version = state.editingVessel.version;
   }
   setSubmitting(form, event.submitter, true, 'Đang lưu…');
+  let saved = null;
+  let uploaded = 0;
   try {
     const path = state.vesselSaveContext === 'port-register' ? '/api/vessels?port_register=true' : '/api/vessels';
-    await api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+    saved = await api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+    for (const file of files) {
+      await api(`/api/vessels/${saved.id}/attachments?filename=${encodeURIComponent(file.name)}`, {
+        method:'POST',
+        headers:{'Content-Type':file.type || 'application/octet-stream'},
+        body:file,
+      });
+      uploaded += 1;
+    }
     $('#vessel-dialog').close();
-    toast('Đã lưu hồ sơ phương tiện.');
+    toast(`Đã lưu hồ sơ phương tiện${uploaded ? ` và ${uploaded} file đính kèm` : ''}.`);
     await loadVessels();
     if (state.vesselSaveContext === 'port-register') await loadPortRegister();
-  } catch (error) { toast(error.message, true); }
+  } catch (error) {
+    if (saved) {
+      $('#vessel-dialog').close();
+      toast(`Hồ sơ đã lưu nhưng mới tải được ${uploaded}/${files.length} file: ${error.message}`, true);
+      await loadVessels();
+      if (state.vesselSaveContext === 'port-register') await loadPortRegister();
+    } else {
+      toast(error.message, true);
+    }
+  }
   finally { setSubmitting(form, event.submitter, false); }
 }
 
@@ -1742,7 +1809,7 @@ function renderPortRegister() {
   $('#port-register-selection').hidden = selectedCount === 0;
   $('#port-register-selection').textContent = `Đã chọn ${selectedCount}`;
   $('#remove-selected-port-vessels').hidden = selectedCount === 0;
-  $('#port-register-table').innerHTML = items.length ? `<table class="data-table port-register-table"><thead><tr><th class="select-column"><input id="select-port-register-page" type="checkbox" ${allPageSelected ? 'checked' : ''} aria-label="Chọn tất cả Salan trên trang này"></th><th>STT</th><th>Tên phương tiện</th><th>Số đăng ký</th><th>Loại / công dụng</th><th>Vùng hoạt động</th><th>Chiều dài (m)</th><th>Trọng tải toàn phần (tấn)</th><th>Dung tích (m³)</th><th>Khả năng khai thác (tấn)</th><th>Khả năng khai thác (TEU)</th><th>Hạn GCN ATKT & BVMT</th><th>Số thuyền viên</th><th>Thuyền trưởng</th><th>Điện thoại</th><th>Lượt gần nhất</th><th aria-label="Thao tác"></th></tr></thead><tbody>${pageItems.map((v, index) => `<tr class="${state.portRegisterSelected.has(v.id) ? 'selected-row' : ''}"><td class="select-column"><input type="checkbox" data-select-port-vessel="${v.id}" ${state.portRegisterSelected.has(v.id) ? 'checked' : ''} aria-label="Chọn ${esc(v.name)}"></td><td>${offset + index + 1}</td><td><strong>${esc(v.name)}</strong></td><td>${esc(v.registration_no)}</td><td>${esc(v.vessel_type)}</td><td>${esc(profileText(v, 'activity_area', v.vessel_class))}</td><td>${esc(v.length_m ?? '')}</td><td>${esc(profileText(v, 'deadweight_tons', v.deadweight_tons ?? ''))}</td><td>${esc(v.gross_tonnage ?? '')}</td><td>${esc(profileText(v, 'cargo_capacity_tons', v.cargo_capacity_tons ?? ''))}</td><td>${esc(v.container_capacity_teu ?? '')}</td><td>${fmtDate(v.certificate_expiry_date)}</td><td>${esc(v.min_crew ?? '')}</td><td>${esc(v.tracking_master_name || '')}</td><td>${esc(v.tracking_master_phone || '')}</td><td>${latestCallCell(v.latest_call)}</td><td class="action-cell port-row-actions"><button class="table-icon-button" data-edit-port-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button><button class="table-icon-button danger-icon" data-remove-port-vessel="${v.id}" title="Gỡ ${esc(v.name)} khỏi sổ theo dõi" aria-label="Gỡ ${esc(v.name)} khỏi sổ theo dõi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5M14 11v5"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có dữ liệu Salan', 'Import file theo dõi hoặc thêm thủ công một Salan.');
+  $('#port-register-table').innerHTML = items.length ? `<table class="data-table port-register-table"><thead><tr><th class="select-column"><input id="select-port-register-page" type="checkbox" ${allPageSelected ? 'checked' : ''} aria-label="Chọn tất cả Salan trên trang này"></th><th>STT</th><th>Tên phương tiện</th><th>Số đăng ký</th><th>Loại / công dụng</th><th>Vùng hoạt động</th><th>Chiều dài (m)</th><th>Trọng tải toàn phần (tấn)</th><th>Dung tích (m³)</th><th>Khả năng khai thác (tấn)</th><th>Khả năng khai thác (TEU)</th><th>Hạn GCN ATKT & BVMT</th><th>Số thuyền viên</th><th>Thuyền trưởng</th><th>Điện thoại</th><th>Lượt gần nhất</th><th aria-label="Thao tác"></th></tr></thead><tbody>${pageItems.map((v, index) => `<tr class="${state.portRegisterSelected.has(v.id) ? 'selected-row' : ''}"><td class="select-column"><input type="checkbox" data-select-port-vessel="${v.id}" ${state.portRegisterSelected.has(v.id) ? 'checked' : ''} aria-label="Chọn ${esc(v.name)}"></td><td>${offset + index + 1}</td><td><span class="vessel-name-with-attachment"><strong>${esc(v.name)}</strong>${vesselAttachmentIndicator(v)}</span></td><td>${esc(v.registration_no)}</td><td>${esc(v.vessel_type)}</td><td>${esc(profileText(v, 'activity_area', v.vessel_class))}</td><td>${esc(v.length_m ?? '')}</td><td>${esc(profileText(v, 'deadweight_tons', v.deadweight_tons ?? ''))}</td><td>${esc(v.gross_tonnage ?? '')}</td><td>${esc(profileText(v, 'cargo_capacity_tons', v.cargo_capacity_tons ?? ''))}</td><td>${esc(v.container_capacity_teu ?? '')}</td><td>${fmtDate(v.certificate_expiry_date)}</td><td>${esc(v.min_crew ?? '')}</td><td>${esc(v.tracking_master_name || '')}</td><td>${esc(v.tracking_master_phone || '')}</td><td>${latestCallCell(v.latest_call)}</td><td class="action-cell port-row-actions"><button class="table-icon-button" data-edit-port-vessel="${v.id}" title="Chỉnh sửa ${esc(v.name)}" aria-label="Chỉnh sửa ${esc(v.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button><button class="table-icon-button danger-icon" data-remove-port-vessel="${v.id}" title="Gỡ ${esc(v.name)} khỏi sổ theo dõi" aria-label="Gỡ ${esc(v.name)} khỏi sổ theo dõi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5M14 11v5"></path></svg></button></td></tr>`).join('')}</tbody></table>` : empty('Chưa có dữ liệu Salan', 'Import file theo dõi hoặc thêm thủ công một Salan.');
   $('#port-register-pagination').innerHTML = items.length > state.portRegisterPageSize ? `<span>Trang ${state.portRegisterPage}/${totalPages}</span><button type="button" class="ghost-button" data-port-register-page="${state.portRegisterPage - 1}" ${state.portRegisterPage === 1 ? 'disabled' : ''}>Trước</button><button type="button" class="ghost-button" data-port-register-page="${state.portRegisterPage + 1}" ${state.portRegisterPage === totalPages ? 'disabled' : ''}>Sau</button>` : '';
   $$('[data-edit-port-vessel]').forEach(button => button.onclick = () => openVessel(Number(button.dataset.editPortVessel), true));
   $$('[data-remove-port-vessel]').forEach(button => button.onclick = () => {
@@ -2537,7 +2604,11 @@ async function previewHistoricalImport(input) {
     try {
       const result = await api('/api/historical-imports/preview', {
         method: 'POST',
-        headers: {...IMPORT_FILE_HEADERS, 'X-Source-Filename': encodeURIComponent(file.name)},
+        headers: {
+          ...IMPORT_FILE_HEADERS,
+          'X-Source-Filename': encodeURIComponent(file.name),
+          'X-Reporting-Period': pl03PeriodValue(),
+        },
         body: file,
       });
       state.historicalBatch[index] = {filename: file.name, result};
@@ -2576,7 +2647,7 @@ function renderHistoricalBatch() {
     if (item.loading) return `<article class="historical-batch-row"><div><strong>${esc(item.filename)}</strong><small>Đang nhận diện cấu trúc…</small></div><span class="table-badge draft">Đang đọc</span></article>`;
     if (item.error) return `<article class="historical-batch-row error"><div><strong>${esc(item.filename)}</strong><small>${esc(item.error)}</small></div><span class="table-badge danger">Không đọc được</span></article>`;
     const result = item.result;
-    return `<article class="historical-batch-row"><div><strong>${esc(item.filename)}</strong><small>${esc(HISTORICAL_SOURCE_LABELS[result.sourceKind] || result.sourceKind)} · ${number(result.accepted)} hợp lệ · ${number(result.review)} cần xử lý · ${number(result.rejected)} bị loại</small></div><button type="button" class="outline-button" data-open-batch-import="${result.id}">Mở kiểm tra</button></article>`;
+    return `<article class="historical-batch-row"><div><strong>${esc(item.filename)}</strong><small>${esc(HISTORICAL_SOURCE_LABELS[result.sourceKind] || result.sourceKind)} · giữ ${number(result.sotRetainedCount)} dòng SOT · ${number(result.newRowCount)} phát sinh mới · ${number(result.review)} cần xử lý</small></div><button type="button" class="outline-button" data-open-batch-import="${result.id}">Mở kiểm tra</button></article>`;
   }).join('');
   $$('[data-open-batch-import]', panel).forEach(button => button.onclick = () => openHistoricalImport(Number(button.dataset.openBatchImport)));
 }
@@ -2619,7 +2690,7 @@ async function renderHistoricalImportWorkspace() {
   const conflictNotice = $('#historical-conflict-notice');
   conflictNotice.hidden = !conflicts.length;
   conflictNotice.innerHTML = conflicts.length
-    ? `<strong>Phát hiện dữ liệu cùng nguồn và cùng kỳ đang được sử dụng</strong>File hiện tại chưa thay bản cũ. Chọn “Giữ bản đang dùng” hoặc ghi lý do và chọn “Dùng file mới · tạo revision”. Lượt liên quan: ${conflicts.map(id => `#${esc(id)}`).join(', ')}.` : '';
+    ? `<strong>Database đã xác nhận là Source of Truth</strong>Đã giữ nguyên ${number(item.sotRetainedCount).toLocaleString('vi-VN')} dòng trùng và chỉ stage ${number(item.newRowCount).toLocaleString('vi-VN')} phát sinh mới. Xác nhận bổ sung không thay bản cũ; chỉ dùng revision khi chủ động sửa dữ liệu. Lượt SOT: ${conflicts.map(id => `#${esc(id)}`).join(', ')}.` : '';
   const reviewGuide = $('#historical-review-guide');
   reviewGuide.hidden = !item.review && !item.rejected;
   if (!reviewGuide.hidden) {
@@ -2639,8 +2710,11 @@ async function renderHistoricalImportWorkspace() {
   $('.historical-confirm-area').hidden = !isPreview;
   $('#keep-historical-existing').hidden = !conflicts.length;
   $('#historical-revision-reason').hidden = !conflicts.length;
+  $('#activate-historical-revision').hidden = !conflicts.length || !item.newRowCount;
   $('#confirm-historical-import').textContent = conflicts.length
-    ? 'Dùng file mới · tạo revision'
+    ? item.newRowCount
+      ? `Xác nhận ${number(item.newRowCount).toLocaleString('vi-VN')} phát sinh mới`
+      : 'Dùng file mới · tạo revision'
     : item.sourceKind === 'tos_berth_call'
       ? 'Xác nhận Berth & ghép Detail'
       : item.sourceKind === 'tos_cargo_detail'
@@ -2683,7 +2757,7 @@ async function loadHistoricalPreviewRows(page = 1) {
     }
     $('#historical-preview-table').innerHTML = rows.length
       ? `<table class="data-table responsive-table historical-preview-table"><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table>`
-      : empty('Không có dòng preview', 'File không có dòng nghiệp vụ phù hợp với cấu trúc đã nhận diện.');
+      : empty('Không có phát sinh mới', item.sotRetainedCount ? `Đã giữ nguyên ${number(item.sotRetainedCount).toLocaleString('vi-VN')} dòng trùng theo database SOT.` : 'File không có dòng nghiệp vụ phù hợp với cấu trúc đã nhận diện.');
     renderHistoricalPagination($('#historical-preview-pagination'), result, 'historical-preview-page', loadHistoricalPreviewRows);
   } catch (error) { toast(error.message, true); }
 }
@@ -2741,12 +2815,21 @@ async function confirmHistoricalImport(action = null) {
     $('#historical-revision-reason-input').focus();
     return;
   }
-  const button = action === 'KEEP_EXISTING' ? $('#keep-historical-existing') : $('#confirm-historical-import');
+  const button = action === 'KEEP_EXISTING'
+    ? $('#keep-historical-existing')
+    : action === 'ACTIVATE_NEW_REVISION' && !$('#activate-historical-revision').hidden
+      ? $('#activate-historical-revision')
+      : $('#confirm-historical-import');
   const original = button.textContent;
   button.disabled = true;
   button.textContent = 'Đang xác nhận…';
   try {
-    const payload = action ? {conflict_action: action, reason: reason || 'Người dùng chọn giữ bản đang dùng.'} : {};
+    const payload = action ? {
+      conflict_action: action,
+      reason: reason || (action === 'MERGE_NEW_RECORDS'
+        ? 'Bổ sung phát sinh mới; giữ nguyên database SOT đã xác nhận.'
+        : 'Người dùng chọn giữ bản đang dùng.'),
+    } : {};
     const result = await api(`/api/historical-imports/${item.id}/confirm`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
     });
@@ -3373,8 +3456,13 @@ async function init() {
   $('#close-historical-preview').onclick = () => { $('#historical-preview').hidden = true; };
   $('#cancel-historical-import').onclick = cancelHistoricalImport;
   $('#keep-historical-existing').onclick = () => confirmHistoricalImport('KEEP_EXISTING');
+  $('#activate-historical-revision').onclick = () => confirmHistoricalImport('ACTIVATE_NEW_REVISION');
   $('#confirm-historical-import').onclick = () => confirmHistoricalImport(
-    state.historicalImport?.conflictingImportIds?.length ? 'ACTIVATE_NEW_REVISION' : null
+    state.historicalImport?.conflictingImportIds?.length
+      ? state.historicalImport?.newRowCount
+        ? 'MERGE_NEW_RECORDS'
+        : 'ACTIVATE_NEW_REVISION'
+      : null
   );
   $('#refresh-historical-history').onclick = () => loadHistoricalImportHistory(1);
   $('#close-port-import').onclick = cancelImport;

@@ -1,8 +1,8 @@
 ﻿{
     "schemaVersion":  "1.0",
     "projectName":  "quanlyxalan",
-    "currentMode":  "FREEZE",
-    "activePhase":  "FREEZE",
+    "currentMode":  "REVIEW",
+    "activePhase":  "REVIEW",
     "phaseModel":  [
                        "INTAKE",
                        "DESIGN",
@@ -12,10 +12,10 @@
                        "REVIEW",
                        "FREEZE"
                    ],
-    "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V1_2026-07-27.md",
-    "nextAllowedMove":  "Tranche closed. Await the next governed request from INTAKE.",
+    "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
+    "nextAllowedMove":  "PR #7 is code-complete with a passing quality gate. Await canonical-repository owner review; do not merge or FREEZE without separate operator authority.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "CLOSER",
+    "activeRole":  "ORCHESTRATOR",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
-    "updatedAt":  "2026-07-27"
+    "updatedAt":  "2026-07-30"
 }

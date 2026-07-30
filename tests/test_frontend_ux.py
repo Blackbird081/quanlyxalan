@@ -151,6 +151,62 @@ def test_historical_import_is_visually_and_semantically_separate_from_live_impor
     assert "@media (max-width: 760px)" in styles_css
 
 
+def test_vessel_editor_supports_profile_attachments():
+    app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+    styles_css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+
+    assert "File đính kèm hồ sơ Salan" in app_js
+    assert 'name="vessel_attachments" type="file" multiple' in app_js
+    assert "function renderVesselAttachments(" in app_js
+    assert "/attachments?filename=${encodeURIComponent(file.name)}" in app_js
+    assert "data-delete-vessel-attachment" in app_js
+    assert ".vessel-attachment-list" in styles_css
+
+
+def test_vessel_editor_omits_blank_optional_fields_before_save_and_upload():
+    app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+    index_html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    save_start = app_js.index("async function saveVessel(event)")
+    save_end = app_js.index("function containerCountTons(", save_start)
+    save_block = app_js[save_start:save_end]
+
+    normalize = "Object.keys(data).forEach(key => { if (data[key] === '') delete data[key]; });"
+    assert normalize in save_block
+    assert save_block.index("data.organization = {name: data.organization_name};") < save_block.index(normalize)
+    assert save_block.index(normalize) < save_block.index("saved = await api(path")
+    assert save_block.index("saved = await api(path") < save_block.index("/attachments?filename=")
+    assert '<script src="app.js?v=1.13.4" defer></script>' in index_html
+    assert '<link rel="stylesheet" href="styles.css?v=1.13.4">' in index_html
+
+
+def test_vessel_lists_show_accessible_attachment_indicator_only_when_files_exist():
+    app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+    styles_css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+
+    assert "function vesselAttachmentIndicator(vessel)" in app_js
+    assert "const count = vessel.attachments?.length || 0;" in app_js
+    assert "if (!count) return '';" in app_js
+    assert 'class="vessel-attachment-indicator"' in app_js
+    assert 'title="${label}" aria-label="${label}"' in app_js
+    assert 'width="14" height="14" style="width:14px;height:14px"' in app_js
+    assert app_js.count("${vesselAttachmentIndicator(v)}") == 2
+    assert ".vessel-name-with-attachment" in styles_css
+    assert ".vessel-attachment-indicator svg" in styles_css
+
+
+def test_historical_cumulative_import_explains_sot_incremental_merge():
+    index_html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="activate-historical-revision"' in index_html
+    assert "Database đã xác nhận là Source of Truth" in app_js
+    assert "sotRetainedCount" in app_js
+    assert "newRowCount" in app_js
+    assert "'MERGE_NEW_RECORDS'" in app_js
+    assert "phát sinh mới" in app_js
+    assert "'X-Reporting-Period': pl03PeriodValue()" in app_js
+
+
 def test_report_dashboard_makes_source_coverage_and_overlap_explicit():
     index_html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
     app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
