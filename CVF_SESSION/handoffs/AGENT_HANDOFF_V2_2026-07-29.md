@@ -8,11 +8,11 @@ Status: IN_PROGRESS
 - Tranche: `WO-QLXL-SOT-ATTACHMENTS-20260729`
 - Current mode: REVIEW
 - Active phase: REVIEW
-- Active role: ORCHESTRATOR
+- Active role: COMMIT_STEWARD
 - Risk: R2
-- Next allowed move: monitor the quality gate for
-  `hoangnmr/quanlyxalan#7` and hand off any CI findings. Do not merge or
-  FREEZE without separate operator authority.
+- Next allowed move: commit/push the independently accepted PR #7 CI repair,
+  complete PR metadata, and monitor the full quality gate. Do not merge or
+  FREEZE.
 - Parked operator checkpoint: none.
 
 ## Intake
@@ -171,6 +171,17 @@ confirmed SOT data, and will not commit or push without separate authority.
   `app.js?v=1.13.2` response contains the blank-field normalization repair.
 - Phase return: BUILD -> REVIEW.
 - Role transition: REPAIR_WORKER -> ORCHESTRATOR for independent R2 review.
+- Independent reviewer: `/root/independent_ui_repair_review`.
+- Independent disposition: `PASS_WITH_LIMITATIONS`; no HIGH, MEDIUM, or LOW
+  findings.
+- Reviewer reproduced the PGDG install in clean Ubuntu 24.04 and confirmed
+  `pg_dump 17.10`, verified YAML parsing, the `GITHUB_PATH` handoff, 18 focused
+  tests, compile/diff/secret checks, and workspace doctor 25/25.
+- The only limitation is that the repaired workflow has not yet been
+  pushed/rerun on GitHub; the static contract test is supplemented by the
+  clean-container reproduction.
+- Role transition: ORCHESTRATOR -> COMMIT_STEWARD under the operator's PR
+  completion authority.
 - Operator requested a visible icon when a Salan profile already has one or
   more attachments.
 - Phase return: REVIEW -> BUILD.
@@ -263,6 +274,32 @@ confirmed SOT data, and will not commit or push without separate authority.
 - User-owned untracked `.claude/` was not staged, committed, or pushed.
 - Role transition: COMMIT_STEWARD -> ORCHESTRATOR after publication handback.
 - Merge and FREEZE remain outside this authorization.
+
+## PR Quality-Gate Repair — 2026-07-30
+
+- Operator directed completion of PR #7 after the readiness audit found a
+  failed quality gate.
+- GitHub evidence: 268 tests passed and two backup tests failed because the CI
+  service ran PostgreSQL 17.10 while the runner resolved `pg_dump` 16.14.
+- The PR body incorrectly generalized this CI failure as a missing `pg_dump`;
+  it must be corrected to distinguish the local missing-client limitation from
+  the CI version mismatch.
+- Phase return: REVIEW -> BUILD.
+- Role transition: ORCHESTRATOR -> REPAIR_WORKER.
+- BUILD acknowledgment: repair is limited to PostgreSQL client alignment in
+  `.github/workflows/ci.yml`, a focused CI configuration regression test,
+  complete PR metadata, executable checks, continuity evidence, and CI
+  monitoring. Merge and FREEZE are not authorized.
+- Repair result: the workflow installs `postgresql-client-17`, prepends its
+  binary directory through `GITHUB_PATH`, and verifies `pg_dump` major version
+  17 before dependency installation and pytest.
+- Added `tests/test_ci_config.py` to lock the PostgreSQL 17 service/client/path
+  contract.
+- Focused CI/frontend suite: 18 passed. Alembic reports one head
+  (`y24f0f000024`); Python compile, JavaScript syntax, diff, catalog, and
+  workspace doctor checks pass.
+- Phase return: BUILD -> REVIEW.
+- Role transition: REPAIR_WORKER -> ORCHESTRATOR for independent R2 review.
 
 ## Claim Boundary
 

@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "Monitor hoangnmr/quanlyxalan PR #7 quality-gate status and hand off any CI findings. Do not merge or FREEZE without separate operator authority.",
+    "nextAllowedMove":  "As COMMIT_STEWARD, commit and push the independently accepted PR #7 CI repair, complete PR metadata, and monitor the full quality gate. Do not merge or FREEZE.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "ORCHESTRATOR",
+    "activeRole":  "COMMIT_STEWARD",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
     "updatedAt":  "2026-07-30"
 }

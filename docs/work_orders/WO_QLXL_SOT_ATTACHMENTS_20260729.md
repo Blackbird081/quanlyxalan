@@ -101,3 +101,25 @@ Role: REPAIR_WORKER. Phase: BUILD.
 Independent re-review found that published revision `x23f0f000023` must remain
 immutable. The repair therefore adds successor `y24f0f000024` for
 period-scoped historical idempotency.
+
+## PR Quality-Gate Repair Amendment
+
+The operator authorized completion of PR #7 after GitHub Actions exposed a
+PostgreSQL client/server mismatch. The bounded changed set additionally
+includes:
+
+- `.github/workflows/ci.yml` to install and select the PostgreSQL 17 client
+  before tests run against the PostgreSQL 17 service;
+- `tests/test_ci_config.py` to lock the service/client major-version contract;
+- this work order, active review/continuity truth, and PR metadata.
+
+Acceptance:
+
+1. the workflow explicitly selects `pg_dump` 17;
+2. the focused CI configuration test passes;
+3. the full GitHub quality gate passes, including pytest, diff check, and
+   secret guard;
+4. the PR body records both migrations, rollback limits, exact test evidence,
+   and the corrected CI failure cause.
+
+Merge and FREEZE remain out of scope.

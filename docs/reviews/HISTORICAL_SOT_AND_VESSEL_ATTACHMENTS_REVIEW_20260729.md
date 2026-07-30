@@ -236,3 +236,30 @@ FREEZE, production deployment, or a live CVF-governance claim.
 - At creation GitHub reported `OPEN`, `MERGEABLE`, with the quality gate in
   progress.
 - This receipt does not authorize merge, FREEZE, or production deployment.
+
+### PR Quality-Gate Repair Evidence
+
+- GitHub Actions run `30509046700` failed with 268 passed and two backup-test
+  failures because PostgreSQL server 17.10 was paired with `pg_dump` 16.14.
+- The workflow repair installs `postgresql-client-17`, selects
+  `/usr/lib/postgresql/17/bin` through `GITHUB_PATH`, and verifies the client
+  major version before pytest.
+- `tests/test_ci_config.py` locks the PostgreSQL 17 service/client/path
+  contract.
+- Focused CI/frontend tests: 18 passed.
+- Alembic: one head (`y24f0f000024`).
+- Python compileall, JavaScript syntax, diff check, catalog check, and
+  workspace doctor 25/25: pass.
+- Status: pending independent R2 review and full GitHub quality-gate rerun.
+
+Independent CI-repair review:
+
+- Disposition: `PASS_WITH_LIMITATIONS`.
+- Findings: none at HIGH, MEDIUM, or LOW.
+- Clean Ubuntu 24.04 reproduction installed `postgresql-client-17` from the
+  signed PGDG repository and returned `pg_dump 17.10`.
+- Reviewer verified YAML parsing, safe repository/key setup, bounded
+  permissions, correct `GITHUB_PATH` propagation, 18 focused tests,
+  compile/diff/secret checks, and workspace doctor 25/25.
+- Remaining limitation: the repaired workflow must be pushed and pass the full
+  GitHub quality gate; the regression test is a static configuration contract.
