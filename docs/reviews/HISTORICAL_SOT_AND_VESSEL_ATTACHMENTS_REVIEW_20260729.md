@@ -263,3 +263,19 @@ Independent CI-repair review:
   compile/diff/secret checks, and workspace doctor 25/25.
 - Remaining limitation: the repaired workflow must be pushed and pass the full
   GitHub quality gate; the regression test is a static configuration contract.
+
+Final GitHub evidence:
+
+- CI repair commit: `57b8bc6`.
+- Quality-gate run:
+  `https://github.com/hoangnmr/quanlyxalan/actions/runs/30509548693`.
+- Result: SUCCESS — 271 passed, 3 warnings, 0 failed.
+- PostgreSQL client install and major-version verification, Python compile,
+  diff check, and secret guard all passed.
+- PR body includes migration order, deployment command, downgrade refusal
+  conditions, exact CI incident/correction, review evidence, and claim
+  limitations.
+- The fork account cannot formally request the canonical owner as reviewer or
+  assign labels/assignees; owner review remains a GitHub permission checkpoint.
+- Status: code-complete and CI-green, pending canonical-owner review. Merge,
+  FREEZE, and production deployment remain unauthorized.

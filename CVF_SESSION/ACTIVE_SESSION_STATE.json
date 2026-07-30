@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "As COMMIT_STEWARD, commit and push the independently accepted PR #7 CI repair, complete PR metadata, and monitor the full quality gate. Do not merge or FREEZE.",
+    "nextAllowedMove":  "PR #7 is code-complete with a passing quality gate. Await canonical-repository owner review; do not merge or FREEZE without separate operator authority.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "COMMIT_STEWARD",
+    "activeRole":  "ORCHESTRATOR",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
     "updatedAt":  "2026-07-30"
 }

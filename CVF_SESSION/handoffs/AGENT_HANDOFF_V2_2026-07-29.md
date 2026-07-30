@@ -8,11 +8,11 @@ Status: IN_PROGRESS
 - Tranche: `WO-QLXL-SOT-ATTACHMENTS-20260729`
 - Current mode: REVIEW
 - Active phase: REVIEW
-- Active role: COMMIT_STEWARD
+- Active role: ORCHESTRATOR
 - Risk: R2
-- Next allowed move: commit/push the independently accepted PR #7 CI repair,
-  complete PR metadata, and monitor the full quality gate. Do not merge or
-  FREEZE.
+- Next allowed move: PR #7 is code-complete with a passing quality gate;
+  await canonical-repository owner review. Do not merge or FREEZE without
+  separate operator authority.
 - Parked operator checkpoint: none.
 
 ## Intake
@@ -182,6 +182,21 @@ confirmed SOT data, and will not commit or push without separate authority.
   clean-container reproduction.
 - Role transition: ORCHESTRATOR -> COMMIT_STEWARD under the operator's PR
   completion authority.
+- CI repair commit: `57b8bc6` (`ci: align PostgreSQL client with test
+  service`), pushed to the PR head branch.
+- GitHub Actions run `30509548693`: SUCCESS.
+- Full GitHub evidence: 271 passed, 3 warnings, 0 failed; PostgreSQL client
+  install/version check, Python compile, diff check, and secret guard all
+  passed.
+- PR body now records both migrations, downgrade refusal conditions,
+  deployment command, corrected CI failure cause, independent review,
+  limitations, and the successful quality-gate receipt.
+- GitHub rejected formal reviewer/assignee/label mutation from the fork
+  account because it lacks canonical-repository permission. This is a
+  repository-authorization limitation, not missing code or evidence.
+- Role transition: COMMIT_STEWARD -> ORCHESTRATOR after code-complete
+  publication handback.
+- Merge and FREEZE remain unauthorized.
 - Operator requested a visible icon when a Salan profile already has one or
   more attachments.
 - Phase return: REVIEW -> BUILD.

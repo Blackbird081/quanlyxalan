@@ -17,7 +17,7 @@
                              "Local backup execution requires PostgreSQL client tools such as pg_dump in PATH; Docker test evidence used a matching PostgreSQL 17 client and server.",
                              "Two existing openpyxl Data Validation warnings remain in the last closed baseline.",
                              "Independent R2 review of the 2026-07-30 vessel-editor and attachment-indicator repairs returned PASS_WITH_LIMITATIONS: no connected browser or Playwright runtime was available for a rendered screenshot/computed-style check.",
-                             "WO-QLXL-SOT-ATTACHMENTS-20260729 remains in REVIEW in hoangnmr/quanlyxalan PR #7; merge and FREEZE are not authorized."
+                             "WO-QLXL-SOT-ATTACHMENTS-20260729 is code-complete in hoangnmr/quanlyxalan PR #7 with a passing GitHub quality gate; canonical-owner review, merge, and FREEZE remain pending."
                          ],
     "evidence":  [
                      "docs/decisions/APP_ROUTE_EXTRACTION_DESIGN_20260727.md",
@@ -30,6 +30,8 @@
                      "docs/work_orders/WO_QLXL_SOT_ATTACHMENTS_20260729.md",
                      "docs/reviews/HISTORICAL_SOT_AND_VESSEL_ATTACHMENTS_REVIEW_20260729.md",
                      "commit:31d2da4",
+                     "commit:57b8bc6",
+                     "https://github.com/hoangnmr/quanlyxalan/actions/runs/30509548693",
                      "https://github.com/hoangnmr/quanlyxalan/pull/7"
                  ],
     "updatedAt":  "2026-07-30"
