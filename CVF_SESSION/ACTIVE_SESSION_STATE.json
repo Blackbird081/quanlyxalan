@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "As COMMIT_STEWARD, verify and commit the independently reviewed changed set, push the feature branch through the Blackbird081 fork, and create or update a PR targeting hoangnmr/quanlyxalan main. FREEZE remains unauthorized.",
+    "nextAllowedMove":  "Monitor hoangnmr/quanlyxalan PR #7 quality-gate status and hand off any CI findings. Do not merge or FREEZE without separate operator authority.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "COMMIT_STEWARD",
+    "activeRole":  "ORCHESTRATOR",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
     "updatedAt":  "2026-07-30"
 }

@@ -223,3 +223,16 @@ directly mitigate the reported oversized-icon failure.
 
 This is local review evidence only. It does not authorize commit, push,
 FREEZE, production deployment, or a live CVF-governance claim.
+
+### Publication Receipt
+
+- Operator authorized commit and pull-request publication after independent
+  review.
+- Reviewed implementation commit: `31d2da4`.
+- Branch:
+  `Blackbird081/quanlyxalan:feat/port-staff-declaration-create-import`.
+- Pull request: `https://github.com/hoangnmr/quanlyxalan/pull/7`, targeting
+  `hoangnmr/quanlyxalan:main`.
+- At creation GitHub reported `OPEN`, `MERGEABLE`, with the quality gate in
+  progress.
+- This receipt does not authorize merge, FREEZE, or production deployment.

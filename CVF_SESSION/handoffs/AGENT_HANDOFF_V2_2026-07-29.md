@@ -8,12 +8,11 @@ Status: IN_PROGRESS
 - Tranche: `WO-QLXL-SOT-ATTACHMENTS-20260729`
 - Current mode: REVIEW
 - Active phase: REVIEW
-- Active role: COMMIT_STEWARD
+- Active role: ORCHESTRATOR
 - Risk: R2
-- Next allowed move: verify and commit the independently reviewed changed set,
-  push the feature branch through the `Blackbird081` fork, and create or
-  update a PR targeting `hoangnmr/quanlyxalan:main`. FREEZE remains
-  unauthorized.
+- Next allowed move: monitor the quality gate for
+  `hoangnmr/quanlyxalan#7` and hand off any CI findings. Do not merge or
+  FREEZE without separate operator authority.
 - Parked operator checkpoint: none.
 
 ## Intake
@@ -249,6 +248,21 @@ confirmed SOT data, and will not commit or push without separate authority.
   `Blackbird081` fork branch and target `hoangnmr/quanlyxalan:main`; the
   COMMIT_STEWARD must detect and update an existing PR instead of creating a
   duplicate.
+
+## Commit And PR Receipt — 2026-07-30
+
+- Reviewed changed-set commit: `31d2da4` (`fix: complete vessel attachment UI
+  workflow`).
+- Pushed branch:
+  `Blackbird081/quanlyxalan:feat/port-staff-declaration-create-import`.
+- Canonical target: `hoangnmr/quanlyxalan:main`.
+- Pull request: `https://github.com/hoangnmr/quanlyxalan/pull/7`.
+- Duplicate-PR check returned no existing PR for this head before creation.
+- GitHub reported the PR as `OPEN` and `MERGEABLE`; quality gate was running
+  when the receipt was written.
+- User-owned untracked `.claude/` was not staged, committed, or pushed.
+- Role transition: COMMIT_STEWARD -> ORCHESTRATOR after publication handback.
+- Merge and FREEZE remain outside this authorization.
 
 ## Claim Boundary
 
