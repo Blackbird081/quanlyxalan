@@ -2,17 +2,70 @@
 
 Status: IN_PROGRESS
 
+## Vessel Attachment Access Tranche — 2026-07-30
+
+- The operator reported that the attachment count is visible but cannot be
+  clicked to inspect the file.
+- Rehydration and workspace doctor passed 25/25.
+- Risk: R2 because stored file access must preserve tenant isolation.
+- Phase/role route: REVIEW/ORCHESTRATOR -> INTAKE/ORCHESTRATOR ->
+  DESIGN/SPEC_AUTHOR -> SPEC/SPEC_AUTHOR ->
+  WORK_ORDER/WORK_ORDER_AUTHOR -> BUILD/IMPLEMENTATION_WORKER.
+- Authorized work order:
+  `docs/work_orders/WO_QLXL_VESSEL_ATTACHMENT_ACCESS_20260730.md`.
+- BUILD acknowledgment: implementation is limited to an actionable indicator,
+  tenant-guarded forced download, storage read support, cache key, focused
+  tests, browser evidence, and governed truth updates. PR #8 remains parked;
+  commit, push, merge, deployment, and FREEZE are not authorized.
+- BUILD result: both list indicators are buttons; they open/focus the correct
+  vessel attachment section; filenames download through a canonical
+  vessel-scope guard; response headers force download and prevent sniffing.
+- Focused suite: 7 passed. Full Docker PostgreSQL 17 suite: 271 passed,
+  3 warnings, 0 failed. Compile, JavaScript syntax, catalog, and diff checks
+  passed. A live local request returned the exact PDF bytes and security
+  headers.
+- Browser skill setup found no available browser session, so rendered click
+  evidence is parked without substituting mock proof.
+- Phase/role transition: BUILD/IMPLEMENTATION_WORKER ->
+  REVIEW/ORCHESTRATOR for independent R2 review.
+- Independent disposition: BLOCKED with one MEDIUM and one LOW finding.
+- Accepted repair scope: translate MinIO missing-object errors to the endpoint's
+  controlled 404 contract; make the download call force blob handling on
+  successful responses while preserving JSON error parsing; add regression
+  coverage.
+- Phase/role return: REVIEW/ORCHESTRATOR -> BUILD/REPAIR_WORKER.
+- Repair result: MinIO `NoSuchKey`/`NoSuchObject` now becomes
+  `FileNotFoundError` for controlled endpoint 404 behavior; successful
+  attachment downloads explicitly request Blob handling while JSON error
+  responses remain parseable.
+- Post-repair focused suite: 8 passed. Full Docker PostgreSQL 17 suite:
+  272 passed, 3 warnings, 0 failed.
+- Phase/role transition: BUILD/REPAIR_WORKER -> REVIEW/ORCHESTRATOR for
+  independent re-review.
+- Independent re-review disposition: PASS_WITH_LIMITATIONS; no remaining
+  HIGH, MEDIUM, or LOW findings. Reviewer independently reproduced both MinIO
+  missing stages, connection cleanup, JSON-labelled PDF Blob handling, and
+  JSON error preservation.
+- The only limitation is unavailable rendered-browser evidence. Code is
+  complete locally; commit, push, PR, merge, deployment, and FREEZE remain
+  outside this request's authority.
+- The operator explicitly authorized commit and PR publication for this
+  tranche on 2026-07-30. Role transition: ORCHESTRATOR -> COMMIT_STEWARD.
+  Publication is limited to `fix/vessel-attachment-download`; user-owned
+  `.claude/` remains excluded. Merge, deployment, and FREEZE are not
+  authorized.
+
 ## Current State
 
 - Project: quanlyxalan
-- Tranche: `WO-QLXL-SOT-ATTACHMENTS-20260729`
+- Tranche: `WO-QLXL-VESSEL-ATTACHMENT-ACCESS-20260730`
 - Current mode: REVIEW
 - Active phase: REVIEW
 - Active role: ORCHESTRATOR
 - Risk: R2
-- Next allowed move: dashboard warning follow-up PR #8 is CI-green and
-  mergeable; await canonical-owner review. Do not merge or FREEZE without
-  separate operator authority.
+- Next allowed move: PR #9 is CI-green, clean, and mergeable; await
+  canonical-owner review. Do not merge or FREEZE without separate operator
+  authority.
 - Parked operator checkpoint: none.
 
 ## Intake
@@ -345,6 +398,26 @@ confirmed SOT data, and will not commit or push without separate authority.
 
 This tranche changes application data/storage behavior. It does not claim live
 AI governance behavior.
+
+## Vessel Attachment Access PR Receipt — 2026-07-30
+
+- Initial reviewed commit: `dbdeae2`.
+- Canonical `main` advanced when PR #8 was merged at `adafe65`; PR #9 initially
+  reported a conflict.
+- Rebased onto `adafe65`, resolved continuity conflicts by preserving both the
+  merged dashboard-warning receipts and the attachment-access tranche, then
+  reran 9 focused tests successfully.
+- Final reviewed source commit after rebase: `807e9d9`.
+- Pushed with `--force-with-lease` to
+  `Blackbird081/quanlyxalan:fix/vessel-attachment-download`.
+- Pull request: `https://github.com/hoangnmr/quanlyxalan/pull/9`.
+- GitHub quality gate `30517459808`: SUCCESS — 273 passed, 3 warnings,
+  0 failed; PostgreSQL 17 client check, compile, diff check, and secret guard
+  passed.
+- GitHub reports PR #9 `OPEN`, `CLEAN`, and `MERGEABLE`.
+- User-owned `.claude/` was not staged, committed, or pushed.
+- Role transition: COMMIT_STEWARD -> ORCHESTRATOR after publication handback.
+- Merge and FREEZE remain unauthorized.
 
 ## Dashboard Certificate Warning Repair — 2026-07-30
 

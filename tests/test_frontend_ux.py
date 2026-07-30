@@ -175,23 +175,36 @@ def test_vessel_editor_omits_blank_optional_fields_before_save_and_upload():
     assert save_block.index("data.organization = {name: data.organization_name};") < save_block.index(normalize)
     assert save_block.index(normalize) < save_block.index("saved = await api(path")
     assert save_block.index("saved = await api(path") < save_block.index("/attachments?filename=")
-    assert '<script src="app.js?v=1.13.4" defer></script>' in index_html
-    assert '<link rel="stylesheet" href="styles.css?v=1.13.4">' in index_html
+    assert '<script src="app.js?v=1.13.5" defer></script>' in index_html
+    assert '<link rel="stylesheet" href="styles.css?v=1.13.5">' in index_html
 
 
 def test_vessel_lists_show_accessible_attachment_indicator_only_when_files_exist():
     app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
     styles_css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+    index_html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
 
-    assert "function vesselAttachmentIndicator(vessel)" in app_js
+    assert "function vesselAttachmentIndicator(vessel, portRegister = false)" in app_js
     assert "const count = vessel.attachments?.length || 0;" in app_js
     assert "if (!count) return '';" in app_js
-    assert 'class="vessel-attachment-indicator"' in app_js
-    assert 'title="${label}" aria-label="${label}"' in app_js
+    assert 'type="button" class="vessel-attachment-indicator"' in app_js
+    assert 'data-open-vessel-attachments="${vessel.id}"' in app_js
+    assert 'aria-label="Mở ${label}"' in app_js
     assert 'width="14" height="14" style="width:14px;height:14px"' in app_js
-    assert app_js.count("${vesselAttachmentIndicator(v)}") == 2
+    assert "${vesselAttachmentIndicator(v)}" in app_js
+    assert "${vesselAttachmentIndicator(v, true)}" in app_js
+    assert "function bindVesselAttachmentIndicators(root = document)" in app_js
+    assert "function downloadVesselAttachment(attachmentId)" in app_js
+    assert "/attachments/${attachmentId}/download" in app_js
+    assert "response.ok && responseType === 'blob'" in app_js
+    assert "{responseType:'blob'}" in app_js
+    assert 'class="vessel-attachment-download"' in app_js
+    assert 'id="vessel-attachments-section"' in app_js
     assert ".vessel-name-with-attachment" in styles_css
     assert ".vessel-attachment-indicator svg" in styles_css
+    assert ".vessel-attachment-download" in styles_css
+    assert '<script src="app.js?v=1.13.5" defer></script>' in index_html
+    assert '<link rel="stylesheet" href="styles.css?v=1.13.5">' in index_html
 
 
 def test_historical_cumulative_import_explains_sot_incremental_merge():

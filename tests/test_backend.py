@@ -1391,6 +1391,50 @@ def test_vessel_attachment_upload_list_tenant_guard_and_delete(
     assert client.get(
         f"/api/vessels/{vessel_id}/attachments", headers=customer_headers,
     ).status_code == 403
+    downloaded = client.get(
+        f"/api/vessels/{vessel_id}/attachments/{attachment['id']}/download",
+        headers=auth_headers,
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.content == b"%PDF-1.4 vessel certificate"
+    assert downloaded.headers["content-type"] == "application/pdf"
+    assert downloaded.headers["content-disposition"] == (
+        "attachment; filename*=UTF-8''GCN-an-toan.pdf"
+    )
+    assert downloaded.headers["x-content-type-options"] == "nosniff"
+    assert downloaded.headers["content-security-policy"] == "sandbox"
+    assert client.get(
+        f"/api/vessels/{vessel_id}/attachments/{attachment['id']}/download",
+        headers=customer_headers,
+    ).status_code == 403
+
+    second = client.post("/api/vessels?port_register=true", headers=auth_headers, json={
+        "organization_name": "TEST PORT REGISTER OWNER",
+        "name": "SALAN KHÔNG SỞ HỮU FILE",
+        "registration_no": f"SG-ATT-{uuid.uuid4().hex[:8]}".upper(),
+        "vessel_type": "CHỞ HÀNG KHÔ",
+        "vessel_class": "VR-SI",
+    })
+    assert second.status_code == 200, second.text
+    second_vessel_id = second.json()["id"]
+    assert client.get(
+        f"/api/vessels/{second_vessel_id}/attachments/{attachment['id']}/download",
+        headers=auth_headers,
+    ).status_code == 404
+
+    db = SessionLocal()
+    try:
+        stored_name = db.query(Attachment).filter_by(id=attachment["id"]).one().stored_name
+    finally:
+        db.close()
+    (storage.root / stored_name).unlink()
+    missing = client.get(
+        f"/api/vessels/{vessel_id}/attachments/{attachment['id']}/download",
+        headers=auth_headers,
+    )
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "File đính kèm không còn trong kho lưu trữ."
+    storage.put_quarantined(stored_name, b"%PDF-1.4 vessel certificate")
 
     deleted = client.delete(
         f"/api/vessels/{vessel_id}/attachments/{attachment['id']}", headers=auth_headers,
@@ -1405,7 +1449,9 @@ def test_vessel_attachment_upload_list_tenant_guard_and_delete(
 
     db = SessionLocal()
     try:
-        db.query(Vessel).filter_by(id=vessel_id).delete()
+        db.query(Vessel).filter(Vessel.id.in_([vessel_id, second_vessel_id])).delete(
+            synchronize_session=False
+        )
         db.commit()
     finally:
         db.close()

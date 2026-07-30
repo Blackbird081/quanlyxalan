@@ -12,6 +12,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, field_validator
@@ -671,6 +672,37 @@ def list_vessel_attachments(
         raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện.")
     require_vessel_in_scope(db, scope, vessel)
     return [_attachment_dict(item) for item in vessel.attachments]
+
+
+@router.get("/api/vessels/{vessel_id}/attachments/{attachment_id}/download")
+def download_vessel_attachment(
+    vessel_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(resolve_scope),
+):
+    vessel = db.query(Vessel).filter(Vessel.id == vessel_id).first()
+    if not vessel:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phương tiện.")
+    require_vessel_in_scope(db, scope, vessel)
+    item = db.query(Attachment).filter_by(id=attachment_id, vessel_id=vessel_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Không tìm thấy file đính kèm.")
+    try:
+        content = attachment_storage.get(item.stored_name)
+    except FileNotFoundError:
+        logger.warning("Stored vessel attachment is missing: attachment=%s", item.id)
+        raise HTTPException(status_code=404, detail="File đính kèm không còn trong kho lưu trữ.")
+    filename = quote(item.original_name, safe="")
+    return Response(
+        content=content,
+        media_type=item.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+        },
+    )
 
 
 @router.post("/api/vessels/{vessel_id}/attachments")

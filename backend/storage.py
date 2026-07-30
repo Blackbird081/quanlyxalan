@@ -9,6 +9,7 @@ from typing import Protocol
 class ObjectStorage(Protocol):
     backend_name: str
     def put_quarantined(self, object_key: str, content: bytes) -> str: ...
+    def get(self, object_key: str) -> bytes: ...
     def delete(self, object_key: str) -> None: ...
 
 
@@ -25,6 +26,12 @@ class LocalQuarantineStorage:
             raise ValueError("Object key nằm ngoài quarantine root.")
         target.write_bytes(content)
         return object_key
+
+    def get(self, object_key: str) -> bytes:
+        target = (self.root / object_key).resolve()
+        if self.root not in target.parents:
+            raise ValueError("Object key nằm ngoài quarantine root.")
+        return target.read_bytes()
 
     def delete(self, object_key: str) -> None:
         target = (self.root / object_key).resolve()
@@ -56,6 +63,25 @@ class MinioQuarantineStorage:
             self.client.make_bucket(self.bucket)
         self.client.put_object(self.bucket, key, BytesIO(content), len(content))
         return key
+
+    def get(self, object_key: str) -> bytes:
+        from minio.error import S3Error
+
+        try:
+            response = self.client.get_object(self.bucket, object_key)
+        except S3Error as exc:
+            if exc.code in {"NoSuchKey", "NoSuchObject"}:
+                raise FileNotFoundError(object_key) from exc
+            raise
+        try:
+            return response.read()
+        except S3Error as exc:
+            if exc.code in {"NoSuchKey", "NoSuchObject"}:
+                raise FileNotFoundError(object_key) from exc
+            raise
+        finally:
+            response.close()
+            response.release_conn()
 
     def delete(self, object_key: str) -> None:
         self.client.remove_object(self.bucket, object_key)
