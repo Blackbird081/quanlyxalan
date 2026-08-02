@@ -13,6 +13,7 @@ const state = {
   reportingUnits: [], activeReportingUnitId: null, reportingUnitOrganizations: [],
   users: [], organizations: [], editingOrganization: null,
   auditLogPage: 1, auditLogEntityTypes: [],
+  vesselAttachmentPreview: null,
 };
 const CREW_ROLES = ['Thuyền trưởng', 'Máy trưởng', 'Thuyền viên', 'Thuyền phó'];
 
@@ -448,6 +449,11 @@ function setSidebarOpen(open) {
 
 function route() {
   let name = location.hash.replace('#', '') || 'dashboard';
+  const adminOnlyRoutes = ['import', 'reports'];
+  if (state.currentUser?.role && state.currentUser.role !== 'PLATFORM_ADMIN' && adminOnlyRoutes.includes(name)) {
+    name = state.currentUser.role === 'CUSTOMER' ? 'declarations' : 'dashboard';
+    history.replaceState(null, '', `${location.pathname}${location.search}#${name}`);
+  }
   if (state.currentUser?.role === 'CUSTOMER' && !['declarations', 'crew', 'settings'].includes(name)) {
     name = 'declarations';
     if (location.hash !== '#declarations') history.replaceState(null, '', `${location.pathname}${location.search}#declarations`);
@@ -481,7 +487,7 @@ async function loadDashboard(query = '') {
       ['PHƯƠNG TIỆN', data.stats.vessels, 'Hồ sơ đang lưu'],
       ['PHIẾU NHÁP', data.stats.drafts, 'Chờ khách hoàn tất'],
       ['ĐÃ XÁC NHẬN GỬI', data.stats.submitted, 'Đang chờ Cảng xử lý hoặc đã duyệt'],
-      ['DỰ KIẾN ĐẾN HÔM NAY', data.stats.arrivingToday, 'Theo ETA đã khai'],
+      ['DỰ KIẾN ĐẾN HÔM NAY', data.stats.arrivingToday, 'Theo ETB đã khai'],
       ['CẢNH BÁO CHỨNG CHỈ', data.stats.certificateWarnings, 'Hết hạn hoặc còn dưới 30 ngày'],
     ];
     $('#stats').innerHTML = cards.map(card => `<article class="stat-card"><p>${card[0]}</p><strong>${card[1]}</strong><small>${card[2]}</small></article>`).join('');
@@ -1262,36 +1268,109 @@ function renderVesselAttachments() {
   const items = state.editingVessel?.attachments || [];
   container.innerHTML = items.length
     ? items.map(item => `<div class="vessel-attachment-row">
-        <span><button type="button" class="vessel-attachment-download" data-download-vessel-attachment="${item.id}">${esc(item.original_name)}</button><small>${number(item.size_bytes).toLocaleString('vi-VN')} byte · ${esc(item.scan_status)}</small></span>
+        <span><button type="button" class="vessel-attachment-preview-link" data-preview-vessel-attachment="${item.id}" aria-label="Xem trước file ${esc(item.original_name)}">${esc(item.original_name)}</button><small>${number(item.size_bytes).toLocaleString('vi-VN')} byte · ${esc(item.scan_status)}</small></span>
         <button type="button" class="table-icon-button danger-icon" data-delete-vessel-attachment="${item.id}" aria-label="Xóa file ${esc(item.original_name)}">×</button>
       </div>`).join('')
     : '<small>Chưa có file đính kèm cho hồ sơ này.</small>';
-  $$('[data-download-vessel-attachment]', container).forEach(button => {
-    button.onclick = () => downloadVesselAttachment(Number(button.dataset.downloadVesselAttachment));
+  $$('[data-preview-vessel-attachment]', container).forEach(button => {
+    button.onclick = () => openVesselAttachmentPreview(Number(button.dataset.previewVesselAttachment));
   });
   $$('[data-delete-vessel-attachment]', container).forEach(button => {
     button.onclick = () => deleteVesselAttachment(Number(button.dataset.deleteVesselAttachment));
   });
 }
 
-async function downloadVesselAttachment(attachmentId) {
+const VESSEL_ATTACHMENT_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+
+function vesselAttachmentExtension(filename = '') {
+  const dot = filename.lastIndexOf('.');
+  return dot === -1 ? '' : filename.slice(dot).toLowerCase();
+}
+
+function clearVesselAttachmentPreview() {
+  if (state.vesselAttachmentPreview?.objectUrl) {
+    URL.revokeObjectURL(state.vesselAttachmentPreview.objectUrl);
+  }
+  state.vesselAttachmentPreview = null;
+  const content = $('#vessel-attachment-preview-content');
+  if (content) content.innerHTML = '';
+}
+
+async function openVesselAttachmentPreview(attachmentId) {
   const vesselId = state.editingVessel?.id;
   const attachment = (state.editingVessel?.attachments || []).find(item => item.id === attachmentId);
   if (!vesselId || !attachment) return;
+  clearVesselAttachmentPreview();
+  const previewRequest = {vesselId, attachment, blob: null, objectUrl: null};
+  state.vesselAttachmentPreview = previewRequest;
+  $('#vessel-attachment-preview-title').textContent = attachment.original_name;
+  $('#vessel-attachment-preview-meta').textContent = `${number(attachment.size_bytes).toLocaleString('vi-VN')} byte · ${attachment.scan_status}`;
+  $('#download-vessel-attachment').disabled = false;
+  const content = $('#vessel-attachment-preview-content');
+  const dialog = $('#vessel-attachment-preview-dialog');
+  content.innerHTML = '<div class="vessel-attachment-preview-state"><strong>Đang tải bản xem trước…</strong><p>File chưa được tải xuống thiết bị.</p></div>';
+  dialog.showModal();
+
+  const extension = vesselAttachmentExtension(attachment.original_name);
+  const isImage = VESSEL_ATTACHMENT_IMAGE_EXTENSIONS.has(extension);
+  const isPdf = extension === '.pdf';
+  if (!isImage && !isPdf) {
+    content.innerHTML = '<div class="vessel-attachment-preview-state"><strong>Không hỗ trợ xem trực tiếp định dạng này</strong><p>Word và Excel cần được tải xuống rồi mở bằng ứng dụng phù hợp.</p></div>';
+    return;
+  }
+
   try {
     const blob = await api(
       `/api/vessels/${vesselId}/attachments/${attachmentId}/download`,
       {responseType:'blob'},
     );
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = attachment.original_name;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) { toast(error.message, true); }
+    if (state.vesselAttachmentPreview !== previewRequest) return;
+    const objectUrl = URL.createObjectURL(blob);
+    state.vesselAttachmentPreview = {vesselId, attachment, blob, objectUrl};
+    content.innerHTML = isImage
+      ? `<img class="vessel-attachment-preview-image" src="${objectUrl}" alt="Bản xem trước ${esc(attachment.original_name)}">`
+      : `<iframe class="vessel-attachment-preview-frame" src="${objectUrl}" title="Bản xem trước ${esc(attachment.original_name)}" sandbox></iframe>`;
+  } catch (error) {
+    if (state.vesselAttachmentPreview !== previewRequest) return;
+    content.innerHTML = `<div class="vessel-attachment-preview-state error"><strong>Không thể mở bản xem trước</strong><p>${esc(error.message)}</p></div>`;
+  }
+}
+
+function saveVesselAttachmentBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadVesselAttachment(attachmentId, existingBlob = null) {
+  const vesselId = state.editingVessel?.id;
+  const attachment = (state.editingVessel?.attachments || []).find(item => item.id === attachmentId);
+  if (!vesselId || !attachment) return;
+  const button = $('#download-vessel-attachment');
+  const original = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Đang tải…';
+  }
+  try {
+    const blob = existingBlob || await api(
+      `/api/vessels/${vesselId}/attachments/${attachmentId}/download`,
+      {responseType:'blob'},
+    );
+    saveVesselAttachmentBlob(blob, attachment.original_name);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
 }
 
 async function deleteVesselAttachment(attachmentId) {
@@ -2442,7 +2521,7 @@ const HISTORICAL_SOURCE_LABELS = {
 };
 const HISTORICAL_STATUS_LABELS = {
   PREVIEWED: 'Chờ xác nhận', COMMITTED: 'Đang dùng', REVIEW: 'Chờ kiểm tra',
-  REJECTED: 'Đã hủy / giữ bản cũ', SUPERSEDED: 'Đã được thay bằng revision mới',
+  REJECTED: 'Đã hủy / giữ bản cũ', SUPERSEDED: 'Đã được thay bằng bản sửa đổi mới',
 };
 const HISTORICAL_WARNING_LABELS = {
   INVALID_CALL_IDENTITY: 'Thiếu hoặc sai tên phương tiện, năm hay số chuyến.',
@@ -2535,7 +2614,7 @@ function ensureHistoricalExportPanel() {
   const panel = document.createElement('section');
   panel.id = 'historical-pl03-export';
   panel.className = 'panel historical-export-panel';
-  panel.innerHTML = `<div><p class="eyebrow">KẾT QUẢ ĐỐI SOÁT</p><h2>PL.03 tổng hợp từ TOS</h2></div><div class="historical-export-actions">${pl03PeriodSelectsHtml()}<button id="export-historical-pl03" type="button" class="primary-button">Xuất PL.03 tổng hợp</button></div>`;
+  panel.innerHTML = `<div><p class="eyebrow">KẾT QUẢ ĐỐI SOÁT</p><h2>PL.03 từ TOS</h2></div><div class="historical-export-actions">${pl03PeriodSelectsHtml()}<button id="export-historical-pl03" type="button" class="primary-button">Xuất PL.03</button></div>`;
   historyPanel.before(panel);
   $('#export-historical-pl03').onclick = exportHistoricalPl03;
 }
@@ -2543,7 +2622,7 @@ function ensureHistoricalExportPanel() {
 async function exportHistoricalPl03() {
   const reportingPeriod = pl03PeriodValue();
   if (!reportingPeriod) {
-    toast('Chọn tháng báo cáo trước khi xuất PL.03 tổng hợp.', true);
+    toast('Chọn tháng báo cáo.', true);
     $('#historical-pl03-month')?.focus();
     return;
   }
@@ -2583,7 +2662,7 @@ function historicalResultCell(item) {
 function historicalRevCell(item) {
   const link = item.supersededByImportId ? `<br><small>→ #${item.supersededByImportId}</small>` : '';
   const rev = item.revisionNo > 1
-    ? `<span class="rev-badge">rev ${item.revisionNo}</span>`
+    ? `<span class="rev-badge">bản sửa đổi ${item.revisionNo}</span>`
     : `<span class="rev-muted">${item.revisionNo}</span>`;
   return rev + link;
 }
@@ -2734,7 +2813,7 @@ async function renderHistoricalImportWorkspace() {
   const conflictNotice = $('#historical-conflict-notice');
   conflictNotice.hidden = !conflicts.length;
   conflictNotice.innerHTML = conflicts.length
-    ? `<strong>Database đã xác nhận là Source of Truth</strong>Đã giữ nguyên ${number(item.sotRetainedCount).toLocaleString('vi-VN')} dòng trùng và chỉ stage ${number(item.newRowCount).toLocaleString('vi-VN')} phát sinh mới. Xác nhận bổ sung không thay bản cũ; chỉ dùng revision khi chủ động sửa dữ liệu. Lượt SOT: ${conflicts.map(id => `#${esc(id)}`).join(', ')}.` : '';
+    ? `<strong>Database đã xác nhận là Source of Truth</strong>Đã giữ nguyên ${number(item.sotRetainedCount).toLocaleString('vi-VN')} dòng trùng và chỉ stage ${number(item.newRowCount).toLocaleString('vi-VN')} phát sinh mới. Xác nhận bổ sung không thay bản cũ; chỉ tạo bản sửa đổi khi chủ động sửa dữ liệu. Lượt SOT: ${conflicts.map(id => `#${esc(id)}`).join(', ')}.` : '';
   const reviewGuide = $('#historical-review-guide');
   reviewGuide.hidden = !item.review && !item.rejected;
   if (!reviewGuide.hidden) {
@@ -2758,7 +2837,7 @@ async function renderHistoricalImportWorkspace() {
   $('#confirm-historical-import').textContent = conflicts.length
     ? item.newRowCount
       ? `Xác nhận ${number(item.newRowCount).toLocaleString('vi-VN')} phát sinh mới`
-      : 'Dùng file mới · tạo revision'
+      : 'Dùng file mới · tạo bản sửa đổi'
     : item.sourceKind === 'tos_berth_call'
       ? 'Xác nhận Berth & ghép Detail'
       : item.sourceKind === 'tos_cargo_detail'
@@ -2855,7 +2934,7 @@ async function confirmHistoricalImport(action = null) {
   if (!item) return;
   const reason = $('#historical-revision-reason-input').value.trim();
   if (action === 'ACTIVATE_NEW_REVISION' && reason.length < 5) {
-    toast('Ghi lý do cụ thể trước khi dùng file mới làm revision đang hoạt động.', true);
+    toast('Ghi lý do cụ thể trước khi dùng file mới làm bản sửa đổi đang hoạt động.', true);
     $('#historical-revision-reason-input').focus();
     return;
   }
@@ -2919,7 +2998,7 @@ async function loadHistoricalImportHistory(page = state.historicalHistoryPage) {
       setPl03Period(state.historicalHistory.find(item => item.sourceKind === 'tos_berth_call' && item.reportingPeriod)?.reportingPeriod || '');
     }
     container.innerHTML = state.historicalHistory.length
-      ? `<table class="data-table responsive-table"><thead><tr><th>Mã</th><th>Nguồn</th><th>Kỳ</th><th>Kết quả</th><th>Revision</th><th>Trạng thái</th><th></th></tr></thead><tbody>${state.historicalHistory.map(item => `<tr><td data-label="Mã">#${item.id}<br><small>${fmtDate(item.createdAt)}</small></td><td data-label="Nguồn"><strong>${esc(HISTORICAL_SOURCE_LABELS[item.sourceKind] || item.sourceKind)}</strong><br><small title="${esc(item.sourceFilename)}">${esc(item.sourceFilename)}</small></td><td data-label="Kỳ">${esc(historicalEffectivePeriod(item, activeBerthPeriods))}</td><td data-label="Kết quả">${historicalResultCell(item)}</td><td data-label="Revision">${historicalRevCell(item)}</td><td data-label="Trạng thái" class="historical-status"><span class="table-badge ${historicalStatusTone(item.status)}">${esc(HISTORICAL_STATUS_LABELS[item.status] || item.status)}</span></td><td data-label="Thao tác" class="historical-history-action"><button type="button" class="outline-button" data-open-historical-import="${item.id}">${item.status === 'PREVIEWED' ? 'Tiếp tục' : 'Xem'}</button></td></tr>`).join('')}</tbody></table>`
+      ? `<table class="data-table responsive-table"><thead><tr><th>Mã</th><th>Nguồn</th><th>Kỳ</th><th>Kết quả</th><th>Bản sửa đổi</th><th>Trạng thái</th><th></th></tr></thead><tbody>${state.historicalHistory.map(item => `<tr><td data-label="Mã">#${item.id}<br><small>${fmtDate(item.createdAt)}</small></td><td data-label="Nguồn"><strong>${esc(HISTORICAL_SOURCE_LABELS[item.sourceKind] || item.sourceKind)}</strong><br><small title="${esc(item.sourceFilename)}">${esc(item.sourceFilename)}</small></td><td data-label="Kỳ">${esc(historicalEffectivePeriod(item, activeBerthPeriods))}</td><td data-label="Kết quả">${historicalResultCell(item)}</td><td data-label="Bản sửa đổi">${historicalRevCell(item)}</td><td data-label="Trạng thái" class="historical-status"><span class="table-badge ${historicalStatusTone(item.status)}">${esc(HISTORICAL_STATUS_LABELS[item.status] || item.status)}</span></td><td data-label="Thao tác" class="historical-history-action"><button type="button" class="outline-button" data-open-historical-import="${item.id}">${item.status === 'PREVIEWED' ? 'Tiếp tục' : 'Xem'}</button></td></tr>`).join('')}</tbody></table>`
       : empty('Chưa có dữ liệu lịch sử', 'Chọn một file TOS hoặc PL.03 cũ để tạo preview đầu tiên.');
     $$('[data-open-historical-import]', container).forEach(button => button.onclick = () => openHistoricalImport(Number(button.dataset.openHistoricalImport)));
     renderHistoricalPagination($('#historical-history-pagination'), result, 'historical-history-page', loadHistoricalImportHistory);
@@ -3375,13 +3454,13 @@ async function init() {
     const importNav = $('nav a[href="#import"]');
     if (importNav) {
       importNav.style.removeProperty('display');
-      importNav.hidden = !(isReviewer || isAdmin);
+      importNav.hidden = !isAdmin;
     }
 
     const reportsNav = $('nav a[href="#reports"]');
     if (reportsNav) {
       reportsNav.style.removeProperty('display');
-      reportsNav.hidden = isCustomer;
+      reportsNav.hidden = !isAdmin;
     }
 
     const portRegisterNav = $('nav a[href="#port-register"]');
@@ -3451,6 +3530,14 @@ async function init() {
   });
   $('#crew-search').addEventListener('input', renderCrew);
   $('#vessel-form').addEventListener('submit', saveVessel);
+  ['close-vessel-attachment-preview', 'close-vessel-attachment-preview-bottom'].forEach(id => {
+    $(`#${id}`).onclick = () => $('#vessel-attachment-preview-dialog').close();
+  });
+  $('#vessel-attachment-preview-dialog').addEventListener('close', clearVesselAttachmentPreview);
+  $('#download-vessel-attachment').onclick = () => {
+    const preview = state.vesselAttachmentPreview;
+    if (preview) downloadVesselAttachment(preview.attachment.id, preview.blob);
+  };
   $('#crew-form').addEventListener('submit', saveCrew);
   $('#declaration-form').addEventListener('submit', saveDeclaration);
   $('#workflow-form').addEventListener('submit', saveWorkflow);

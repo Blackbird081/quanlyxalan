@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=1.13.5">
+  <link rel="stylesheet" href="styles.css?v=1.13.7">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Bỏ qua điều hướng, đến nội dung chính</a>
@@ -30,8 +30,8 @@
       </nav>
       <nav class="data-nav" aria-label="Dữ liệu và báo cáo">
         <p class="nav-label">Dữ liệu</p>
-        <a href="#import" data-route="import"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"></path><path d="M8 8l4-4 4 4"></path><path d="M4 14v3.5A1.5 1.5 0 0 0 5.5 19h13a1.5 1.5 0 0 0 1.5-1.5V14"></path></svg></span>Import dữ liệu</a>
-        <a href="#reports" data-route="reports"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"></path><rect x="5" y="12" width="3.5" height="6" rx="1"></rect><rect x="10.25" y="8" width="3.5" height="10" rx="1"></rect><rect x="15.5" y="4" width="3.5" height="14" rx="1"></rect></svg></span>Báo cáo hoạt động</a>
+        <a href="#import" data-route="import" hidden><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"></path><path d="M8 8l4-4 4 4"></path><path d="M4 14v3.5A1.5 1.5 0 0 0 5.5 19h13a1.5 1.5 0 0 0 1.5-1.5V14"></path></svg></span>Import dữ liệu</a>
+        <a href="#reports" data-route="reports" hidden><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"></path><rect x="5" y="12" width="3.5" height="6" rx="1"></rect><rect x="10.25" y="8" width="3.5" height="10" rx="1"></rect><rect x="15.5" y="4" width="3.5" height="14" rx="1"></rect></svg></span>Báo cáo hoạt động</a>
         <a href="#organizations" data-route="organizations" hidden><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V6a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v14"></path><path d="M13 9h5a1 1 0 0 1 1 1v10"></path><path d="M3 20h18"></path><path d="M7 9h2M7 13h2M16 13h1"></path></svg></span>Thông tin khách hàng</a>
         <a href="#users" data-route="users" hidden><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M17 4.5v5M14.5 7h5"></path></svg></span>Quản lý người dùng</a>
         <a href="#settings" data-route="settings"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span>Cài đặt</a>
@@ -138,7 +138,7 @@
             <ol class="historical-import-steps" aria-label="Quy trình import lịch sử">
               <li class="active"><span>1</span><div><strong>Chọn file</strong><small>Berth, chi tiết xếp dỡ hoặc PL.03 cũ</small></div></li>
               <li><span>2</span><div><strong>Xử lý cảnh báo</strong><small>Xem lý do và thao tác theo từng dòng</small></div></li>
-              <li><span>3</span><div><strong>Xử lý trùng</strong><small>Giữ bản đang dùng hoặc tạo revision</small></div></li>
+              <li><span>3</span><div><strong>Xử lý trùng</strong><small>Giữ bản đang dùng hoặc tạo bản sửa đổi</small></div></li>
               <li><span>4</span><div><strong>Xác nhận</strong><small>Chỉ dòng hợp lệ được kích hoạt</small></div></li>
             </ol>
             <section class="panel historical-upload-panel">
@@ -156,11 +156,11 @@
               <div id="historical-preview-pagination" class="pagination" aria-label="Phân trang preview lịch sử"></div>
               <section id="historical-link-review" class="historical-link-review" hidden><div class="panel-header"><div><p class="eyebrow">LIÊN KẾT CẦN KIỂM TRA</p><h3>Tên phương tiện trong TOS</h3><p>Chỉ xác nhận khi đúng phương tiện trong Sổ theo dõi của Cảng.</p></div></div><div id="historical-link-list"></div></section>
               <div class="historical-confirm-area">
-                <label id="historical-revision-reason" hidden>Lý do nếu chủ động dùng file mới làm revision<input id="historical-revision-reason-input" type="text" minlength="5" placeholder="Ví dụ: TOS cập nhật ATB/ATD chính xác hơn"></label>
-                <div class="historical-preview-actions"><button id="cancel-historical-import" class="ghost-button" type="button">Hủy lượt import</button><button id="keep-historical-existing" class="outline-button" type="button" hidden>Giữ bản đang dùng</button><button id="activate-historical-revision" class="outline-button" type="button" hidden>Dùng file mới · tạo revision</button><button id="confirm-historical-import" class="primary-button" type="button">Xác nhận import</button></div>
+                <label id="historical-revision-reason" hidden>Lý do dùng file mới làm bản sửa đổi<input id="historical-revision-reason-input" type="text" minlength="5" placeholder="Ví dụ: TOS cập nhật ATB/ATD chính xác hơn"></label>
+                <div class="historical-preview-actions"><button id="cancel-historical-import" class="ghost-button" type="button">Hủy lượt import</button><button id="keep-historical-existing" class="outline-button" type="button" hidden>Giữ bản đang dùng</button><button id="activate-historical-revision" class="outline-button" type="button" hidden>Dùng file mới · tạo bản sửa đổi</button><button id="confirm-historical-import" class="primary-button" type="button">Xác nhận import</button></div>
               </div>
             </section>
-            <section class="panel historical-history-panel"><div class="panel-header"><div><p class="eyebrow">LOG & REVISION</p><h2>Lượt import</h2><p id="historical-history-summary">Chưa có kết quả đối soát.</p></div><button id="refresh-historical-history" class="outline-button" type="button">Làm mới</button></div><div id="historical-import-history" class="table-wrap"><div class="empty-state">Chưa tải lịch sử import.</div></div><div id="historical-history-pagination" class="pagination" aria-label="Phân trang lịch sử import"></div></section>
+            <section class="panel historical-history-panel"><div class="panel-header"><div><p class="eyebrow">NHẬT KÝ</p><h2>Lượt import</h2><p id="historical-history-summary">Chưa có kết quả đối soát.</p></div><button id="refresh-historical-history" class="outline-button" type="button">Làm mới</button></div><div id="historical-import-history" class="table-wrap"><div class="empty-state">Chưa tải lịch sử import.</div></div><div id="historical-history-pagination" class="pagination" aria-label="Phân trang lịch sử import"></div></section>
           </section>
         </section>
 
@@ -217,14 +217,14 @@
           </section>
 
           <section class="panel">
-            <div class="panel-header"><div><p class="eyebrow">BẢO MẬT</p><h2>Đổi mật khẩu</h2><p class="muted">Nên đổi mật khẩu do quản trị viên cấp ban đầu sang mật khẩu của riêng bạn.</p></div></div>
+            <div class="panel-header"><div><p class="eyebrow">BẢO MẬT</p><h2>Đổi mật khẩu</h2><p class="muted">Nên đổi mật khẩu của riêng bạn.</p></div></div>
             <form id="change-password-form" class="settings-form">
               <div class="settings-inline">
                 <label>* Mật khẩu hiện tại<input name="current_password" type="password" autocomplete="current-password" required></label>
                 <label>* Mật khẩu mới<input name="new_password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
                 <label>* Nhập lại mật khẩu mới<input name="confirm_password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
               </div>
-              <p class="muted">Mật khẩu mới cần từ 8 đến 128 ký tự.</p>
+              <p class="muted">Mật khẩu mới cần ít nhất 8 ký tự.</p>
               <div class="modal-actions"><button type="submit" class="primary-button">Đổi mật khẩu</button></div>
             </form>
           </section>
@@ -266,7 +266,7 @@
           </section>
 
           <section id="settings-audit-panel" class="panel" hidden>
-            <div class="panel-header"><div><p class="eyebrow">QUẢN TRỊ NỀN TẢNG</p><h2>Nhật ký hệ thống</h2><p class="muted">Tra cứu ai đã tạo/sửa gì, lúc nào — kể cả phiếu khai báo, người dùng, tổ chức, cấu hình.</p></div><button type="button" id="audit-log-clear-all" class="danger-link">Xóa tất cả</button></div>
+            <div class="panel-header"><div><p class="eyebrow">QUẢN TRỊ NỀN TẢNG</p><h2>Nhật ký hệ thống</h2><p class="muted">Ghi nhận các hoạt động.</p></div><button type="button" id="audit-log-clear-all" class="danger-link">Xóa tất cả</button></div>
             <div class="audit-log-filters">
               <label>Loại<select id="audit-log-entity-type"><option value="">Tất cả</option></select></label>
               <label>Tìm theo mã/nội dung<input id="audit-log-q" type="text" placeholder="vd: TT-260723-001"></label>
@@ -288,6 +288,17 @@
   <dialog id="reset-password-dialog" class="modal reset-password-dialog" aria-labelledby="reset-password-title"><form id="reset-password-form"><div class="modal-header"><div><p class="eyebrow">QUẢN TRỊ NỀN TẢNG</p><h2 id="reset-password-title">Đặt lại mật khẩu</h2></div><button type="button" class="icon-button" data-close-dialog="reset-password-dialog" aria-label="Đóng">×</button></div><div class="reset-password-body"><p id="reset-password-target" class="muted"></p><label>Mật khẩu mới<input name="password" type="password" minlength="8" maxlength="128" required autocomplete="new-password"><small>Tối thiểu 8 ký tự.</small></label></div><div class="modal-actions"><button type="button" class="ghost-button" data-close-dialog="reset-password-dialog">Hủy</button><button type="submit" class="primary-button">Đặt lại mật khẩu</button></div></form></dialog>
   <dialog id="reporting-unit-dialog" class="modal reporting-unit-dialog" aria-labelledby="reporting-unit-dialog-title"><form id="reporting-unit-form"><div class="modal-header"><div><p class="eyebrow">QUẢN TRỊ NỀN TẢNG</p><h2 id="reporting-unit-dialog-title">Tạo đơn vị báo cáo</h2></div><button type="button" class="icon-button" id="close-reporting-unit-dialog" aria-label="Đóng">×</button></div><div class="reporting-unit-form-body"><p>Đơn vị mới được tạo trống, không sao chép nhân viên, doanh nghiệp hoặc dữ liệu từ Cảng đang chọn.</p><label>Tên đơn vị<input name="name" type="text" minlength="2" maxlength="150" required placeholder="Ví dụ: Cảng Nhà Rồng"></label><label>Mã đơn vị<input name="code" type="text" minlength="2" maxlength="30" required pattern="[A-Za-z0-9_-]+" placeholder="Ví dụ: NHA-RONG"><small>Dùng chữ A–Z, số, dấu “-” hoặc “_”.</small></label><label>Email Cảng<input name="notify_email" type="email" maxlength="200" placeholder="Tùy chọn — nhận thông báo phiếu"><small>Nếu để trống, thông báo gửi tới email cá nhân của nhân viên đã bật nhận email.</small></label></div><div class="modal-actions"><button id="cancel-reporting-unit-dialog" type="button" class="ghost-button">Hủy</button><button type="submit" class="primary-button">Tạo đơn vị</button></div></form></dialog>
   <dialog id="vessel-dialog" class="modal"><form id="vessel-form"><div class="modal-header"><div><p class="eyebrow">HỒ SƠ DÙNG LẠI</p><h2>Thông tin phương tiện</h2></div><button type="button" class="icon-button" data-close-dialog="vessel-dialog" aria-label="Đóng">×</button></div><div id="vessel-fields" class="form-grid"></div><div class="modal-actions"><button type="button" class="ghost-button" data-close-dialog="vessel-dialog">Hủy</button><button type="submit" class="primary-button" id="save-vessel">Lưu hồ sơ</button></div></form></dialog>
+  <dialog id="vessel-attachment-preview-dialog" class="modal wide vessel-attachment-preview-dialog" aria-labelledby="vessel-attachment-preview-title">
+    <div class="modal-header">
+      <div><p class="eyebrow">FILE ĐÍNH KÈM HỒ SƠ SALAN</p><h2 id="vessel-attachment-preview-title">Xem trước file</h2><p id="vessel-attachment-preview-meta" class="muted"></p></div>
+      <button type="button" class="icon-button" id="close-vessel-attachment-preview" aria-label="Đóng bản xem trước">×</button>
+    </div>
+    <div class="vessel-attachment-preview-body">
+      <div class="vessel-attachment-preview-warning">File đang được lưu trong vùng cách ly. Hệ thống chỉ hiển thị trực tiếp ảnh và PDF.</div>
+      <div id="vessel-attachment-preview-content" class="vessel-attachment-preview-content" role="status" aria-live="polite"></div>
+    </div>
+    <div class="modal-actions"><button type="button" class="ghost-button" id="close-vessel-attachment-preview-bottom">Đóng</button><button type="button" class="primary-button" id="download-vessel-attachment">Tải xuống</button></div>
+  </dialog>
 
   <dialog id="crew-dialog" class="modal"><form id="crew-form"><div class="modal-header"><div><p class="eyebrow">DANH SÁCH THUYỀN VIÊN</p><h2>Thông tin và chứng chỉ chuyên môn</h2></div><button type="button" class="icon-button" data-close-dialog="crew-dialog" aria-label="Đóng">×</button></div><div id="crew-fields" class="form-grid"></div><div class="modal-actions"><button type="button" class="ghost-button" data-close-dialog="crew-dialog">Hủy</button><button type="submit" class="primary-button">Lưu thuyền viên</button></div></form></dialog>
 
@@ -321,6 +332,6 @@
   </dialog>
 
   <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script src="app.js?v=1.13.5" defer></script>
+  <script src="app.js?v=1.13.7" defer></script>
 </body>
 </html>

@@ -2,6 +2,222 @@
 
 Status: IN_PROGRESS
 
+## Historical Vessel Source-of-Truth Reuse — 2026-07-30
+
+- Operator clarified that Admin-verified or Admin-maintained Salan identity is
+  source of truth. A new voyage number is a new call, not a new vessel.
+- Continuity drift was reported and the operator authorized reconciliation;
+  the stale handoff footer was synchronized to REVIEW/ORCHESTRATOR and the
+  workspace doctor passed 25/25.
+- Risk: R2 because automatic identity reuse must preserve tenant isolation and
+  must not accept conflicting mappings.
+- Diagnosis: cumulative filtering correctly retains identical call keys, but
+  `_stage_berth` creates every new call's vessel link as `PENDING`; accepted
+  vessel identity is stored per import/call and is not reused.
+- Phase/role route: REVIEW/ORCHESTRATOR -> INTAKE/ORCHESTRATOR ->
+  DESIGN/SPEC_AUTHOR -> SPEC/SPEC_AUTHOR ->
+  WORK_ORDER/WORK_ORDER_AUTHOR -> BUILD/IMPLEMENTATION_WORKER.
+- Governed artifacts:
+  - `docs/decisions/HISTORICAL_VESSEL_SOT_REUSE_DESIGN_20260730.md`
+  - `docs/specs/HISTORICAL_VESSEL_SOT_REUSE_SPEC_20260730.md`
+  - `docs/work_orders/WO_QLXL_HISTORICAL_VESSEL_SOT_REUSE_20260730.md`
+- BUILD acknowledgment: scope is limited to tenant-safe reuse of current
+  canonical vessel matches and unambiguous prior Admin-accepted mappings,
+  focused tests, and governed truth updates. Production data, schema changes,
+  attachment-preview changes, `.claude/`, commit, push, merge, deployment,
+  and FREEZE remain outside scope.
+- BUILD result:
+  - unique exact/normalized matches in the current Salan register are accepted
+    automatically;
+  - the latest Admin-accepted TOS alias mapping is reused for new voyages and
+    a later Admin correction becomes the current SOT;
+  - disagreement with the current register remains pending;
+  - one manual decision cascades to same-name sibling calls in the import;
+  - pre-existing staged previews are repaired by the idempotent reconcile
+    endpoint or same-file upload;
+  - tenant filtering and call-key incremental merge remain unchanged.
+- Executable evidence: SOT unit tests 11/11; focused PostgreSQL API 3/3;
+  regression suite 276 passed, 2 backup-tool tests deselected, 2 existing
+  openpyxl warnings; compile and diff checks passed.
+- Phase/role transition: BUILD/IMPLEMENTATION_WORKER -> REVIEW/REVIEWER.
+- Review disposition: `PASS_WITH_LIMITATIONS`; no HIGH, MEDIUM, or LOW finding
+  remains. The only limitation is unavailable local `pg_dump` for two
+  unrelated backup tests.
+- Review artifact:
+  `docs/reviews/HISTORICAL_VESSEL_SOT_REUSE_REVIEW_20260730.md`.
+- Role handback: REVIEWER -> ORCHESTRATOR. Commit, push, merge, deployment,
+  and FREEZE remain unauthorized.
+- Operator explicitly requested an independent reviewer before publication and
+  authorized commit plus PR creation against the canonical
+  `hoangnmr/quanlyxalan` repository.
+- Role transition: ORCHESTRATOR -> independent REVIEWER. Publication must wait
+  for a PASS disposition. On PASS, COMMIT_STEWARD may commit the exact reviewed
+  set, exclude `.claude/`, push the fork branch, and create or update the
+  canonical PR. Merge, deployment, and FREEZE remain unauthorized.
+- Independent review disposition: `BLOCKED`; the set is not safe to commit or
+  publish.
+- HIGH accepted finding: `PORT_STAFF` may resolve links, while the SOT query
+  reused every accepted link without proving a `PLATFORM_ADMIN` reviewer.
+- MEDIUM accepted finding: filtering to accepted links before ordering allowed
+  an older acceptance to survive a later Admin rejection.
+- No additional finding was reported for attachment preview. Independent
+  focused evidence passed 29/29 plus JavaScript syntax, Python compile,
+  catalog, diff, and doctor 25/25.
+- Phase/role transition: REVIEW/independent REVIEWER ->
+  BUILD/REPAIR_WORKER. Repair scope is limited to Admin-authoritative alias
+  decisions, latest accepted/rejected semantics, negative tests, continuity,
+  and independent re-review. Commit and PR remain blocked pending PASS.
+- Repair result:
+  - manual alias SOT requires an active `PLATFORM_ADMIN` reviewer;
+  - latest Admin decisions are ordered across `ACCEPTED` and `REJECTED`;
+  - latest rejection tombstones older acceptance;
+  - current-register unique matching remains a separate trusted path;
+  - negative tests cover Port Staff exclusion, rejection invalidation, and
+    latest Admin correction.
+- Repair evidence: combined SOT/frontend 31/31; focused PostgreSQL API 3/3;
+  Python/JavaScript syntax and diff checks passed.
+- Phase/role transition: BUILD/REPAIR_WORKER -> REVIEW/independent REVIEWER.
+  Commit and PR remain blocked pending re-review PASS.
+- First re-review remained `BLOCKED` with one HIGH provenance finding:
+  Admin-triggered automatic reconciliation stamped the actor as a manual
+  reviewer and could therefore seed alias SOT.
+- Second repair result:
+  - automatic matching/reconciliation leaves reviewer identity and timestamp
+    empty;
+  - manual resolve always records `MANUAL` with the acting reviewer;
+  - an Admin-triggered auto-reconcile regression proves the result cannot seed
+    alias SOT after the register match changes.
+- Second repair evidence: combined SOT/frontend 32/32; focused PostgreSQL API
+  3/3; syntax and diff checks passed.
+- The set remains in independent REVIEW and publication remains blocked until
+  the same reviewer returns PASS.
+- Second independent re-review disposition: `PASS_WITH_LIMITATIONS`; no HIGH,
+  MEDIUM, or LOW finding remains.
+- Independent evidence: focused 32/32, JavaScript syntax, Python compile,
+  catalog, diff, and workspace doctor 25/25 passed.
+- Final local repair regression: 279 passed, 2 unrelated backup-tool tests
+  deselected, 2 existing openpyxl warnings.
+- Reviewer authorized the exact set for commit and PR publication, excluding
+  `.claude/`, with post-rebase checks.
+- Role transition: independent REVIEWER -> COMMIT_STEWARD under the operator's
+  explicit commit/PR authority. Merge, deployment, and FREEZE remain
+  unauthorized.
+
+## Vessel Attachment Preview Tranche — 2026-07-30
+
+- Operator requested that selecting a vessel attachment open a preview popup
+  instead of downloading immediately; download must be an explicit choice.
+- Workspace doctor passed 25/25 before material work.
+- Risk: R2 because attachments remain quarantined and preview must preserve
+  tenant isolation and browser-content safety.
+- Phase/role route: REVIEW/ORCHESTRATOR -> INTAKE/ORCHESTRATOR ->
+  DESIGN/SPEC_AUTHOR -> SPEC/SPEC_AUTHOR ->
+  WORK_ORDER/WORK_ORDER_AUTHOR -> BUILD/IMPLEMENTATION_WORKER.
+- Governed artifacts:
+  - `docs/decisions/VESSEL_ATTACHMENT_PREVIEW_DESIGN_20260730.md`
+  - `docs/specs/VESSEL_ATTACHMENT_PREVIEW_SPEC_20260730.md`
+  - `docs/work_orders/WO_QLXL_VESSEL_ATTACHMENT_PREVIEW_20260730.md`
+- BUILD acknowledgment: implementation is limited to an authenticated preview
+  dialog, safe image/PDF rendering, explicit download, unsupported Office
+  guidance, object-URL cleanup, cache keys, focused tests, browser evidence,
+  and governed truth updates. Backend security headers, scanner policy,
+  commit, push, merge, deployment, and FREEZE remain outside scope.
+- BUILD result:
+  - filename selection now opens a dedicated preview dialog;
+  - PNG, JPEG, WebP, and PDF use authenticated bytes, with PDF isolated in a
+    sandboxed iframe;
+  - Word and Excel remain unfetched until the user explicitly downloads;
+  - the explicit download action reuses preview bytes where available;
+  - object URLs and stale preview requests are cleaned up safely;
+  - cache keys advanced together to `1.13.7`.
+- Executable evidence: frontend UX 18/18; focused attachment backend 1/1
+  against temporary PostgreSQL 17; JavaScript syntax and diff checks passed.
+- Full suite evidence: 272 passed and 2 unrelated backup tests failed because
+  `pg_dump` is absent from local `PATH`.
+- Browser discovery returned no available session, so rendered popup evidence
+  remains unavailable.
+- Phase/role transition: BUILD/IMPLEMENTATION_WORKER -> REVIEW/REVIEWER.
+- Review disposition: `PASS_WITH_LIMITATIONS`; no HIGH, MEDIUM, or LOW finding
+  remains in the authorized changed set.
+- Review artifact:
+  `docs/reviews/VESSEL_ATTACHMENT_PREVIEW_REVIEW_20260730.md`.
+- Role handback: REVIEWER -> ORCHESTRATOR. Commit, push, merge, deployment,
+  and FREEZE remain unauthorized.
+
+## Admin-only Import/Reports UI Tranche — 2026-07-30
+
+- Operator requested that the `Import dữ liệu` and `Báo cáo hoạt động` tabs be
+  visible only to Platform Admin, with all other roles hiding them.
+- Operator also requested consistent Vietnamese terminology for the
+  user-visible word `Revision`.
+- Workspace doctor passed 25/25 before material work.
+- Risk: R2 because role-based navigation and direct-route behavior form an
+  access-control surface.
+- Phase/role transition: REVIEW/ORCHESTRATOR -> INTAKE/ORCHESTRATOR.
+- Existing user-owned edits in `frontend/app.js` and `frontend/index.html`
+  must be preserved. Untracked `.claude/` remains outside scope.
+- Intake boundary: frontend navigation visibility, direct hash-route guard,
+  user-visible Vietnamese terminology, focused regression tests, and governed
+  continuity/evidence only. Backend report/import authorization, production
+  data, deployment, merge, and unrelated UI copy are outside scope.
+- Phase/role route: INTAKE/ORCHESTRATOR -> DESIGN/SPEC_AUTHOR ->
+  SPEC/SPEC_AUTHOR -> WORK_ORDER/WORK_ORDER_AUTHOR ->
+  BUILD/IMPLEMENTATION_WORKER.
+- Governed artifacts:
+  - `docs/decisions/ADMIN_ONLY_DATA_TABS_DESIGN_20260730.md`
+  - `docs/specs/ADMIN_ONLY_DATA_TABS_SPEC_20260730.md`
+  - `docs/work_orders/WO_QLXL_ADMIN_ONLY_DATA_TABS_20260730.md`
+- BUILD acknowledgment: implementation is limited to the authorized frontend
+  navigation, direct hash-route guard, Vietnamese terminology, focused tests,
+  and governed truth updates. Existing user-owned edits will be preserved.
+  Backend authorization, commit, push, merge, deployment, and FREEZE remain
+  unauthorized.
+- BUILD result:
+  - both navigation links are hidden by default and unhidden only for
+    `PLATFORM_ADMIN`;
+  - direct non-admin `#import`/`#reports` hashes redirect to `#dashboard` for
+    Port Staff or `#declarations` for Customer before page loaders run;
+  - user-visible historical import copy consistently uses `Bản sửa đổi`;
+  - frontend cache keys advanced together to `1.13.6`;
+  - existing user-owned ETB, password, and audit-log copy edits were preserved.
+- Executable evidence: frontend UX 18/18; backend static shell 1/1 against
+  temporary PostgreSQL 17; JavaScript syntax, diff, catalog, and workspace
+  doctor 25/25 passed.
+- Phase/role transition: BUILD/IMPLEMENTATION_WORKER -> REVIEW/REVIEWER.
+- Review disposition: `PASS_WITH_LIMITATIONS`; no HIGH, MEDIUM, or LOW
+  findings. No connected production or rendered multi-role browser session was
+  used.
+- Review artifact:
+  `docs/reviews/ADMIN_ONLY_DATA_TABS_REVIEW_20260730.md`.
+- Role handback: REVIEWER -> ORCHESTRATOR. Commit, push, merge, deployment,
+  and FREEZE remain unauthorized.
+- Operator follow-up authorized a User Guide clarification and one local
+  commit. The guide must state that PL.03 from approved LIVE declarations and
+  PL.03 reconstructed from confirmed historical/TOS imports are separate
+  workflows that share the same output template.
+- The operator manually cleaned frontend copy after the first review. Those
+  edits are accepted as the intended working version; regression assertions
+  must be aligned without reverting the manual copy.
+- Phase/role transition: REVIEW/ORCHESTRATOR ->
+  BUILD/IMPLEMENTATION_WORKER for the bounded documentation/test repair.
+- Publication boundary: one local commit is authorized after review. Push,
+  merge, deployment, FREEZE, and untracked `.claude/` remain excluded.
+- Documentation repair result: `USER_GUIDE.md` now distinguishes LIVE PL.03
+  from historical/TOS PL.03, records their separate sources and overlap rule,
+  and reflects Platform Admin-only Import/Reports navigation.
+- Focused rerun after preserving the operator's manual copy cleanup:
+  18 frontend UX tests passed; JavaScript syntax and diff checks passed.
+- Phase/role transition: BUILD/IMPLEMENTATION_WORKER -> REVIEW/REVIEWER.
+- Review disposition remains `PASS_WITH_LIMITATIONS`; no new finding was
+  introduced by the documentation or copy cleanup.
+- Role transition: REVIEWER -> COMMIT_STEWARD under the operator's explicit
+  local-commit authority. The exact reviewed tracked set may be committed;
+  `.claude/`, push, merge, deployment, and FREEZE remain excluded.
+- Local commit completed on `fix/vessel-attachment-download` with message
+  `fix: restrict data workflows to admin`; the final commit identifier is
+  reported by Git after the continuity receipt is included.
+- Role handback: COMMIT_STEWARD -> ORCHESTRATOR. No push was performed.
+
 ## Vessel Attachment Access Tranche — 2026-07-30
 
 - The operator reported that the attachment count is visible but cannot be
@@ -58,14 +274,15 @@ Status: IN_PROGRESS
 ## Current State
 
 - Project: quanlyxalan
-- Tranche: `WO-QLXL-VESSEL-ATTACHMENT-ACCESS-20260730`
+- Tranche: Historical Vessel Source-of-Truth Reuse
 - Current mode: REVIEW
 - Active phase: REVIEW
-- Active role: ORCHESTRATOR
+- Active role: COMMIT_STEWARD
 - Risk: R2
-- Next allowed move: PR #9 is CI-green, clean, and mergeable; await
-  canonical-owner review. Do not merge or FREEZE without separate operator
-  authority.
+- Next allowed move: commit the exact reviewed set excluding `.claude/`, rebase
+  a new publication branch onto `upstream/main`, rerun checks, push the fork,
+  and create the canonical PR. Merge, deployment, and FREEZE remain
+  unauthorized.
 - Parked operator checkpoint: none.
 
 ## Intake
@@ -445,3 +662,44 @@ AI governance behavior.
 - Python compile and diff check: pass.
 - Phase return: BUILD -> REVIEW.
 - Role transition: REPAIR_WORKER -> ORCHESTRATOR for independent R2 review.
+
+## Vessel Preview and Historical Vessel SOT Publication — 2026-07-30
+
+- Independent review initially blocked publication because Port Staff decisions
+  could seed alias truth, a later Admin rejection did not tombstone an older
+  acceptance, and automated reconciliation could appear to carry a manual
+  reviewer identity.
+- Repairs restrict reusable alias truth to the latest active Platform Admin
+  decision, honor later Admin rejection, and leave automated review provenance
+  empty while preserving explicit manual reviewer attribution.
+- The same independent reviewer returned `PASS_WITH_LIMITATIONS` with no open
+  HIGH, MEDIUM, or LOW findings. Limitations are the unavailable rendered
+  browser preview and the local absence of `pg_dump`.
+- Reviewed source commit after rebasing onto `upstream/main`: `77bb8d8`
+  (`fix: preview attachments and reuse verified vessel identity`).
+- Post-rebase evidence: 32 focused tests passed; Python and JavaScript syntax,
+  diff, catalog, and workspace doctor 25/25 checks passed.
+- Earlier full PostgreSQL 17 regression evidence: 279 passed and 2 backup tests
+  deselected solely because local `pg_dump` is unavailable.
+- User-owned untracked `.claude/` remains excluded from staging and commits.
+- Next governed move: push
+  `Blackbird081/quanlyxalan:fix/vessel-preview-sot-reuse`, create a PR against
+  `hoangnmr/quanlyxalan:main`, monitor the quality gate, and record the
+  publication receipt.
+- Merge, deployment, and FREEZE remain unauthorized.
+
+## Vessel Preview and Historical Vessel SOT PR Receipt — 2026-07-30
+
+- Pushed branch:
+  `Blackbird081/quanlyxalan:fix/vessel-preview-sot-reuse`.
+- Canonical pull request:
+  `https://github.com/hoangnmr/quanlyxalan/pull/10`.
+- GitHub reported the PR as `OPEN` and `MERGEABLE`.
+- Quality gate `30558812593`: SUCCESS — PostgreSQL client 17.10 verified,
+  281 tests passed with 3 warnings and 0 failures; compile, diff check, and
+  secret guard passed.
+- User-owned untracked `.claude/` was not staged, committed, or pushed.
+- Role transition: COMMIT_STEWARD -> ORCHESTRATOR after publication handback.
+- Next governed move belongs to the canonical owner: review PR #10 and decide
+  whether to merge.
+- Merge, deployment, and FREEZE remain unauthorized in this session.

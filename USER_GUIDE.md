@@ -1,7 +1,7 @@
 # Hướng dẫn sử dụng — Quản Lý Xalan
 
-> Cập nhật theo chức năng ứng dụng ngày 24/07/2026, bổ sung nghiệp vụ xử lý
-> tại cảng (Bảo vệ/Giao nhận, hủy phiếu) ngày 24/07/2026.
+> Cập nhật theo chức năng ứng dụng ngày 30/07/2026, bao gồm nghiệp vụ tại
+> cảng, phân quyền menu quản trị và hai luồng xuất PL.03.
 
 ## 1. Vai trò và phạm vi sử dụng
 
@@ -51,7 +51,9 @@ Mọi danh sách, import và báo cáo sau đó đều thuộc đơn vị đang 
 - **Import dữ liệu**: import vận hành hoặc dữ liệu lịch sử/TOS.
 - **Báo cáo hoạt động**: dashboard, PL.01–PL.03 và xuất Excel.
 
-Tài khoản `CUSTOMER` chỉ thấy các chức năng phù hợp với phạm vi khách hàng.
+**Import dữ liệu** và **Báo cáo hoạt động** chỉ hiển thị với
+`PLATFORM_ADMIN`. `PORT_STAFF` và `CUSTOMER` không thấy hai menu này; nếu mở
+đường dẫn trực tiếp, hệ thống chuyển về màn hình phù hợp với vai trò.
 
 ## 4. Phiếu khai báo
 
@@ -166,9 +168,9 @@ công việc hiện tại:
 - danh sách thuyền viên;
 - phiếu khai báo.
 
-Cả ba loại đều mở cho `PORT_STAFF` và `PLATFORM_ADMIN`. Với phiếu khai báo, tên
-doanh nghiệp trong file sẽ được dùng để xác định (hoặc tạo mới) khách hàng
-thuộc đơn vị báo cáo đang chọn.
+Menu này chỉ dành cho `PLATFORM_ADMIN`. Với phiếu khai báo, tên doanh nghiệp
+trong file sẽ được dùng để xác định (hoặc tạo mới) khách hàng thuộc đơn vị báo
+cáo đang chọn.
 
 Chọn file, xem preview và lỗi theo từng dòng, sau đó mới xác nhận import. Dữ
 liệu chưa xác nhận không trở thành dữ liệu vận hành. Nếu file sai, hủy lượt
@@ -176,9 +178,10 @@ import, sửa file nguồn và tải lại.
 
 ## 7. Import lịch sử/TOS
 
-Chọn tab **Lịch sử / TOS** để nhập dữ liệu phục vụ đối soát và báo cáo lịch sử.
-Hệ thống nhận dạng loại workbook theo cấu trúc sheet/cột, không phụ thuộc tên
-file. Có thể chọn nhiều file cùng lúc và không bắt buộc tải theo thứ tự.
+`PLATFORM_ADMIN` chọn tab **Lịch sử / TOS** để nhập dữ liệu phục vụ đối soát
+và báo cáo lịch sử. Hệ thống nhận dạng loại workbook theo cấu trúc sheet/cột,
+không phụ thuộc tên file. Có thể chọn nhiều file cùng lúc và không bắt buộc tải
+theo thứ tự.
 
 Ba nguồn được hỗ trợ:
 
@@ -195,8 +198,8 @@ Ba nguồn được hỗ trợ:
 5. Xác nhận nguồn hợp lệ. Khi có nguồn liên quan được xác nhận, hệ thống tự đối
    soát lại các lượt import cùng đơn vị và cùng kỳ.
 6. Nếu phương tiện chưa ghép được, xử lý tại danh sách liên kết phương tiện.
-7. Nếu dữ liệu trùng với bản đã lưu, chọn rõ giữ bản đang dùng hay tạo revision
-   mới; hệ thống không tự ghi đè âm thầm.
+7. Nếu dữ liệu trùng với bản đã lưu, chọn rõ giữ bản đang dùng hay tạo **bản
+   sửa đổi** mới; hệ thống không tự ghi đè âm thầm.
 
 Không cần sửa lỗi chỉ vì dấu phẩy thập phân Việt Nam: ví dụ `331,47` được hiểu
 là `331.47` tấn. Cảnh báo chỉ biến mất khi dữ liệu liên quan đã được xác nhận,
@@ -216,12 +219,12 @@ là `331.47` tấn. Cảnh báo chỉ biến mất khi dữ liệu liên quan đ
 File nguồn được đọc để tạo dữ liệu có provenance; hệ thống không sửa workbook
 gốc và không đưa dữ liệu lịch sử vào phiếu khai báo LIVE.
 
-### Xuất PL.03 tổng hợp
+### Xuất PL.03 từ TOS
 
 Sau khi các nguồn đã được xác nhận và đối soát:
 
-1. Chọn tháng, năm tại khối **PL.03 tổng hợp từ TOS**.
-2. Chọn **Xuất PL.03 tổng hợp**.
+1. Chọn tháng, năm tại khối **PL.03 từ TOS**.
+2. Chọn **Xuất PL.03**.
 3. Kiểm tra workbook được tạo, đặc biệt các dòng còn thiếu liên kết phương tiện.
 
 File này được tổng hợp lại từ dữ liệu chuẩn TOS và thông tin phương tiện được
@@ -229,17 +232,34 @@ ghép, thay vì sao chép nguyên số liệu thủ công của PL.03 cũ.
 
 ## 8. Báo cáo hoạt động
 
+### Hai luồng xuất PL.03
+
+Hai nút xuất PL.03 tạo cùng biểu mẫu Excel nhưng là hai workflow độc lập:
+
+| Nơi xuất | Nguồn dữ liệu | Mục đích |
+|---|---|---|
+| **Báo cáo hoạt động → PL.03** | Phiếu khai báo **Đã duyệt** và hồ sơ phương tiện trong hệ thống | Báo cáo hoạt động LIVE theo khoảng ngày |
+| **Import dữ liệu → Lịch sử / TOS → Xuất PL.03** | TOS Berth và chi tiết container đã import, đối soát, xác nhận | Tái lập báo cáo lịch sử theo tháng |
+
+PL.03 trong **Báo cáo hoạt động** không lấy dữ liệu từ lịch sử import. PL.03
+trong **Import dữ liệu** không lấy dữ liệu từ phiếu khai báo LIVE. File PL.03
+cũ được import chỉ hỗ trợ bổ sung thông tin nền của phương tiện; sản lượng và
+thời gian của báo cáo lịch sử vẫn ưu tiên Berth và chi tiết TOS đã xác nhận.
+
+Không ghi nhận cùng một lượt hoạt động ở cả hai nguồn. Khi LIVE và LỊCH SỬ
+chồng lấn trong cùng kỳ, hệ thống không cho cộng thành báo cáo KẾT HỢP để tránh
+tính trùng.
+
 ### Dashboard sản lượng
 
-`PORT_STAFF` và `PLATFORM_ADMIN` có thể chọn:
+`PLATFORM_ADMIN` có thể chọn:
 
 - **LIVE**: phiếu đã duyệt trong ứng dụng;
 - **LỊCH SỬ**: dữ liệu TOS đã xác nhận;
 - **KẾT HỢP**: cộng hai nguồn khi các kỳ không chồng lấn.
 
 Nếu LIVE và LỊCH SỬ chồng lấn trong cùng kỳ, hệ thống chặn việc cộng trùng và
-hiển thị mức độ dữ liệu có thể sử dụng. `CUSTOMER` chỉ xem dữ liệu LIVE thuộc
-phạm vi của mình.
+hiển thị mức độ dữ liệu có thể sử dụng.
 
 ### Xuất báo cáo
 
@@ -248,8 +268,8 @@ phạm vi của mình.
 - Các biểu PL.01, PL.02 và PL.03 vận hành tiếp tục được tạo từ phiếu đã duyệt.
 - PL.03 tái tạo từ TOS được xuất tại tab **Lịch sử / TOS** như hướng dẫn ở trên.
 
-PL.02 cho phép nhân viên Cảng ghi một điều chỉnh có lý do. Điều chỉnh được lưu
-như delta có dấu vết và không sửa phiếu khai báo gốc.
+PL.02 cho phép `PLATFORM_ADMIN` ghi một điều chỉnh có lý do. Điều chỉnh được
+lưu như delta có dấu vết và không sửa phiếu khai báo gốc.
 
 ## 9. Xử lý tình huống thường gặp
 
@@ -260,7 +280,7 @@ như delta có dấu vết và không sửa phiếu khai báo gốc.
 | Import vẫn còn cảnh báo sau khi mở lại | Xác nhận nguồn liên quan, chọn **Làm mới**, rồi mở lại preview; cảnh báo tồn tại nếu điều kiện chưa được xử lý |
 | Chi tiết container báo chưa ghép lượt | Xác nhận Berth cùng đơn vị/kỳ; hệ thống sẽ tự đối soát lại |
 | Báo cáo KẾT HỢP chỉ có một phần | Kiểm tra kỳ bị chồng lấn hoặc lượt import vẫn còn dòng cần xử lý |
-| Không xuất được PL.03 tổng hợp | Kiểm tra tháng/năm, trạng thái các nguồn và liên kết phương tiện |
+| Không xuất được PL.03 từ TOS | Kiểm tra tháng/năm, trạng thái các nguồn và liên kết phương tiện |
 | Hết phiên đăng nhập | Đăng nhập lại; thao tác chưa xác nhận cần được kiểm tra lại |
 | Không thấy khối Bảo vệ/Giao nhận trong chi tiết phiếu | Phiếu chưa **Đã duyệt**, hoặc tài khoản `PORT_STAFF` chưa được gán đúng bộ phận (Bảo vệ/Giao nhận) tại đơn vị đang chọn — liên hệ Admin |
 | Giao nhận không xác nhận được dỡ/xếp hàng | Bảo vệ chưa xác nhận thu phí cầu bến — đây là điều kiện bắt buộc trước, không phải lỗi |

@@ -28,7 +28,7 @@ from .historical_tos_parser import (
 from .models import (
     HistoricalCargoRow, HistoricalPortCall, HistoricalReportImport,
     HistoricalReportMetric, HistoricalReportRow, HistoricalVesselLink,
-    ReportingUnit, ReportingUnitVessel, Vessel,
+    ReportingUnit, ReportingUnitVessel, User, Vessel,
 )
 from .tenant import Scope, require_port_scope
 from .xlsx_io import make_report_xlsx
@@ -37,6 +37,10 @@ from .xlsx_io import make_report_xlsx
 router = APIRouter(prefix="/api/historical-imports", tags=["historical-imports"])
 MAX_SOURCE_BYTES = 12 * 1024 * 1024
 ACTIVE_IMPORT_STATUSES = ("COMMITTED", "REVIEW")
+VESSEL_SOT_IMPORT_STATUSES = ("COMMITTED", "REVIEW", "SUPERSEDED")
+VESSEL_LINK_REVIEW_WARNINGS = {
+    "REVIEW_NORMALIZED_VESSEL_LINK", "UNMATCHED_VESSEL", "AMBIGUOUS_VESSEL",
+}
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ARCHIVE_ROOT = Path(os.environ.get("HISTORICAL_SOURCE_DIR", ROOT / "data" / "historical_sources"))
 
@@ -132,6 +136,69 @@ def _candidate_link(vessels: list[Vessel], vessel_name: str) -> tuple[Vessel | N
     if not candidates:
         return None, "", "LOW", "UNMATCHED_VESSEL"
     return None, "", "LOW", "AMBIGUOUS_VESSEL"
+
+
+def _accepted_vessel_sot(
+    db: Session, unit_id: int, registered_vessel_ids: set[int],
+) -> dict[str, int | None]:
+    """Return tenant-current vessel identities previously accepted by an Admin."""
+    if not registered_vessel_ids:
+        return {}
+    rows = (
+        db.query(HistoricalVesselLink)
+        .join(
+            HistoricalReportImport,
+            HistoricalReportImport.id == HistoricalVesselLink.import_id,
+        )
+        .join(User, User.id == HistoricalVesselLink.reviewed_by_user_id)
+        .filter(
+            HistoricalVesselLink.reporting_unit_id == unit_id,
+            HistoricalVesselLink.link_status.in_(("ACCEPTED", "REJECTED")),
+            HistoricalReportImport.reporting_unit_id == unit_id,
+            HistoricalReportImport.status.in_(VESSEL_SOT_IMPORT_STATUSES),
+            User.role == "PLATFORM_ADMIN",
+            User.is_active == 1,
+        ).all()
+    )
+    latest: dict[str, tuple[tuple[str, int], str, int | None]] = {}
+    for row in rows:
+        normalized = normalize_vessel_name(row.normalized_vessel_name or row.raw_vessel_name)
+        if normalized:
+            decision_order = (row.reviewed_at or row.created_at or "", row.id)
+            if normalized not in latest or decision_order > latest[normalized][0]:
+                latest[normalized] = (
+                    decision_order, row.link_status, row.candidate_vessel_id,
+                )
+    return {
+        normalized: (
+            entry[2]
+            if entry[1] == "ACCEPTED" and entry[2] in registered_vessel_ids
+            else None
+        )
+        for normalized, entry in latest.items()
+    }
+
+
+def _vessel_sot_resolution(
+    vessels: list[Vessel],
+    vessels_by_id: dict[int, Vessel],
+    accepted_sot: dict[str, int | None],
+    vessel_name: str,
+) -> tuple[Vessel | None, str, str, str, bool]:
+    candidate, method, confidence, link_warning = _candidate_link(vessels, vessel_name)
+    normalized = normalize_vessel_name(vessel_name)
+    auto_accept = candidate is not None
+    if normalized in accepted_sot:
+        remembered_id = accepted_sot[normalized]
+        if remembered_id is None:
+            return None, "", "LOW", "UNMATCHED_VESSEL", False
+        remembered = vessels_by_id[remembered_id]
+        if candidate is not None and candidate.id != remembered.id:
+            return None, "", "LOW", "AMBIGUOUS_VESSEL", False
+        return remembered, "MANUAL", "HIGH", "", True
+    if candidate is not None:
+        return candidate, method, confidence, "", True
+    return candidate, method, confidence, link_warning, auto_accept
 
 
 def _cargo_fact_key(row: dict[str, Any] | HistoricalCargoRow) -> tuple[Any, ...]:
@@ -272,11 +339,13 @@ def _active_calls_by_key(
 
 def _stage_berth(db: Session, item: HistoricalReportImport, parsed: ParsedWorkbook) -> None:
     vessels = _registered_vessels(db, item.reporting_unit_id)
+    vessels_by_id = {vessel.id: vessel for vessel in vessels}
+    accepted_sot = _accepted_vessel_sot(db, item.reporting_unit_id, set(vessels_by_id))
     for source in parsed.rows:
         status = source["validation_status"]
         ambiguity = source["ambiguity_status"]
-        candidate, method, confidence, link_warning = _candidate_link(
-            vessels, source["vessel_name_raw"]
+        candidate, method, confidence, link_warning, auto_accept = _vessel_sot_resolution(
+            vessels, vessels_by_id, accepted_sot, source["vessel_name_raw"],
         )
         warnings = list(source["warnings"])
         if link_warning:
@@ -302,6 +371,7 @@ def _stage_berth(db: Session, item: HistoricalReportImport, parsed: ParsedWorkbo
             actual_departure_at=source["actual_departure_at"],
             reporting_month=source["reporting_month"], validation_status=status,
             ambiguity_status=ambiguity, reconciliation_status="NONE",
+            vessel_id=candidate.id if auto_accept else None,
             provenance_json=json_dumps({**source["provenance"], "warnings": warnings}),
             created_at=now_iso(),
         )
@@ -312,8 +382,10 @@ def _stage_berth(db: Session, item: HistoricalReportImport, parsed: ParsedWorkbo
             raw_vessel_name=source["vessel_name_raw"],
             normalized_vessel_name=source["vessel_name_normalized"],
             candidate_vessel_id=candidate.id if candidate else None,
-            match_method=method, confidence=confidence, link_status="PENDING",
-            reason=link_warning, created_at=now_iso(),
+            match_method=method, confidence=confidence,
+            link_status="ACCEPTED" if auto_accept else "PENDING",
+            reason=link_warning, reviewed_at=now_iso() if auto_accept else None,
+            created_at=now_iso(),
         ))
 
 
@@ -403,6 +475,90 @@ def _refresh_counts(db: Session, item: HistoricalReportImport) -> None:
     item.review_count = counts.get("REVIEW", 0)
     item.rejected_count = counts.get("REJECTED", 0)
     item.updated_at = now_iso()
+
+
+def _accept_vessel_link(
+    db: Session,
+    link: HistoricalVesselLink,
+    candidate_id: int,
+    reviewer_user_id: int | None,
+    *,
+    match_method: str,
+    confidence: str,
+) -> None:
+    link.candidate_vessel_id = candidate_id
+    link.link_status = "ACCEPTED"
+    link.match_method = match_method
+    link.confidence = confidence
+    link.reason = ""
+    link.reviewed_by_user_id = reviewer_user_id
+    link.reviewed_at = now_iso() if reviewer_user_id is not None else None
+    if not link.port_call_id:
+        return
+    call = db.query(HistoricalPortCall).filter_by(
+        id=link.port_call_id, reporting_unit_id=link.reporting_unit_id,
+    ).first()
+    if not call:
+        return
+    call.vessel_id = candidate_id
+    if call.ambiguity_status in {"UNMATCHED", "AMBIGUOUS"}:
+        call.ambiguity_status = "NONE"
+    provenance = json.loads(call.provenance_json or "{}")
+    original_warnings = provenance.get("warnings", [])
+    provenance["warnings"] = [
+        warning for warning in original_warnings
+        if warning not in VESSEL_LINK_REVIEW_WARNINGS
+    ]
+    call.provenance_json = json_dumps(provenance)
+    if call.validation_status != "REJECTED" and not provenance["warnings"]:
+        call.validation_status = "VALID"
+
+
+def _reconcile_pending_vessel_sot(
+    db: Session, unit_id: int, actor_user_id: int, *, import_ids: set[int] | None = None,
+) -> list[int]:
+    """Apply unambiguous Admin vessel SOT to already-staged Berth previews."""
+    vessels = _registered_vessels(db, unit_id)
+    vessels_by_id = {vessel.id: vessel for vessel in vessels}
+    accepted_sot = _accepted_vessel_sot(db, unit_id, set(vessels_by_id))
+    query = (
+        db.query(HistoricalVesselLink)
+        .join(
+            HistoricalReportImport,
+            HistoricalReportImport.id == HistoricalVesselLink.import_id,
+        )
+        .filter(
+            HistoricalVesselLink.reporting_unit_id == unit_id,
+            HistoricalVesselLink.link_status == "PENDING",
+            HistoricalReportImport.reporting_unit_id == unit_id,
+            HistoricalReportImport.status == "PREVIEWED",
+        )
+    )
+    if import_ids is not None:
+        query = query.filter(HistoricalVesselLink.import_id.in_(import_ids))
+    updated_import_ids: set[int] = set()
+    for link in query.order_by(HistoricalVesselLink.id).all():
+        candidate, method, confidence, _, auto_accept = _vessel_sot_resolution(
+            vessels, vessels_by_id, accepted_sot, link.raw_vessel_name,
+        )
+        if not auto_accept or candidate is None:
+            continue
+        _accept_vessel_link(
+            db, link, candidate.id, None,
+            match_method=method, confidence=confidence,
+        )
+        updated_import_ids.add(link.import_id)
+    for import_id in sorted(updated_import_ids):
+        item = db.query(HistoricalReportImport).filter_by(
+            id=import_id, reporting_unit_id=unit_id,
+        ).one()
+        _refresh_counts(db, item)
+        audit(
+            db, "historical_report_import", item.id, "VESSEL_SOT_RECONCILED",
+            "Reused Admin-maintained vessel source of truth.",
+            actor_user_id=actor_user_id, reporting_unit_id=unit_id,
+        )
+    return sorted(updated_import_ids)
 
 
 def _reconcile_active_cargo_links(db: Session, unit_id: int, actor_user_id: int) -> list[int]:
@@ -632,6 +788,11 @@ async def preview_historical_import(
     prior = prior_query.first()
     if prior:
         _archive_source(scope.reporting_unit_id, checksum, content)
+        _reconcile_pending_vessel_sot(
+            db, scope.reporting_unit_id, scope.user.id, import_ids={prior.id},
+        )
+        db.commit()
+        db.refresh(prior)
         return {**_import_json(prior, conflicts=[i.id for i in _conflicts(db, prior)]), "idempotent": True}
     archive_key = _archive_source(scope.reporting_unit_id, checksum, content)
     full_row_count = len(parsed.rows)
@@ -721,9 +882,18 @@ def reconcile_historical_imports(
     still invokes the same reconciliation transaction immediately.
     """
     _authorize(db, scope)
+    vessel_updated = _reconcile_pending_vessel_sot(
+        db, scope.reporting_unit_id, scope.user.id,
+    )
     updated = _reconcile_active_cargo_links(db, scope.reporting_unit_id, scope.user.id)
     db.commit()
-    return {"updated": len(updated), "updatedImportIds": updated}
+    result = {"updated": len(updated), "updatedImportIds": updated}
+    if vessel_updated:
+        result.update({
+            "updatedVesselImports": len(vessel_updated),
+            "updatedVesselImportIds": vessel_updated,
+        })
+    return result
 
 
 def _historical_pl03_rows(
@@ -1154,31 +1324,29 @@ def resolve_historical_vessel_link(
             )
         except HistoricalTenantError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
-        previous_candidate_id = link.candidate_vessel_id
-        link.candidate_vessel_id = candidate_id
-        link.link_status = "ACCEPTED"
-        link.match_method = "MANUAL" if candidate_id != previous_candidate_id else link.match_method
-        if link.port_call_id:
-            call = db.query(HistoricalPortCall).filter_by(
-                id=link.port_call_id, reporting_unit_id=scope.reporting_unit_id,
-            ).first()
-            if call:
-                call.vessel_id = candidate_id
-                if call.ambiguity_status in {"UNMATCHED", "AMBIGUOUS"}:
-                    call.ambiguity_status = "NONE"
-                original_warnings = json.loads(call.provenance_json or "{}").get("warnings", [])
-                link_warnings = {
-                    "REVIEW_NORMALIZED_VESSEL_LINK", "UNMATCHED_VESSEL", "AMBIGUOUS_VESSEL",
-                }
-                if call.validation_status != "REJECTED" and not any(
-                    warning not in link_warnings for warning in original_warnings
-                ):
-                    call.validation_status = "VALID"
+        _accept_vessel_link(
+            db, link, candidate_id, scope.user.id,
+            match_method="MANUAL", confidence="HIGH",
+        )
+        link.reason = body.reason.strip()
+        siblings = db.query(HistoricalVesselLink).filter(
+            HistoricalVesselLink.import_id == import_id,
+            HistoricalVesselLink.reporting_unit_id == scope.reporting_unit_id,
+            HistoricalVesselLink.normalized_vessel_name == link.normalized_vessel_name,
+            HistoricalVesselLink.link_status == "PENDING",
+            HistoricalVesselLink.id != link.id,
+        ).all()
+        for sibling in siblings:
+            _accept_vessel_link(
+                db, sibling, candidate_id, scope.user.id,
+                match_method="MANUAL", confidence="HIGH",
+            )
+            sibling.reason = body.reason.strip()
     else:
         link.link_status = "REJECTED"
-    link.reason = body.reason.strip()
-    link.reviewed_by_user_id = scope.user.id
-    link.reviewed_at = now_iso()
+        link.reason = body.reason.strip()
+        link.reviewed_by_user_id = scope.user.id
+        link.reviewed_at = now_iso()
     audit(db, "historical_vessel_link", link.id, f"LINK_{link.link_status}",
           link.reason or link.raw_vessel_name, actor_user_id=scope.user.id,
           reporting_unit_id=scope.reporting_unit_id)

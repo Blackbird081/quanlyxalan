@@ -13,7 +13,7 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "Vessel attachment access PR #9 is CI-green, clean, and mergeable. Await canonical-owner review; do not merge or FREEZE without separate operator authority.",
+    "nextAllowedMove":  "As ORCHESTRATOR, hand PR #10 to the canonical owner for review and merge disposition. Merge, deployment, and FREEZE remain unauthorized in this session.",
     "parkedOperatorCheckpoint":  null,
     "activeRole":  "ORCHESTRATOR",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",

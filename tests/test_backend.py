@@ -427,6 +427,10 @@ def test_static_frontend(client):
     assert "dashboardTimer = setTimeout(() => loadDashboard" not in app_js
     assert "importNav.style.removeProperty('display')" in app_js
     assert "reportsNav.style.removeProperty('display')" in app_js
+    assert "importNav.hidden = !isAdmin" in app_js
+    assert "reportsNav.hidden = !isAdmin" in app_js
+    assert "const adminOnlyRoutes = ['import', 'reports'];" in app_js
+    assert "state.currentUser.role !== 'PLATFORM_ADMIN' && adminOnlyRoutes.includes(name)" in app_js
     assert "importNav.style.display = 'block'" not in app_js
     assert "reportsNav.style.display = 'block'" not in app_js
     assert "Giữ dữ liệu hiện có & tiếp tục" in app_js
@@ -2668,17 +2672,14 @@ def test_historical_tos_preview_cross_import_join_and_revision(
         headers=auth_headers,
     )
     assert links.status_code == 200
-    assert links.json()["total"] == 1
-    suggested_link = links.json()["items"][0]
-    assert suggested_link["candidateVesselId"] is not None
-    resolved = client.post(
-        f"/api/historical-imports/{berth_import_id}/vessel-links/{suggested_link['id']}/resolve",
-        json={"decision": "ACCEPT", "candidate_vessel_id": suggested_link["candidateVesselId"],
-              "reason": "Confirmed in H4 preview"},
+    assert links.json()["total"] == 0
+    accepted_links = client.get(
+        f"/api/historical-imports/{berth_import_id}/vessel-links?status=ACCEPTED",
         headers=auth_headers,
     )
-    assert resolved.status_code == 200
-    assert resolved.json()["status"] == "ACCEPTED"
+    assert accepted_links.status_code == 200
+    assert accepted_links.json()["total"] == 1
+    assert accepted_links.json()["items"][0]["candidateVesselId"] is not None
     confirmed = client.post(
         f"/api/historical-imports/{berth_import_id}/confirm", json={}, headers=auth_headers,
     )
@@ -2913,15 +2914,10 @@ def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
     )
     assert original_preview.status_code == 200, original_preview.text
     original_id = original_preview.json()["id"]
-    original_link = client.get(
+    assert client.get(
         f"/api/historical-imports/{original_id}/vessel-links?status=PENDING",
         headers=auth_headers,
-    ).json()["items"][0]
-    assert client.post(
-        f"/api/historical-imports/{original_id}/vessel-links/{original_link['id']}/resolve",
-        json={"decision": "ACCEPT", "candidate_vessel_id": first_vessel_id, "reason": "Manual SOT"},
-        headers=auth_headers,
-    ).status_code == 200
+    ).json()["total"] == 0
     assert client.post(
         f"/api/historical-imports/{original_id}/confirm", json={}, headers=auth_headers,
     ).status_code == 200
@@ -3081,6 +3077,106 @@ def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
         db.commit()
     finally:
         db.close()
+
+
+def test_new_berth_voyage_reuses_admin_accepted_vessel_identity(
+    client, auth_headers,
+):
+    canonical_name = f"CANONICAL SOT {uuid.uuid4().hex[:8]}"
+    tos_alias = f"TOS ALIAS {uuid.uuid4().hex[:8]}"
+    vessel_id = _seed_historical_registered_vessel(canonical_name)
+    berth_headers = {2: "Năm", 3: "Chuyến", 5: "Tên tàu", 8: "Mã bến", 20: "ATB", 23: "ATD"}
+
+    first_preview = client.post(
+        "/api/historical-imports/preview",
+        content=_historical_fixture(berth_headers, [
+            {
+                2: "2093", 3: "0001", 5: tos_alias, 8: "K12",
+                20: "18/07/2093 08:30:00", 23: "18/07/2093 13:00:00",
+            },
+            {
+                2: "2093", 3: "0002", 5: tos_alias, 8: "K13",
+                20: "19/07/2093 08:30:00", 23: "19/07/2093 13:00:00",
+            },
+        ]),
+        headers={**auth_headers, "X-Source-Filename": "berth-sot-first.xlsx"},
+    )
+    assert first_preview.status_code == 200, first_preview.text
+    first_id = first_preview.json()["id"]
+    first_link = client.get(
+        f"/api/historical-imports/{first_id}/vessel-links?status=PENDING",
+        headers=auth_headers,
+    ).json()["items"][0]
+    assert client.post(
+        f"/api/historical-imports/{first_id}/vessel-links/{first_link['id']}/resolve",
+        json={"decision": "ACCEPT", "candidate_vessel_id": vessel_id, "reason": "Admin SOT"},
+        headers=auth_headers,
+    ).status_code == 200
+    assert client.get(
+        f"/api/historical-imports/{first_id}/vessel-links?status=PENDING",
+        headers=auth_headers,
+    ).json()["total"] == 0
+    assert client.post(
+        f"/api/historical-imports/{first_id}/confirm", json={}, headers=auth_headers,
+    ).status_code == 200
+
+    next_preview = client.post(
+        "/api/historical-imports/preview",
+        content=_historical_fixture(berth_headers, [{
+            2: "2093", 3: "0003", 5: tos_alias, 8: "K14",
+            20: "20/07/2093 08:30:00", 23: "20/07/2093 13:00:00",
+        }]),
+        headers={**auth_headers, "X-Source-Filename": "berth-sot-next-voyage.xlsx"},
+    )
+    assert next_preview.status_code == 200, next_preview.text
+    next_body = next_preview.json()
+    assert next_body["newRowCount"] == 1
+    assert next_body["review"] == 0
+    assert client.get(
+        f"/api/historical-imports/{next_body['id']}/vessel-links?status=PENDING",
+        headers=auth_headers,
+    ).json()["total"] == 0
+    accepted = client.get(
+        f"/api/historical-imports/{next_body['id']}/vessel-links?status=ACCEPTED",
+        headers=auth_headers,
+    ).json()
+    assert accepted["total"] == 1
+    assert accepted["items"][0]["candidateVesselId"] == vessel_id
+
+    db = SessionLocal()
+    try:
+        call = db.query(HistoricalPortCall).filter_by(import_id=next_body["id"]).one()
+        assert call.vessel_id == vessel_id
+        assert call.validation_status == "VALID"
+        link = db.query(HistoricalVesselLink).filter_by(import_id=next_body["id"]).one()
+        item = db.get(HistoricalReportImport, next_body["id"])
+        link.link_status = "PENDING"
+        link.candidate_vessel_id = None
+        link.match_method = ""
+        link.confidence = "LOW"
+        link.reason = "UNMATCHED_VESSEL"
+        link.reviewed_by_user_id = None
+        link.reviewed_at = None
+        call.vessel_id = None
+        call.validation_status = "REVIEW"
+        call.ambiguity_status = "UNMATCHED"
+        call.provenance_json = json.dumps({
+            **json.loads(call.provenance_json),
+            "warnings": ["UNMATCHED_VESSEL"],
+        })
+        item.accepted_count = 0
+        item.review_count = 1
+        db.commit()
+    finally:
+        db.close()
+
+    reconciled = client.post("/api/historical-imports/reconcile", headers=auth_headers)
+    assert reconciled.status_code == 200, reconciled.text
+    assert next_body["id"] in reconciled.json()["updatedVesselImportIds"]
+    assert client.get(
+        f"/api/historical-imports/{next_body['id']}/vessel-links?status=PENDING",
+        headers=auth_headers,
+    ).json()["total"] == 0
 
 
 def test_historical_corrected_mapping_supersedes_same_source_without_period(

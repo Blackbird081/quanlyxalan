@@ -114,6 +114,27 @@ def test_terminology_standardized():
     assert "Backup ngay" in index_html
     assert "NHẬP DỮ LIỆU CÓ KIỂM SOÁT" in index_html
     assert "Xác nhận import" in app_js
+    assert '<p class="eyebrow">NHẬT KÝ</p>' in index_html
+    assert "Dùng file mới · tạo bản sửa đổi" in app_js
+    assert "<th>Bản sửa đổi</th>" in app_js
+    assert 'data-label="Bản sửa đổi"' in app_js
+    assert "tạo revision" not in index_html
+    assert ">Revision<" not in app_js
+
+
+def test_import_and_reports_tabs_are_platform_admin_only():
+    app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+    index_html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+
+    assert '<a href="#import" data-route="import" hidden>' in index_html
+    assert '<a href="#reports" data-route="reports" hidden>' in index_html
+    assert "importNav.hidden = !isAdmin" in app_js
+    assert "reportsNav.hidden = !isAdmin" in app_js
+    assert "const adminOnlyRoutes = ['import', 'reports'];" in app_js
+    assert "state.currentUser.role !== 'PLATFORM_ADMIN' && adminOnlyRoutes.includes(name)" in app_js
+    assert "state.currentUser.role === 'CUSTOMER' ? 'declarations' : 'dashboard'" in app_js
+    assert "importNav.hidden = !(isReviewer || isAdmin)" not in app_js
+    assert "reportsNav.hidden = isCustomer" not in app_js
 
 
 def test_historical_import_is_visually_and_semantically_separate_from_live_import():
@@ -130,7 +151,7 @@ def test_historical_import_is_visually_and_semantically_separate_from_live_impor
     assert 'data-historical-row-filter="review"' in index_html
     assert 'id="historical-review-guide"' in index_html
     assert "Giữ bản đang dùng" in index_html
-    assert "Dùng file mới · tạo revision" in app_js
+    assert "Dùng file mới · tạo bản sửa đổi" in app_js
     assert "function setImportMode(" in app_js
     assert "function previewHistoricalImport(" in app_js
     assert "function renderHistoricalBatch(" in app_js
@@ -140,7 +161,8 @@ def test_historical_import_is_visually_and_semantically_separate_from_live_impor
     assert "function exportHistoricalPl03(" in app_js
     assert "/api/historical-imports/reconcile" in app_js
     assert "Xác nhận Berth & ghép Detail" in app_js
-    assert "Xuất PL.03 tổng hợp" in app_js
+    assert "PL.03 từ TOS" in app_js
+    assert ">Xuất PL.03<" in app_js
     assert "ATB/ATD, TEU và tấn lấy từ Berth/Detail" not in app_js
     assert "function historicalEffectivePeriod(" in app_js
     assert "function renderHistoricalHistorySummary(" in app_js
@@ -175,8 +197,8 @@ def test_vessel_editor_omits_blank_optional_fields_before_save_and_upload():
     assert save_block.index("data.organization = {name: data.organization_name};") < save_block.index(normalize)
     assert save_block.index(normalize) < save_block.index("saved = await api(path")
     assert save_block.index("saved = await api(path") < save_block.index("/attachments?filename=")
-    assert '<script src="app.js?v=1.13.5" defer></script>' in index_html
-    assert '<link rel="stylesheet" href="styles.css?v=1.13.5">' in index_html
+    assert '<script src="app.js?v=1.13.7" defer></script>' in index_html
+    assert '<link rel="stylesheet" href="styles.css?v=1.13.7">' in index_html
 
 
 def test_vessel_lists_show_accessible_attachment_indicator_only_when_files_exist():
@@ -194,17 +216,27 @@ def test_vessel_lists_show_accessible_attachment_indicator_only_when_files_exist
     assert "${vesselAttachmentIndicator(v)}" in app_js
     assert "${vesselAttachmentIndicator(v, true)}" in app_js
     assert "function bindVesselAttachmentIndicators(root = document)" in app_js
-    assert "function downloadVesselAttachment(attachmentId)" in app_js
+    assert "async function openVesselAttachmentPreview(attachmentId)" in app_js
+    assert "function downloadVesselAttachment(attachmentId, existingBlob = null)" in app_js
     assert "/attachments/${attachmentId}/download" in app_js
     assert "response.ok && responseType === 'blob'" in app_js
     assert "{responseType:'blob'}" in app_js
-    assert 'class="vessel-attachment-download"' in app_js
+    assert 'class="vessel-attachment-preview-link"' in app_js
+    assert 'data-preview-vessel-attachment="${item.id}"' in app_js
+    assert "openVesselAttachmentPreview(Number(button.dataset.previewVesselAttachment))" in app_js
+    assert "VESSEL_ATTACHMENT_IMAGE_EXTENSIONS" in app_js
+    assert "sandbox></iframe>" in app_js
+    assert "Word và Excel cần được tải xuống" in app_js
+    assert "saveVesselAttachmentBlob(blob, attachment.original_name)" in app_js
+    assert "URL.revokeObjectURL(state.vesselAttachmentPreview.objectUrl)" in app_js
+    assert 'id="vessel-attachment-preview-dialog"' in index_html
+    assert 'id="download-vessel-attachment">Tải xuống</button>' in index_html
     assert 'id="vessel-attachments-section"' in app_js
     assert ".vessel-name-with-attachment" in styles_css
     assert ".vessel-attachment-indicator svg" in styles_css
-    assert ".vessel-attachment-download" in styles_css
-    assert '<script src="app.js?v=1.13.5" defer></script>' in index_html
-    assert '<link rel="stylesheet" href="styles.css?v=1.13.5">' in index_html
+    assert ".vessel-attachment-preview-dialog" in styles_css
+    assert '<script src="app.js?v=1.13.7" defer></script>' in index_html
+    assert '<link rel="stylesheet" href="styles.css?v=1.13.7">' in index_html
 
 
 def test_historical_cumulative_import_explains_sot_incremental_merge():

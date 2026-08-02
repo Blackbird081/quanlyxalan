@@ -10,18 +10,27 @@
                                   "Vessel editor omits blank optional imported-profile fields before save so attachment upload and audit can proceed.",
                                   "Vessel and port-register lists show an accessible paperclip count only for Salan profiles that have attachments.",
                                   "Dashboard certificate warnings count only tenant-scoped EXPIRED and EXPIRING vessels through the canonical status helper.",
-                                  "Vessel attachment indicators open the correct profile attachment section and tenant-authorized files download with quarantine-safe response headers."
+                                  "Vessel attachment indicators open the correct profile attachment section and tenant-authorized files download with quarantine-safe response headers.",
+                                  "Import data and activity report tabs are visible only to Platform Admin; non-admin direct hashes are redirected, historical revision terminology is consistently Vietnamese, and the User Guide distinguishes LIVE PL.03 from historical/TOS PL.03.",
+                                  "Vessel attachment filenames open a safe preview dialog for raster images and PDF; Office files explain the preview limitation and every download requires an explicit user action.",
+                                  "Historical Berth imports treat the current Admin-maintained vessel register and latest Admin-accepted alias mapping as tenant-scoped source of truth, so new voyages reuse vessel identity without repeated confirmation."
                               ],
     "activeWorkOrders":  [
                               "docs/work_orders/WO_QLXL_SOT_ATTACHMENTS_20260729.md",
-                              "docs/work_orders/WO_QLXL_VESSEL_ATTACHMENT_ACCESS_20260730.md"
+                              "docs/work_orders/WO_QLXL_VESSEL_ATTACHMENT_ACCESS_20260730.md",
+                              "docs/work_orders/WO_QLXL_ADMIN_ONLY_DATA_TABS_20260730.md",
+                              "docs/work_orders/WO_QLXL_VESSEL_ATTACHMENT_PREVIEW_20260730.md",
+                              "docs/work_orders/WO_QLXL_HISTORICAL_VESSEL_SOT_REUSE_20260730.md"
                          ],
     "knownLimitations":  [
                              "Local backup execution requires PostgreSQL client tools such as pg_dump in PATH; Docker test evidence used a matching PostgreSQL 17 client and server.",
                              "Two existing openpyxl Data Validation warnings remain in the last closed baseline.",
                              "Independent R2 review of the 2026-07-30 vessel-editor and attachment-indicator repairs returned PASS_WITH_LIMITATIONS: no connected browser or Playwright runtime was available for a rendered screenshot/computed-style check.",
                              "WO-QLXL-SOT-ATTACHMENTS-20260729 is code-complete in hoangnmr/quanlyxalan PR #7 with a passing GitHub quality gate; canonical-owner review, merge, and FREEZE remain pending.",
-                             "Rendered browser evidence for vessel attachment click/download is unavailable because Browser discovery returned no available session; source, API, and full-suite evidence passed."
+                             "Rendered browser evidence for vessel attachment click/download is unavailable because Browser discovery returned no available session; source, API, and full-suite evidence passed.",
+                             "Admin-only Import/Reports navigation passed local source/static tests, but no connected production or rendered multi-role browser session was used.",
+                             "Vessel attachment preview passed focused frontend and backend evidence, but Browser discovery returned no available session for rendered popup evidence; the full local suite had 272 passes and 2 unrelated backup failures because pg_dump is absent from PATH.",
+                             "Independent vessel SOT re-review returned PASS_WITH_LIMITATIONS with no findings; final local regression passed 279 tests while two unrelated backup tests remained deselected because pg_dump is absent from PATH."
                          ],
     "evidence":  [
                      "docs/decisions/APP_ROUTE_EXTRACTION_DESIGN_20260727.md",
@@ -43,7 +52,20 @@
                      "docs/reviews/VESSEL_ATTACHMENT_ACCESS_REVIEW_20260730.md",
                      "commit:807e9d9",
                      "https://github.com/hoangnmr/quanlyxalan/actions/runs/30517459808",
-                     "https://github.com/hoangnmr/quanlyxalan/pull/9"
+                     "https://github.com/hoangnmr/quanlyxalan/pull/9",
+                     "docs/reviews/ADMIN_ONLY_DATA_TABS_REVIEW_20260730.md",
+                     "USER_GUIDE.md",
+                     "docs/decisions/VESSEL_ATTACHMENT_PREVIEW_DESIGN_20260730.md",
+                     "docs/specs/VESSEL_ATTACHMENT_PREVIEW_SPEC_20260730.md",
+                     "docs/work_orders/WO_QLXL_VESSEL_ATTACHMENT_PREVIEW_20260730.md",
+                     "docs/reviews/VESSEL_ATTACHMENT_PREVIEW_REVIEW_20260730.md",
+                     "docs/decisions/HISTORICAL_VESSEL_SOT_REUSE_DESIGN_20260730.md",
+                     "docs/specs/HISTORICAL_VESSEL_SOT_REUSE_SPEC_20260730.md",
+                     "docs/work_orders/WO_QLXL_HISTORICAL_VESSEL_SOT_REUSE_20260730.md",
+                     "docs/reviews/HISTORICAL_VESSEL_SOT_REUSE_REVIEW_20260730.md",
+                     "commit:77bb8d8",
+                     "https://github.com/hoangnmr/quanlyxalan/pull/10",
+                     "https://github.com/hoangnmr/quanlyxalan/actions/runs/30558812593"
                  ],
     "updatedAt":  "2026-07-30"
 }
