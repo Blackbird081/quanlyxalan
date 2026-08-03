@@ -1,7 +1,7 @@
 ﻿{
     "schemaVersion":  "1.0",
     "projectName":  "quanlyxalan",
-    "updatedAt":  "2026-07-27",
+    "updatedAt":  "2026-08-03",
     "claimBoundary":  "Registers only source-verified modules. Statuses describe current implementation and executable evidence, not roadmap intent.",
     "modules":  [
                     {
@@ -9,8 +9,16 @@
                         "name":  "Historical Import API",
                         "path":  "backend/historical_api.py",
                         "status":  "PARTIAL",
-                        "description":  "Tenant-scoped historical TOS/PL.03 import with source-of-truth retention and incremental merge implemented; PostgreSQL integration and independent R2 review remain pending.",
-                        "evidence":  "docs/reviews/HISTORICAL_SOT_AND_VESSEL_ATTACHMENTS_REVIEW_20260729.md; tests/test_sot_merge_unit.py; tests/test_backend.py"
+                        "description":  "Tenant-scoped historical TOS/PL.03 import with cumulative-snapshot replacement, safe partial merge, Admin-only inactive-history deletion and one PL.03 row per Berth call; local browser and PostgreSQL evidence are recorded while production evidence remains outside scope.",
+                        "evidence":  "docs/reviews/HISTORICAL_SNAPSHOT_CALL_ROWS_BERTH_FILTER_REVIEW_20260802.md; docs/reviews/REPORT_SOURCE_UI_UX_TEST_REPORT_20260803.md; tests/test_sot_merge_unit.py; tests/test_backend.py; tests/test_frontend_ux.py"
+                    },
+                    {
+                        "id":  "activity-reports-api",
+                        "name":  "Activity Reports API",
+                        "path":  "backend/reports_api.py",
+                        "status":  "PARTIAL",
+                        "description":  "Activity analytics and Excel exports support explicit LIVE, historical/TOS and overlap-protected combined sources for PL.02/PL.03, while PL.01 remains LIVE-only; historical analytics also filters by normalized Berth column H. Local rendered-browser evidence is recorded while production evidence remains outside scope.",
+                        "evidence":  "docs/reviews/HISTORICAL_SNAPSHOT_CALL_ROWS_BERTH_FILTER_REVIEW_20260802.md; docs/reviews/REPORT_EXPORT_SOURCE_INTEGRATION_REVIEW_20260802.md; docs/reviews/REPORT_SOURCE_UI_UX_TEST_REPORT_20260803.md; tests/test_backend.py; tests/test_frontend_ux.py"
                     },
                     {
                         "id":  "user-management-api",

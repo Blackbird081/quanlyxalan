@@ -13,14 +13,18 @@
                                   "Vessel attachment indicators open the correct profile attachment section and tenant-authorized files download with quarantine-safe response headers.",
                                   "Import data and activity report tabs are visible only to Platform Admin; non-admin direct hashes are redirected, historical revision terminology is consistently Vietnamese, and the User Guide distinguishes LIVE PL.03 from historical/TOS PL.03.",
                                   "Vessel attachment filenames open a safe preview dialog for raster images and PDF; Office files explain the preview limitation and every download requires an explicit user action.",
-                                  "Historical Berth imports treat the current Admin-maintained vessel register and latest Admin-accepted alias mapping as tenant-scoped source of truth, so new voyages reuse vessel identity without repeated confirmation."
+                                  "Historical Berth imports treat the current Admin-maintained vessel register and latest Admin-accepted alias mapping as tenant-scoped source of truth, so new voyages reuse vessel identity without repeated confirmation.",
+                                  "Historical imports distinguish cumulative snapshots from partial increments, Platform Admin can remove only inactive history, historical PL.03 keeps one row per Berth call/voyage, and Activity Reports filter both screen and Excel output by berth without adding berth to PL.03.",
+                                  "Activity Report exports keep PL.01 explicitly LIVE and let PL.02/PL.03 use LIVE, historical/TOS or non-overlapping combined sources with missing metrics preserved as blank and overlap blocked."
                               ],
     "activeWorkOrders":  [
                               "docs/work_orders/WO_QLXL_SOT_ATTACHMENTS_20260729.md",
                               "docs/work_orders/WO_QLXL_VESSEL_ATTACHMENT_ACCESS_20260730.md",
                               "docs/work_orders/WO_QLXL_ADMIN_ONLY_DATA_TABS_20260730.md",
                               "docs/work_orders/WO_QLXL_VESSEL_ATTACHMENT_PREVIEW_20260730.md",
-                              "docs/work_orders/WO_QLXL_HISTORICAL_VESSEL_SOT_REUSE_20260730.md"
+                              "docs/work_orders/WO_QLXL_HISTORICAL_VESSEL_SOT_REUSE_20260730.md",
+                              "docs/work_orders/WO_QLXL_HISTORICAL_SNAPSHOT_CALL_BERTH_20260802.md",
+                              "docs/work_orders/WO_QLXL_REPORT_EXPORT_SOURCE_INTEGRATION_20260802.md"
                          ],
     "knownLimitations":  [
                              "Local backup execution requires PostgreSQL client tools such as pg_dump in PATH; Docker test evidence used a matching PostgreSQL 17 client and server.",
@@ -30,7 +34,9 @@
                              "Rendered browser evidence for vessel attachment click/download is unavailable because Browser discovery returned no available session; source, API, and full-suite evidence passed.",
                              "Admin-only Import/Reports navigation passed local source/static tests, but no connected production or rendered multi-role browser session was used.",
                              "Vessel attachment preview passed focused frontend and backend evidence, but Browser discovery returned no available session for rendered popup evidence; the full local suite had 272 passes and 2 unrelated backup failures because pg_dump is absent from PATH.",
-                             "Independent vessel SOT re-review returned PASS_WITH_LIMITATIONS with no findings; final local regression passed 279 tests while two unrelated backup tests remained deselected because pg_dump is absent from PATH."
+                             "Independent vessel SOT re-review returned PASS_WITH_LIMITATIONS with no findings; final local regression passed 279 tests while two unrelated backup tests remained deselected because pg_dump is absent from PATH.",
+                             "Historical snapshot/per-call PL.03/berth-filter review returned PASS_WITH_LIMITATIONS: 280 tests passed, two unrelated pg_dump-dependent backup tests were deselected, and no connected browser session was available for rendered UI evidence.",
+                             "PL report source integration review returned PASS_WITH_LIMITATIONS: 281 application tests passed locally while two unrelated backup-only tests failed because pg_dump is absent; local Chromium screenshots and PostgreSQL 16.11 workbook receipts were added, while the saved mobile frames do not directly include the dedicated annex-source selector."
                          ],
     "evidence":  [
                      "docs/decisions/APP_ROUTE_EXTRACTION_DESIGN_20260727.md",
@@ -65,7 +71,17 @@
                      "docs/reviews/HISTORICAL_VESSEL_SOT_REUSE_REVIEW_20260730.md",
                      "commit:77bb8d8",
                      "https://github.com/hoangnmr/quanlyxalan/pull/10",
-                     "https://github.com/hoangnmr/quanlyxalan/actions/runs/30558812593"
+                     "https://github.com/hoangnmr/quanlyxalan/actions/runs/30558812593",
+                     "docs/decisions/HISTORICAL_SNAPSHOT_CALL_ROWS_BERTH_FILTER_DESIGN_20260802.md",
+                     "docs/specs/HISTORICAL_SNAPSHOT_CALL_ROWS_BERTH_FILTER_SPEC_20260802.md",
+                     "docs/work_orders/WO_QLXL_HISTORICAL_SNAPSHOT_CALL_BERTH_20260802.md",
+                     "docs/reviews/HISTORICAL_SNAPSHOT_CALL_ROWS_BERTH_FILTER_REVIEW_20260802.md",
+                     "docs/decisions/REPORT_EXPORT_SOURCE_INTEGRATION_DESIGN_20260802.md",
+                     "docs/specs/REPORT_EXPORT_SOURCE_INTEGRATION_SPEC_20260802.md",
+                     "docs/work_orders/WO_QLXL_REPORT_EXPORT_SOURCE_INTEGRATION_20260802.md",
+                     "docs/reviews/REPORT_EXPORT_SOURCE_INTEGRATION_REVIEW_20260802.md",
+                     "docs/reviews/REPORT_SOURCE_UI_UX_TEST_REPORT_20260803.md",
+                     "USER_GUIDE.md"
                  ],
-    "updatedAt":  "2026-07-30"
+    "updatedAt":  "2026-08-03"
 }

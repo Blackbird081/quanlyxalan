@@ -13,9 +13,9 @@
                        "FREEZE"
                    ],
     "activeHandoff":  "CVF_SESSION/handoffs/AGENT_HANDOFF_V2_2026-07-29.md",
-    "nextAllowedMove":  "As ORCHESTRATOR, hand PR #10 to the canonical owner for review and merge disposition. Merge, deployment, and FREEZE remain unauthorized in this session.",
+    "nextAllowedMove":  "As COMMIT_STEWARD, commit the exact reviewed historical snapshot and PL report source integration set excluding .claude, rebase it onto upstream/main, rerun bounded post-rebase checks, push the fork branch and create a PR targeting hoangnmr/quanlyxalan:main. Merge, deployment and FREEZE remain unauthorized.",
     "parkedOperatorCheckpoint":  null,
-    "activeRole":  "ORCHESTRATOR",
+    "activeRole":  "COMMIT_STEWARD",
     "roleRoute":  "SINGLE_AGENT_MULTI_ROLE_ALLOWED",
-    "updatedAt":  "2026-07-30"
+    "updatedAt":  "2026-08-03"
 }

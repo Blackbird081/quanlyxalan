@@ -68,7 +68,12 @@ class ReportAdjustmentRequest(BaseModel):
 
 ANALYTICS_PERIODS = {"week", "month", "quarter", "year"}
 ANALYTICS_SOURCES = {"live", "historical", "combined"}
+REPORT_EXPORT_SOURCES = ANALYTICS_SOURCES
 ACTIVE_HISTORICAL_STATUSES = ("COMMITTED", "REVIEW")
+
+
+def _berth_key(value: Any) -> str:
+    return import_match_key(str(value or ""))
 
 
 def _month_shift(value: date, offset: int) -> date:
@@ -214,6 +219,7 @@ def _months_between(start: date, end: date) -> list[str]:
 
 def _historical_window(
     db: Session, unit_id: int, start: date, end: date, labels: list[str], bucket,
+    berth: str = "",
 ) -> dict[str, Any]:
     """Aggregate only active, validated TOS facts using ATB as operating time.
 
@@ -243,16 +249,27 @@ def _historical_window(
             "available": {"trips": False, "tons": False, "teu": False, "pax": False},
             "trend": [0] * len(labels), "months": {}, "coverageMonths": [],
             "reportedMonths": sorted(reported_months), "hasCoverage": bool(reported_months),
-            "hasReview": False,
+            "hasReview": False, "berths": [], "tosCoverageMonths": [],
+            "hasTosCoverage": False,
         }
 
-    calls = db.query(HistoricalPortCall).filter(
+    all_calls = db.query(HistoricalPortCall).filter(
         HistoricalPortCall.reporting_unit_id == unit_id,
         HistoricalPortCall.import_id.in_(active_ids),
         HistoricalPortCall.validation_status == "VALID",
         HistoricalPortCall.actual_berthing_at >= start.isoformat(),
         HistoricalPortCall.actual_berthing_at < (end + timedelta(days=1)).isoformat(),
     ).all()
+    berths = sorted({
+        str(call.source_berth_raw or call.arrival_berth or "").strip()
+        for call in all_calls if str(call.source_berth_raw or call.arrival_berth or "").strip()
+    })
+    selected_berth = _berth_key(berth)
+    calls = [
+        call for call in all_calls
+        if not selected_berth
+        or _berth_key(call.source_berth_raw or call.arrival_berth) == selected_berth
+    ]
     call_ids = [item.id for item in calls]
     cargo_rows = []
     if call_ids:
@@ -285,7 +302,7 @@ def _historical_window(
     berth_complete = bool(berth_months) and all(
         item.status == "COMMITTED" and item.review_count == 0 for item in berth_imports
     )
-    cargo_complete = bool(cargo_months) and all(
+    cargo_complete = bool(berth_months) and berth_months.issubset(cargo_months) and all(
         item.status == "COMMITTED" and item.review_count == 0 for item in cargo_imports
     )
     has_review = any(
@@ -304,14 +321,18 @@ def _historical_window(
         },
         "trend": trend if berth_complete else [0] * len(labels), "months": months,
         "coverageMonths": sorted(berth_months | cargo_months | reported_months),
+        "tosCoverageMonths": sorted(berth_months | cargo_months),
         "reportedMonths": sorted(reported_months),
         "hasCoverage": bool(berth_months or cargo_months or reported_months),
+        "hasTosCoverage": bool(berth_months or cargo_months),
         "hasReview": has_review,
+        "berths": berths,
     }
 
 
 def _analytics_payload(
     db: Session, scope: Scope, period: str, anchor: date, source: str = "live",
+    berth: str = "",
 ) -> dict[str, Any]:
     config = _analytics_period(period, anchor)
     query = db.query(Declaration).filter(Declaration.workflow_status == "APPROVED")
@@ -328,10 +349,13 @@ def _analytics_payload(
     live_trend_current = [0] * len(config["labels"])
     live_trend_previous = [0] * len(config["labels"])
     live_months: dict[str, int] = {}
+    selected_berth = berth.strip()
+    live_berths: set[str] = set()
     for declaration in declarations:
         operating_date = _declaration_operating_date(declaration)
         if not operating_date:
             continue
+        operating_berth = str(declaration.working_port or declaration.departure_berth or "").strip()
         if config["current_start"] <= operating_date <= config["current_end"]:
             group = "cur"
             trend = live_trend_current
@@ -341,6 +365,10 @@ def _analytics_payload(
             trend = live_trend_previous
             start = config["previous_start"]
         else:
+            continue
+        if operating_berth:
+            live_berths.add(operating_berth)
+        if selected_berth and _berth_key(operating_berth) != _berth_key(selected_berth):
             continue
         for key, value in _declaration_metrics(declaration).items():
             live_totals[group][key] += value
@@ -361,11 +389,11 @@ def _analytics_payload(
         historical = {
             "cur": _historical_window(
                 db, scope.reporting_unit_id, config["current_start"], config["current_end"],
-                config["labels"], config["bucket"],
+                config["labels"], config["bucket"], selected_berth,
             ),
             "prev": _historical_window(
                 db, scope.reporting_unit_id, config["previous_start"], config["previous_end"],
-                config["labels"], config["bucket"],
+                config["labels"], config["bucket"], selected_berth,
             ),
         }
         historical_months = (
@@ -441,6 +469,17 @@ def _analytics_payload(
     else:
         coverage_status = "MISSING"
 
+    historical_berths = set()
+    if historical:
+        historical_berths.update(historical["cur"].get("berths", []))
+        historical_berths.update(historical["prev"].get("berths", []))
+    if source == "live":
+        available_berths = live_berths
+    elif source == "historical":
+        available_berths = historical_berths
+    else:
+        available_berths = live_berths | historical_berths
+
     return {
         "period": period,
         "asOf": anchor.isoformat(),
@@ -453,6 +492,7 @@ def _analytics_payload(
             "status": coverage_status, "periods": coverage_periods,
             "overlapPeriods": overlap_months, "warnings": warnings,
         },
+        "filters": {"berth": selected_berth, "berths": sorted(available_berths)},
         "meta": {
             "analyticsTitle": config["title"],
             "trendTitle": config["trend_title"],
@@ -466,6 +506,7 @@ def _analytics_payload(
 def report_analytics(
     period: str = "month",
     source: str = "live",
+    berth: str = Query(default="", max_length=100),
     as_of: Optional[date] = None,
     db: Session = Depends(get_db),
     scope: Scope = Depends(resolve_scope),
@@ -474,13 +515,14 @@ def report_analytics(
         raise HTTPException(status_code=422, detail="Kỳ thống kê phải là week, month, quarter hoặc year.")
     if source not in ANALYTICS_SOURCES:
         raise HTTPException(status_code=422, detail="Nguồn thống kê phải là live, historical hoặc combined.")
-    return _analytics_payload(db, scope, period, as_of or date.today(), source)
+    return _analytics_payload(db, scope, period, as_of or date.today(), source, berth)
 
 
 @router.get("/api/reports/analytics/export")
 def export_analytics(
     period: str = "month",
     source: str = "live",
+    berth: str = Query(default="", max_length=100),
     as_of: Optional[date] = None,
     db: Session = Depends(get_db),
     scope: Scope = Depends(resolve_scope),
@@ -489,7 +531,7 @@ def export_analytics(
         raise HTTPException(status_code=422, detail="Kỳ thống kê không hợp lệ.")
     if source not in ANALYTICS_SOURCES:
         raise HTTPException(status_code=422, detail="Nguồn thống kê không hợp lệ.")
-    payload = _analytics_payload(db, scope, period, as_of or date.today(), source)
+    payload = _analytics_payload(db, scope, period, as_of or date.today(), source, berth)
     if not payload["combinedAllowed"]:
         raise HTTPException(status_code=409, detail="Không thể xuất tổng kết hợp khi kỳ dữ liệu còn chồng lấn chưa đối soát.")
     labels = {"trips": "Lượt tàu", "tons": "Khối lượng (tấn)", "teu": "TEU", "pax": "Hành khách"}
@@ -661,15 +703,29 @@ def _appendix2_rows(
     current_adjustments: Optional[dict[str, float]] = None,
     cumulative_adjustments: Optional[dict[str, float]] = None,
 ) -> list[list[Any]]:
-    current_metrics = _report_period_metrics(current)
-    cumulative_metrics = _report_period_metrics(cumulative)
-    for metrics, adjustments in (
-        (current_metrics, current_adjustments or {}),
-        (cumulative_metrics, cumulative_adjustments or {}),
-    ):
-        for key, delta in adjustments.items():
-            if key in metrics and delta:
-                metrics[key] = float(metrics[key] or 0) + float(delta)
+    current_metrics = _apply_report_adjustments(
+        _report_period_metrics(current), current_adjustments or {},
+    )
+    cumulative_metrics = _apply_report_adjustments(
+        _report_period_metrics(cumulative), cumulative_adjustments or {},
+    )
+    return _appendix2_metric_rows(current_metrics, cumulative_metrics)
+
+
+def _apply_report_adjustments(
+    metrics: dict[str, float | None], adjustments: dict[str, float],
+) -> dict[str, float | None]:
+    result = dict(metrics)
+    for key, delta in adjustments.items():
+        if key in result and delta:
+            result[key] = float(result[key] or 0) + float(delta)
+    return result
+
+
+def _appendix2_metric_rows(
+    current_metrics: dict[str, float | None],
+    cumulative_metrics: dict[str, float | None],
+) -> list[list[Any]]:
     values = [
         current_metrics["container_tons"], current_metrics["container_teu"],
         cumulative_metrics["container_tons"], cumulative_metrics["container_teu"],
@@ -684,6 +740,121 @@ def _appendix2_rows(
         [None, "- Cảng Tân Thuận", *values],
         ["Tổng", None, *values],
     ]
+
+
+def _historical_appendix2_metrics(window: dict[str, Any]) -> dict[str, float | None]:
+    available = window["available"]
+    values = window["values"]
+    return {
+        "container_tons": values["tons"] if available["tons"] else None,
+        "container_teu": values["teu"] if available["teu"] else None,
+        "dry_tons": None,
+        "liquid_tons": None,
+        "foreign_tons": None,
+        "calls": values["trips"] if available["trips"] else None,
+        "passenger_calls": None,
+        "passengers": None,
+    }
+
+
+def _combined_appendix2_metrics(
+    live: dict[str, float | None],
+    historical: dict[str, float | None],
+    *, has_historical_coverage: bool,
+) -> dict[str, float | None]:
+    if not has_historical_coverage:
+        return dict(live)
+    combined: dict[str, float | None] = {}
+    for key, historical_value in historical.items():
+        if historical_value is None:
+            # The requested historical window contains no trustworthy source
+            # for this metric. Preserve "unknown" instead of under-reporting.
+            combined[key] = None
+        else:
+            combined[key] = float(live.get(key) or 0) + float(historical_value)
+    return combined
+
+
+def _historical_report_window(
+    db: Session, unit_id: int, start: date, end: date,
+) -> dict[str, Any]:
+    return _historical_window(
+        db, unit_id, start, end, ["Kỳ"], lambda _value, _start: 0,
+    )
+
+
+def _live_months(
+    declarations: list[Declaration], start: date, end: date, *, arrival_only: bool,
+) -> set[str]:
+    extractor = _arrival_operating_date if arrival_only else _declaration_operating_date
+    return {
+        _month_key(value)
+        for declaration in declarations
+        if (value := extractor(declaration)) and start <= value <= end
+    }
+
+
+def _historical_pl03_export_rows(
+    db: Session, unit_id: int, start: date, end: date, *, required: bool = True,
+) -> tuple[list[list[Any]], set[str]]:
+    from .historical_api import _historical_pl03_rows
+
+    periods = [
+        value for value, in db.query(HistoricalPortCall.reporting_month)
+        .join(
+            HistoricalReportImport,
+            HistoricalReportImport.id == HistoricalPortCall.import_id,
+        )
+        .filter(
+            HistoricalPortCall.reporting_unit_id == unit_id,
+            HistoricalPortCall.validation_status != "REJECTED",
+            HistoricalPortCall.actual_berthing_at >= start.isoformat(),
+            HistoricalPortCall.actual_berthing_at < (end + timedelta(days=1)).isoformat(),
+            HistoricalReportImport.source_kind == "tos_berth_call",
+            HistoricalReportImport.status.in_(ACTIVE_HISTORICAL_STATUSES),
+        ).distinct().order_by(HistoricalPortCall.reporting_month).all()
+        if value
+    ]
+    if not periods:
+        if not required:
+            return [], set()
+        raise HTTPException(
+            status_code=409,
+            detail="Kỳ đã chọn chưa có dữ liệu Berth lịch sử/TOS đã xác nhận để xuất PL.03.",
+        )
+    rows: list[list[Any]] = []
+    for period in periods:
+        try:
+            period_rows, _receipt = _historical_pl03_rows(
+                db, unit_id, period, report_start=start, report_end=end,
+            )
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Kỳ {period}: {exc.detail}",
+                ) from exc
+            raise
+        rows.extend(period_rows)
+    for index, row in enumerate(rows, start=1):
+        row[0] = index
+    return rows, set(periods)
+
+
+def _pl03_row_time_key(row: list[Any]) -> tuple[datetime, str, int]:
+    raw = str(row[32] or "").splitlines()[0].strip()
+    parsed = None
+    if raw:
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            for pattern in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+                try:
+                    parsed = datetime.strptime(raw, pattern)
+                    break
+                except ValueError:
+                    continue
+    return parsed or datetime.max, str(row[1] or ""), int(row[0] or 0)
 
 
 def _cargo_column_start(movement_type: str, cargo_direction: str = "") -> int:
@@ -866,12 +1037,28 @@ def export_report(
     kind: str,
     from_: Optional[str] = Query(default=None, alias="from"),
     to: Optional[str] = None,
+    source: str = Query(default="live"),
     db: Session = Depends(get_db),
     scope: Scope = Depends(resolve_scope),
 ):
     user = scope.user
     if kind not in ("appendix1", "appendix2", "appendix3"):
         raise HTTPException(status_code=404, detail=f"Loại báo cáo '{kind}' không tồn tại.")
+    if source not in REPORT_EXPORT_SOURCES:
+        raise HTTPException(
+            status_code=422,
+            detail="Nguồn xuất báo cáo phải là live, historical hoặc combined.",
+        )
+    if kind == "appendix1" and source != "live":
+        raise HTTPException(
+            status_code=422,
+            detail="PL.01 chỉ hỗ trợ nguồn LIVE vì dữ liệu TOS không đủ trường kế hoạch.",
+        )
+    if source != "live" and not scope.is_port:
+        raise HTTPException(
+            status_code=403,
+            detail="Nguồn lịch sử/TOS chỉ dành cho người dùng Cảng trong đúng đơn vị báo cáo.",
+        )
 
     if to:
         try:
@@ -916,18 +1103,97 @@ def export_report(
             if (value := _arrival_operating_date(item)) and cumulative_start <= value <= report_end
         ]
         month_key = report_end.strftime("%Y-%m")
-        rows = _appendix2_rows(
-            decls,
-            cumulative,
-            _report_adjustment_totals(db, month_key, month_key, scope),
-            _report_adjustment_totals(db, f"{report_end.year}-01", month_key, scope),
+        current_adjustments = _report_adjustment_totals(db, month_key, month_key, scope)
+        cumulative_adjustments = _report_adjustment_totals(
+            db, f"{report_end.year}-01", month_key, scope,
         )
+        if source == "live":
+            rows = _appendix2_rows(
+                decls, cumulative, current_adjustments, cumulative_adjustments,
+            )
+        else:
+            current_window = _historical_report_window(
+                db, scope.reporting_unit_id, report_start, report_end,
+            )
+            cumulative_window = _historical_report_window(
+                db, scope.reporting_unit_id, cumulative_start, report_end,
+            )
+            historical_current = _historical_appendix2_metrics(current_window)
+            historical_cumulative = _historical_appendix2_metrics(cumulative_window)
+            if source == "historical":
+                if not cumulative_window["hasTosCoverage"]:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Năm báo cáo chưa có dữ liệu Berth/chi tiết TOS đã xác nhận để xuất PL.02.",
+                    )
+                rows = _appendix2_metric_rows(
+                    historical_current, historical_cumulative,
+                )
+            else:
+                live_coverage = _live_months(
+                    cumulative, cumulative_start, report_end, arrival_only=True,
+                )
+                overlap = sorted(
+                    live_coverage & set(cumulative_window["tosCoverageMonths"]),
+                )
+                if overlap:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Không thể xuất PL.02 KẾT HỢP vì tháng "
+                            f"{', '.join(overlap)} có cả LIVE và TOS. Hãy chọn một nguồn để tránh cộng trùng."
+                        ),
+                    )
+                live_current = _apply_report_adjustments(
+                    _report_period_metrics(decls), current_adjustments,
+                )
+                live_cumulative = _apply_report_adjustments(
+                    _report_period_metrics(cumulative), cumulative_adjustments,
+                )
+                rows = _appendix2_metric_rows(
+                    _combined_appendix2_metrics(
+                        live_current, historical_current,
+                        has_historical_coverage=current_window["hasTosCoverage"],
+                    ),
+                    _combined_appendix2_metrics(
+                        live_cumulative, historical_cumulative,
+                        has_historical_coverage=cumulative_window["hasTosCoverage"],
+                    ),
+                )
 
     else:  # appendix3
-        try:
-            rows = _appendix3_rows(db, decls, base_vessels)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if source == "live":
+            try:
+                rows = _appendix3_rows(db, decls, base_vessels)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        else:
+            historical_rows, historical_months = _historical_pl03_export_rows(
+                db, scope.reporting_unit_id, report_start, report_end,
+                required=source == "historical",
+            )
+            if source == "historical":
+                rows = historical_rows
+            else:
+                overlap = sorted(
+                    _live_months(decls, report_start, report_end, arrival_only=False)
+                    & historical_months,
+                )
+                if overlap:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Không thể xuất PL.03 KẾT HỢP vì tháng "
+                            f"{', '.join(overlap)} có cả LIVE và TOS. Hãy chọn một nguồn để tránh trùng chuyến."
+                        ),
+                    )
+                try:
+                    live_rows = _appendix3_rows(db, decls, []) if decls else []
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
+                rows = sorted(historical_rows + live_rows, key=_pl03_row_time_key)
+                for index, row in enumerate(rows, start=1):
+                    row[0] = index
 
     if scope.is_customer:
         reporting_unit_label = user.organization.name if user.organization else "CÔNG TY CỔ PHẦN CẢNG TÂN THUẬN"
@@ -942,7 +1208,8 @@ def export_report(
         report_to=report_end,
         reporting_unit=reporting_unit_label,
     )
-    filename = f"report_{kind}_{from_ or 'all'}_{to or 'all'}.xlsx"
+    source_suffix = "" if source == "live" else f"_{source}"
+    filename = f"report_{kind}{source_suffix}_{from_ or 'all'}_{to or 'all'}.xlsx"
     return Response(
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

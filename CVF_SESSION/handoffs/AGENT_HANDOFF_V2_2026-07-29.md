@@ -703,3 +703,134 @@ AI governance behavior.
 - Next governed move belongs to the canonical owner: review PR #10 and decide
   whether to merge.
 - Merge, deployment, and FREEZE remain unauthorized in this session.
+
+## Historical Snapshot, Per-Call PL.03 And Berth Analytics — 2026-08-02
+
+- Operator authorized Platform Admin cleanup of obsolete historical receipts,
+  cumulative-snapshot replacement, one PL.03 row per Salan voyage/timeline,
+  and Activity Report filtering by Berth column H.
+- Clarification: Berth code is not a PL.03 column; it is an Activity Report
+  filter dimension.
+- Risk: R2 because receipt deletion and snapshot activation affect retained
+  report facts and must preserve tenant isolation.
+- Phase/role route: REVIEW/ORCHESTRATOR -> INTAKE/ORCHESTRATOR ->
+  DESIGN/SPEC_AUTHOR -> SPEC/SPEC_AUTHOR ->
+  WORK_ORDER/WORK_ORDER_AUTHOR -> BUILD/IMPLEMENTATION_WORKER.
+- Governed artifacts:
+  - `docs/decisions/HISTORICAL_SNAPSHOT_CALL_ROWS_BERTH_FILTER_DESIGN_20260802.md`
+  - `docs/specs/HISTORICAL_SNAPSHOT_CALL_ROWS_BERTH_FILTER_SPEC_20260802.md`
+  - `docs/work_orders/WO_QLXL_HISTORICAL_SNAPSHOT_CALL_BERTH_20260802.md`
+- BUILD acknowledgment: implementation is limited to safe deletion of
+  non-active receipts, cumulative-versus-partial classification, per-call
+  historical PL.03 rows, berth-filtered analytics/export, focused tests and
+  governed truth updates. No production receipt or source archive will be
+  deleted during verification. Commit, push, merge, deployment and FREEZE
+  remain unauthorized.
+
+## Historical Snapshot Tranche Review — 2026-08-02
+
+- BUILD result: cumulative snapshots replace the relevant active snapshot;
+  partial workbooks stage only new facts; Platform Admin can delete inactive
+  history; historical PL.03 writes one row per Berth call; Activity Reports
+  and their Excel export filter by berth without adding berth to PL.03.
+- Role/phase transition: IMPLEMENTATION_WORKER/BUILD -> REVIEWER/REVIEW.
+- Review found one MEDIUM API-contract defect: a direct client could request
+  incremental merge for a cumulative snapshot. The backend now rejects that
+  combination with 409, and tests cover both invalid action directions.
+- Re-review disposition: PASS_WITH_LIMITATIONS; no open HIGH, MEDIUM or LOW
+  finding remains.
+- Evidence: PostgreSQL 17 regression 280 passed, 2 unrelated backup tests
+  deselected; frontend 18 passed; compile, JavaScript syntax, unbound-name,
+  diff and focused XLSX/API checks passed.
+- Limitations: no rendered browser session; local host lacks `pg_dump`; no
+  production data or source archive was removed.
+- Role transition: REVIEWER -> ORCHESTRATOR for operator handback.
+- Next move requires new authorization for commit/push/PR, production cleanup,
+  deployment or FREEZE.
+
+## PL Report Source Integration — 2026-08-02
+
+- Operator approved integrating historical/TOS data into the Activity Report
+  export area with an explicit requirement to keep the UI clear for end users.
+- Current truth: the three report cards read approved LIVE declarations; TOS
+  facts are available only in analytics and the separate historical PL.03
+  shortcut.
+- Risk: R2 because combined reporting must not duplicate overlapping LIVE and
+  historical periods or convert unavailable historical metrics into zero.
+- Phase/role route: REVIEW/ORCHESTRATOR -> INTAKE/ORCHESTRATOR ->
+  DESIGN/SPEC_AUTHOR -> SPEC/SPEC_AUTHOR ->
+  WORK_ORDER/WORK_ORDER_AUTHOR -> BUILD/IMPLEMENTATION_WORKER.
+- Governed artifacts:
+  - `docs/decisions/REPORT_EXPORT_SOURCE_INTEGRATION_DESIGN_20260802.md`
+  - `docs/specs/REPORT_EXPORT_SOURCE_INTEGRATION_SPEC_20260802.md`
+  - `docs/work_orders/WO_QLXL_REPORT_EXPORT_SOURCE_INTEGRATION_20260802.md`
+- BUILD acknowledgment: implementation is limited to source-aware PL.02 and
+  PL.03 exports, explicit LIVE-only PL.01 presentation, overlap protection,
+  compact source UX, executable tests and governed truth updates. Existing
+  uncommitted tranche changes remain preserved. Production changes, commit,
+  push, deployment and FREEZE remain unauthorized.
+
+## PL Report Source Integration Review — 2026-08-02
+
+- BUILD result: PL.01 stays LIVE; PL.02 and PL.03 export from LIVE,
+  historical/TOS or non-overlapping combined sources through one compact
+  selector. Unsupported historical metrics remain blank.
+- Role/phase transition: IMPLEMENTATION_WORKER/BUILD -> REVIEWER/REVIEW.
+- Review repaired three findings: combined PL.03 now permits a LIVE-only
+  range, combined PL.03 rows are chronologically sorted, and the fixed LIVE
+  badge uses a valid theme token.
+- Re-review disposition: PASS_WITH_LIMITATIONS; no open HIGH, MEDIUM or LOW
+  finding remains.
+- Evidence: PostgreSQL 17 regression 281 passed, 2 unrelated backup tests
+  deselected; frontend 19 passed; compile, JavaScript syntax, unbound-name and
+  diff checks passed; governed catalog passed and workspace doctor passed
+  25/25.
+- Browser discovery returned no available session, so rendered visual evidence
+  remains unavailable. No production data was changed.
+- Role transition: REVIEWER -> ORCHESTRATOR for operator handback.
+- Next move requires explicit authorization for commit/push/PR, production
+  rollout or FREEZE.
+
+## PL Report Source Evidence Publication Repair — 2026-08-03
+
+- Operator explicitly authorized commit and PR creation targeting
+  `hoangnmr/quanlyxalan:main`. Merge, deployment and FREEZE remain
+  unauthorized; user-owned `.claude/` remains excluded.
+- Independent read-only evidence review accepted two publication blockers:
+  the seed script must validate the admin connection that executes the
+  destructive reset, and the executable receipt must verify combined PL.02
+  independently from combined PL.03.
+- Additional evidence hygiene scope: align log names/statuses, remove sample
+  credentials, record reproducible command/version metadata, correct mobile
+  evidence claim boundaries, synchronize the User Guide, catalog and
+  implementation truth, and preserve the unavailable-browser limitation.
+- Phase/role transition: REVIEW/REVIEWER -> BUILD/REPAIR_WORKER.
+- BUILD acknowledgment: changes are limited to the accepted evidence,
+  documentation, continuity and test repairs plus the already authorized
+  report-source implementation set. No production data reset, merge,
+  deployment or FREEZE is authorized.
+- Repair result: both destructive database connections are constrained to
+  local hosts and named databases; PL.02 and PL.03 combined success/overlap
+  have separate XLSX/log receipts; obsolete ambiguous artifacts were removed;
+  local PostgreSQL evidence is accurately labelled 16.11 while PostgreSQL 17
+  remains a separate regression claim; User Guide, catalog and implementation
+  truth are synchronized.
+- Independent browser discovery returned no available session. Existing local
+  Chromium screenshots are retained, but the report now marks the dedicated
+  mobile annex selector as not directly captured rather than substituting mock
+  evidence.
+- Review evidence: report verifier passed PL.01 LIVE/422, historical PL.02,
+  per-call historical PL.03, combined PL.02/PL.03 and both 409 overlap guards;
+  five seed safety rejection cases passed; frontend 19/19; application suite
+  281 passed with two backup-only environment failures because `pg_dump` is
+  absent; compile, JavaScript syntax, unbound-name, catalog, JSON, relative
+  links, XLSX package, secret and diff checks passed.
+- Review disposition: `PASS_WITH_LIMITATIONS`; no open HIGH, MEDIUM or LOW
+  finding remains. Limitations are the unavailable new browser frame and the
+  local missing `pg_dump`; the PR quality gate owns the PostgreSQL 17 client
+  rerun.
+- Phase/role transition: BUILD/REPAIR_WORKER -> REVIEW/REVIEWER ->
+  REVIEW/COMMIT_STEWARD under the operator's explicit commit and PR authority.
+- Publication scope is the exact reviewed historical snapshot and PL report
+  source integration changed set, including evidence and governed truth;
+  `.claude/` is excluded. Merge, deployment and FREEZE remain unauthorized.

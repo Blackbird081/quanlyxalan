@@ -232,19 +232,25 @@ ghép, thay vì sao chép nguyên số liệu thủ công của PL.03 cũ.
 
 ## 8. Báo cáo hoạt động
 
-### Hai luồng xuất PL.03
+### Chọn nguồn xuất PL.02 và PL.03
 
-Hai nút xuất PL.03 tạo cùng biểu mẫu Excel nhưng là hai workflow độc lập:
+Tại **Báo cáo hoạt động**, một bộ chọn gọn dùng chung cho PL.02 và PL.03:
 
-| Nơi xuất | Nguồn dữ liệu | Mục đích |
-|---|---|---|
-| **Báo cáo hoạt động → PL.03** | Phiếu khai báo **Đã duyệt** và hồ sơ phương tiện trong hệ thống | Báo cáo hoạt động LIVE theo khoảng ngày |
-| **Import dữ liệu → Lịch sử / TOS → Xuất PL.03** | TOS Berth và chi tiết container đã import, đối soát, xác nhận | Tái lập báo cáo lịch sử theo tháng |
+- **LIVE**: dùng phiếu khai báo đã duyệt;
+- **LỊCH SỬ / TOS**: dùng Berth và chi tiết container đã import, đối soát và
+  xác nhận;
+- **KẾT HỢP**: ghép các tháng LIVE và TOS không chồng lấn.
 
-PL.03 trong **Báo cáo hoạt động** không lấy dữ liệu từ lịch sử import. PL.03
-trong **Import dữ liệu** không lấy dữ liệu từ phiếu khai báo LIVE. File PL.03
-cũ được import chỉ hỗ trợ bổ sung thông tin nền của phương tiện; sản lượng và
-thời gian của báo cáo lịch sử vẫn ưu tiên Berth và chi tiết TOS đã xác nhận.
+PL.01 luôn dùng LIVE và không thay đổi theo bộ chọn này. Nhãn nguồn trên từng
+thẻ PL.02/PL.03 cho biết chính xác file sắp xuất lấy từ đâu.
+
+Nút **Import dữ liệu → Lịch sử / TOS → Xuất nhanh PL.03** là lối tắt tới cùng
+nguồn TOS của PL.03 tại Báo cáo hoạt động, không phải một kho dữ liệu thứ hai.
+File PL.03 cũ được import chỉ hỗ trợ bổ sung thông tin nền của phương tiện;
+sản lượng và thời gian lịch sử vẫn ưu tiên Berth và chi tiết TOS đã xác nhận.
+
+Mỗi Berth call/chuyến được giữ thành một dòng PL.03 riêng theo ATB/ATD. Một
+sà lan quay vòng nhiều chuyến trong tháng không bị gộp thành một timeline.
 
 Không ghi nhận cùng một lượt hoạt động ở cả hai nguồn. Khi LIVE và LỊCH SỬ
 chồng lấn trong cùng kỳ, hệ thống không cho cộng thành báo cáo KẾT HỢP để tránh
@@ -261,12 +267,17 @@ tính trùng.
 Nếu LIVE và LỊCH SỬ chồng lấn trong cùng kỳ, hệ thống chặn việc cộng trùng và
 hiển thị mức độ dữ liệu có thể sử dụng.
 
+`PLATFORM_ADMIN` có thể lọc dashboard và file Excel thống kê theo **Cầu bến**.
+Mã bến lấy từ cột H của Berth và chỉ là chiều lọc của Báo cáo hoạt động; hệ
+thống không thêm Mã bến thành một cột của PL.03.
+
 ### Xuất báo cáo
 
 - Chọn tuần, tháng, quý hoặc năm theo nhu cầu.
 - Chọn **Xuất Excel** cho dashboard tổng hợp.
-- Các biểu PL.01, PL.02 và PL.03 vận hành tiếp tục được tạo từ phiếu đã duyệt.
-- PL.03 tái tạo từ TOS được xuất tại tab **Lịch sử / TOS** như hướng dẫn ở trên.
+- PL.01 luôn được tạo từ phiếu LIVE đã duyệt.
+- PL.02 và PL.03 dùng nguồn đang chọn: LIVE, LỊCH SỬ / TOS hoặc KẾT HỢP.
+- PL.03 lịch sử cũng có lối tắt tại tab **Import dữ liệu → Lịch sử / TOS**.
 
 PL.02 cho phép `PLATFORM_ADMIN` ghi một điều chỉnh có lý do. Điều chỉnh được
 lưu như delta có dấu vết và không sửa phiếu khai báo gốc.
