@@ -834,3 +834,21 @@ AI governance behavior.
 - Publication scope is the exact reviewed historical snapshot and PL report
   source integration changed set, including evidence and governed truth;
   `.claude/` is excluded. Merge, deployment and FREEZE remain unauthorized.
+
+## Historical Snapshot And Report Source PR Receipt — 2026-08-03
+
+- Reviewed commit after rebasing onto `upstream/main`:
+  `287427d592ffc552312ea4a0db5887eae3be957f` (`feat: integrate historical
+  TOS report sources`).
+- Post-rebase evidence: focused backend 12/12; frontend 19/19; Python compile,
+  JavaScript syntax, unbound-name, catalog, diff and secret-pattern checks
+  passed; workspace doctor passed 25/25.
+- Pushed fork branch:
+  `Blackbird081/quanlyxalan:feat/historical-report-source-integration`.
+- Canonical pull request: `https://github.com/hoangnmr/quanlyxalan/pull/11`.
+- GitHub reported the PR `OPEN` and `MERGEABLE`; quality gate run
+  `30779036098` was in progress when this receipt was written.
+- User-owned `.claude/` was not staged, committed or pushed.
+- Role transition: COMMIT_STEWARD -> ORCHESTRATOR after publication handback.
+  The canonical owner owns merge disposition. Production cleanup, deployment
+  and FREEZE remain unauthorized.

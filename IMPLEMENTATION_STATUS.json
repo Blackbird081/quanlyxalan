@@ -81,7 +81,9 @@
                      "docs/work_orders/WO_QLXL_REPORT_EXPORT_SOURCE_INTEGRATION_20260802.md",
                      "docs/reviews/REPORT_EXPORT_SOURCE_INTEGRATION_REVIEW_20260802.md",
                      "docs/reviews/REPORT_SOURCE_UI_UX_TEST_REPORT_20260803.md",
-                     "USER_GUIDE.md"
+                     "USER_GUIDE.md",
+                     "commit:287427d592ffc552312ea4a0db5887eae3be957f",
+                     "https://github.com/hoangnmr/quanlyxalan/pull/11"
                  ],
     "updatedAt":  "2026-08-03"
 }
