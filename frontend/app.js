@@ -9,7 +9,7 @@ const state = {
   portRegisterItems: [], portRegisterStats: {}, portRegisterPage: 1, portRegisterPageSize: 15,
   portRegisterSelected: new Set(), vesselSaveContext: 'customer-record',
   dashboardSearchSequence: 0,
-  analyticsSource: 'live',
+  analyticsSource: 'live', analyticsBerth: '', reportExportSource: 'live',
   reportingUnits: [], activeReportingUnitId: null, reportingUnitOrganizations: [],
   users: [], organizations: [], editingOrganization: null,
   auditLogPage: 1, auditLogEntityTypes: [],
@@ -2614,7 +2614,7 @@ function ensureHistoricalExportPanel() {
   const panel = document.createElement('section');
   panel.id = 'historical-pl03-export';
   panel.className = 'panel historical-export-panel';
-  panel.innerHTML = `<div><p class="eyebrow">KẾT QUẢ ĐỐI SOÁT</p><h2>PL.03 từ TOS</h2></div><div class="historical-export-actions">${pl03PeriodSelectsHtml()}<button id="export-historical-pl03" type="button" class="primary-button">Xuất PL.03</button></div>`;
+  panel.innerHTML = `<div><p class="eyebrow">LỐI TẮT TỪ IMPORT</p><h2>PL.03 nguồn Lịch sử / TOS</h2><p class="muted">Cùng nguồn dữ liệu với PL.03 tại Báo cáo hoạt động.</p></div><div class="historical-export-actions">${pl03PeriodSelectsHtml()}<button id="export-historical-pl03" type="button" class="primary-button">Xuất nhanh PL.03</button></div>`;
   historyPanel.before(panel);
   $('#export-historical-pl03').onclick = exportHistoricalPl03;
 }
@@ -2810,10 +2810,13 @@ async function renderHistoricalImportWorkspace() {
     <article class="historical-summary-card review"><small>Cần xử lý</small><strong>${number(item.review).toLocaleString('vi-VN')}</strong></article>
     <article class="historical-summary-card rejected"><small>Bị loại</small><strong>${number(item.rejected).toLocaleString('vi-VN')}</strong></article>`;
   const conflicts = item.conflictingImportIds || [];
+  const cumulativeSnapshot = item.snapshotMode === 'CUMULATIVE_SNAPSHOT';
   const conflictNotice = $('#historical-conflict-notice');
   conflictNotice.hidden = !conflicts.length;
   conflictNotice.innerHTML = conflicts.length
-    ? `<strong>Database đã xác nhận là Source of Truth</strong>Đã giữ nguyên ${number(item.sotRetainedCount).toLocaleString('vi-VN')} dòng trùng và chỉ stage ${number(item.newRowCount).toLocaleString('vi-VN')} phát sinh mới. Xác nhận bổ sung không thay bản cũ; chỉ tạo bản sửa đổi khi chủ động sửa dữ liệu. Lượt SOT: ${conflicts.map(id => `#${esc(id)}`).join(', ')}.` : '';
+    ? cumulativeSnapshot
+      ? `<strong>File lũy tiến đầy đủ</strong>File mới bao hàm ${number(item.sotRetainedCount).toLocaleString('vi-VN')} dữ liệu đang dùng và có ${number(item.newRowCount).toLocaleString('vi-VN')} phát sinh. Khi xác nhận, toàn bộ file mới trở thành snapshot hiện hành và các lượt cũ chuyển vào lịch sử. Lượt cũ: ${conflicts.map(id => `#${esc(id)}`).join(', ')}.`
+      : `<strong>File bổ sung một phần</strong>File thiếu ${number(item.missingActiveIdentityCount).toLocaleString('vi-VN')} dữ liệu đang dùng. Hệ thống chỉ stage ${number(item.newRowCount).toLocaleString('vi-VN')} phát sinh mới và không xóa phần đang có. Lượt SOT: ${conflicts.map(id => `#${esc(id)}`).join(', ')}.` : '';
   const reviewGuide = $('#historical-review-guide');
   reviewGuide.hidden = !item.review && !item.rejected;
   if (!reviewGuide.hidden) {
@@ -2835,7 +2838,9 @@ async function renderHistoricalImportWorkspace() {
   $('#historical-revision-reason').hidden = !conflicts.length;
   $('#activate-historical-revision').hidden = !conflicts.length || !item.newRowCount;
   $('#confirm-historical-import').textContent = conflicts.length
-    ? item.newRowCount
+    ? cumulativeSnapshot
+      ? `Dùng toàn bộ file mới · ${number(item.accepted) + number(item.review) + number(item.rejected)} dòng`
+      : item.newRowCount
       ? `Xác nhận ${number(item.newRowCount).toLocaleString('vi-VN')} phát sinh mới`
       : 'Dùng file mới · tạo bản sửa đổi'
     : item.sourceKind === 'tos_berth_call'
@@ -2951,6 +2956,8 @@ async function confirmHistoricalImport(action = null) {
       conflict_action: action,
       reason: reason || (action === 'MERGE_NEW_RECORDS'
         ? 'Bổ sung phát sinh mới; giữ nguyên database SOT đã xác nhận.'
+        : action === 'REPLACE_CUMULATIVE_SNAPSHOT'
+          ? 'Kích hoạt file lũy tiến đầy đủ và thay snapshot cũ.'
         : 'Người dùng chọn giữ bản đang dùng.'),
     } : {};
     const result = await api(`/api/historical-imports/${item.id}/confirm`, {
@@ -2997,15 +3004,31 @@ async function loadHistoricalImportHistory(page = state.historicalHistoryPage) {
     if ($('#historical-pl03-month') && !pl03PeriodValue()) {
       setPl03Period(state.historicalHistory.find(item => item.sourceKind === 'tos_berth_call' && item.reportingPeriod)?.reportingPeriod || '');
     }
+    const canDeleteHistory = item => state.currentUser?.role === 'PLATFORM_ADMIN' && ['PREVIEWED', 'REJECTED', 'SUPERSEDED'].includes(item.status);
     container.innerHTML = state.historicalHistory.length
-      ? `<table class="data-table responsive-table"><thead><tr><th>Mã</th><th>Nguồn</th><th>Kỳ</th><th>Kết quả</th><th>Bản sửa đổi</th><th>Trạng thái</th><th></th></tr></thead><tbody>${state.historicalHistory.map(item => `<tr><td data-label="Mã">#${item.id}<br><small>${fmtDate(item.createdAt)}</small></td><td data-label="Nguồn"><strong>${esc(HISTORICAL_SOURCE_LABELS[item.sourceKind] || item.sourceKind)}</strong><br><small title="${esc(item.sourceFilename)}">${esc(item.sourceFilename)}</small></td><td data-label="Kỳ">${esc(historicalEffectivePeriod(item, activeBerthPeriods))}</td><td data-label="Kết quả">${historicalResultCell(item)}</td><td data-label="Bản sửa đổi">${historicalRevCell(item)}</td><td data-label="Trạng thái" class="historical-status"><span class="table-badge ${historicalStatusTone(item.status)}">${esc(HISTORICAL_STATUS_LABELS[item.status] || item.status)}</span></td><td data-label="Thao tác" class="historical-history-action"><button type="button" class="outline-button" data-open-historical-import="${item.id}">${item.status === 'PREVIEWED' ? 'Tiếp tục' : 'Xem'}</button></td></tr>`).join('')}</tbody></table>`
+      ? `<table class="data-table responsive-table"><thead><tr><th>Mã</th><th>Nguồn</th><th>Kỳ</th><th>Kết quả</th><th>Bản sửa đổi</th><th>Trạng thái</th><th></th></tr></thead><tbody>${state.historicalHistory.map(item => `<tr><td data-label="Mã">#${item.id}<br><small>${fmtDate(item.createdAt)}</small></td><td data-label="Nguồn"><strong>${esc(HISTORICAL_SOURCE_LABELS[item.sourceKind] || item.sourceKind)}</strong><br><small title="${esc(item.sourceFilename)}">${esc(item.sourceFilename)}</small></td><td data-label="Kỳ">${esc(historicalEffectivePeriod(item, activeBerthPeriods))}</td><td data-label="Kết quả">${historicalResultCell(item)}</td><td data-label="Bản sửa đổi">${historicalRevCell(item)}</td><td data-label="Trạng thái" class="historical-status"><span class="table-badge ${historicalStatusTone(item.status)}">${esc(HISTORICAL_STATUS_LABELS[item.status] || item.status)}</span></td><td data-label="Thao tác" class="historical-history-action"><button type="button" class="outline-button" data-open-historical-import="${item.id}">${item.status === 'PREVIEWED' ? 'Tiếp tục' : 'Xem'}</button>${canDeleteHistory(item) ? `<button type="button" class="danger-link" data-delete-historical-import="${item.id}" data-delete-historical-name="${esc(item.sourceFilename)}">Xóa</button>` : ''}</td></tr>`).join('')}</tbody></table>`
       : empty('Chưa có dữ liệu lịch sử', 'Chọn một file TOS hoặc PL.03 cũ để tạo preview đầu tiên.');
     $$('[data-open-historical-import]', container).forEach(button => button.onclick = () => openHistoricalImport(Number(button.dataset.openHistoricalImport)));
+    $$('[data-delete-historical-import]', container).forEach(button => button.onclick = () => deleteHistoricalImport(Number(button.dataset.deleteHistoricalImport), button.dataset.deleteHistoricalName));
     renderHistoricalPagination($('#historical-history-pagination'), result, 'historical-history-page', loadHistoricalImportHistory);
   } catch (error) {
     container.innerHTML = empty('Không thể tải lịch sử import', error.message);
     toast(error.message, true);
   }
+}
+
+async function deleteHistoricalImport(importId, filename) {
+  if (!window.confirm(`Xóa vĩnh viễn lịch sử #${importId} · ${filename}? Dữ liệu đang dùng không được phép xóa.`)) return;
+  try {
+    await api(`/api/historical-imports/${importId}`, {method:'DELETE'});
+    if (state.historicalImport?.id === importId) {
+      state.historicalImport = null;
+      $('#historical-preview').hidden = true;
+      updateHistoricalSteps(null);
+    }
+    toast(`Đã xóa lịch sử import #${importId}.`);
+    await loadHistoricalImportHistory(1);
+  } catch (error) { toast(error.message, true); }
 }
 
 // Authenticated download: plain `location.href` navigation cannot carry the
@@ -3022,9 +3045,33 @@ async function downloadFile(path, filename) {
   URL.revokeObjectURL(url);
 }
 
+const REPORT_EXPORT_SOURCE_LABELS = {
+  live: 'LIVE', historical: 'LỊCH SỬ / TOS', combined: 'KẾT HỢP',
+};
+const REPORT_EXPORT_SOURCE_HELP = {
+  live: 'Dùng phiếu LIVE đã duyệt. PL.01 luôn dùng LIVE.',
+  historical: 'PL.02 lấy lượt, tấn và TEU từ TOS; PL.03 lấy từng chuyến từ Berth và chi tiết container. Trường không có nguồn sẽ để trống.',
+  combined: 'Ghép các tháng LIVE và TOS không trùng nhau. Hệ thống sẽ chặn nếu cùng tháng có cả hai nguồn.',
+};
+
+function renderReportExportSource() {
+  const source = state.reportExportSource;
+  $$('[data-report-source]').forEach(button => {
+    button.classList.toggle('active', button.dataset.reportSource === source);
+    button.setAttribute('aria-pressed', button.dataset.reportSource === source ? 'true' : 'false');
+  });
+  $('#report-source-help').textContent = REPORT_EXPORT_SOURCE_HELP[source];
+  const label = `Nguồn: ${REPORT_EXPORT_SOURCE_LABELS[source]}`;
+  $('#appendix2-source-label').textContent = label;
+  $('#appendix3-source-label').textContent = label;
+  const canAdjust = ['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role);
+  $('#report-adjustment-panel').hidden = !canAdjust || source !== 'live';
+}
+
 async function exportReport(kind) {
   let from = $('#report-from').value || '1900-01-01';
   let to = $('#report-to').value || '2999-12-31';
+  const source = kind === 'appendix1' ? 'live' : state.reportExportSource;
   if (kind === 'appendix2') {
     const month = $('#report-month').value;
     if (!month) { toast('Vui lòng chọn tháng báo cáo PL.02.', true); return; }
@@ -3033,7 +3080,8 @@ async function exportReport(kind) {
     to = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
   }
   try {
-    await downloadFile(`/api/reports/${kind}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, `report_${kind}_${from}_${to}.xlsx`);
+    const params = new URLSearchParams({from, to, source});
+    await downloadFile(`/api/reports/${kind}?${params}`, `report_${kind}_${source}_${from}_${to}.xlsx`);
   } catch (error) { toast(error.message, true); }
 }
 
@@ -3101,6 +3149,16 @@ function renderAnalyticsCoverage(data) {
     button.setAttribute('aria-pressed', button.dataset.source === data.source ? 'true' : 'false');
     button.onclick = () => loadReportAnalytics(data.period, button.dataset.source);
   });
+  const berthSelect = $('#analytics-berth-filter');
+  const berthFilters = data.filters || {berth:'', berths:[]};
+  state.analyticsBerth = berthFilters.berth || '';
+  const berthOptions = [...new Set([...(berthFilters.berths || []), state.analyticsBerth].filter(Boolean))];
+  berthSelect.innerHTML = `<option value="">Tất cả cầu bến</option>${berthOptions.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`;
+  berthSelect.value = state.analyticsBerth;
+  berthSelect.onchange = () => {
+    state.analyticsBerth = berthSelect.value;
+    loadReportAnalytics(data.period, state.analyticsSource);
+  };
   const coveragePanel = $('#analytics-coverage');
   coveragePanel.hidden = data.source === 'live' && !internal;
   $('#analytics-coverage-status').textContent = ANALYTICS_COVERAGE_LABELS[coverage.status] || coverage.status;
@@ -3121,7 +3179,9 @@ function renderAnalyticsCoverage(data) {
 async function loadReportAnalytics(period = 'month', source = state.analyticsSource) {
   try {
     const allowedSource = ['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role) ? source : 'live';
-    const data = await api(`/api/reports/analytics?period=${period}&source=${allowedSource}`);
+    const params = new URLSearchParams({period, source: allowedSource});
+    if (state.analyticsBerth) params.set('berth', state.analyticsBerth);
+    const data = await api(`/api/reports/analytics?${params}`);
     state.analyticsSource = data.source;
     $('#analytics-unavailable').hidden = true;
     $('#analytics-demo-notice').hidden = data.dataSource !== 'DEMO';
@@ -3170,7 +3230,9 @@ async function loadReportAnalytics(period = 'month', source = state.analyticsSou
 
 function exportAnalyticsReport() {
   const period = $('.period-switch button.active')?.dataset.period || 'month';
-  downloadFile(`/api/reports/analytics/export?period=${period}&source=${state.analyticsSource}`, `bao_cao_tong_hop_${state.analyticsSource}_${period}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+  const params = new URLSearchParams({period, source: state.analyticsSource});
+  if (state.analyticsBerth) params.set('berth', state.analyticsBerth);
+  downloadFile(`/api/reports/analytics/export?${params}`, `bao_cao_tong_hop_${state.analyticsSource}_${period}_${new Date().toISOString().slice(0, 10)}.xlsx`)
     .catch(error => toast(error.message, true));
 }
 
@@ -3481,7 +3543,7 @@ async function init() {
     const integrationJobs = $('#sync-jobs');
     if (integrationActions) integrationActions.hidden = !isAdmin;
     if (integrationJobs) integrationJobs.hidden = !isAdmin;
-    $('#report-adjustment-panel').hidden = !(isReviewer || isAdmin);
+    $('#report-adjustment-panel').hidden = !(isReviewer || isAdmin) || state.reportExportSource !== 'live';
 
   } catch (err) {
     state.currentUser = null;
@@ -3553,9 +3615,17 @@ async function init() {
   });
   $('#audit-log-clear-all')?.addEventListener('click', clearAllAuditLog);
   $('#report-adjustment-form').addEventListener('submit', saveReportAdjustment);
+  $$('[data-report-source]').forEach(button => {
+    button.onclick = () => {
+      state.reportExportSource = button.dataset.reportSource;
+      renderReportExportSource();
+    };
+  });
   $('#report-month').addEventListener('change', event => {
     $('#report-adjustment-form').elements.report_month.value = event.target.value;
-    loadReportAdjustments().catch(error => toast(error.message, true));
+    if (state.reportExportSource === 'live') {
+      loadReportAdjustments().catch(error => toast(error.message, true));
+    }
   });
 
   $('#add-crew').onclick = () => openCrew();
@@ -3590,7 +3660,9 @@ async function init() {
   $('#activate-historical-revision').onclick = () => confirmHistoricalImport('ACTIVATE_NEW_REVISION');
   $('#confirm-historical-import').onclick = () => confirmHistoricalImport(
     state.historicalImport?.conflictingImportIds?.length
-      ? state.historicalImport?.newRowCount
+      ? state.historicalImport?.snapshotMode === 'CUMULATIVE_SNAPSHOT'
+        ? 'REPLACE_CUMULATIVE_SNAPSHOT'
+        : state.historicalImport?.newRowCount
         ? 'MERGE_NEW_RECORDS'
         : 'ACTIVATE_NEW_REVISION'
       : null
@@ -3604,6 +3676,7 @@ async function init() {
   const today = new Date(); $('#report-to').value = today.toISOString().slice(0,10); $('#report-from').value = `${today.getFullYear()}-01-01`;
   $('#report-month').value = today.toISOString().slice(0, 7);
   $('#report-adjustment-form').elements.report_month.value = $('#report-month').value;
+  renderReportExportSource();
   if (['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role)) loadReportAdjustments().catch(error => toast(error.message, true));
   try {
     const organizationRequest = ['PORT_STAFF', 'PLATFORM_ADMIN'].includes(state.currentUser?.role)

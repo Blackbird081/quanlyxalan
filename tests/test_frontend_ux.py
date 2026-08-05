@@ -161,8 +161,9 @@ def test_historical_import_is_visually_and_semantically_separate_from_live_impor
     assert "function exportHistoricalPl03(" in app_js
     assert "/api/historical-imports/reconcile" in app_js
     assert "Xác nhận Berth & ghép Detail" in app_js
-    assert "PL.03 từ TOS" in app_js
-    assert ">Xuất PL.03<" in app_js
+    assert "PL.03 nguồn Lịch sử / TOS" in app_js
+    assert "Cùng nguồn dữ liệu với PL.03 tại Báo cáo hoạt động" in app_js
+    assert ">Xuất nhanh PL.03<" in app_js
     assert "ATB/ATD, TEU và tấn lấy từ Berth/Detail" not in app_js
     assert "function historicalEffectivePeriod(" in app_js
     assert "function renderHistoricalHistorySummary(" in app_js
@@ -197,8 +198,8 @@ def test_vessel_editor_omits_blank_optional_fields_before_save_and_upload():
     assert save_block.index("data.organization = {name: data.organization_name};") < save_block.index(normalize)
     assert save_block.index(normalize) < save_block.index("saved = await api(path")
     assert save_block.index("saved = await api(path") < save_block.index("/attachments?filename=")
-    assert '<script src="app.js?v=1.13.7" defer></script>' in index_html
-    assert '<link rel="stylesheet" href="styles.css?v=1.13.7">' in index_html
+    assert '<script src="app.js?v=1.13.9" defer></script>' in index_html
+    assert '<link rel="stylesheet" href="styles.css?v=1.13.9">' in index_html
 
 
 def test_vessel_lists_show_accessible_attachment_indicator_only_when_files_exist():
@@ -235,20 +236,27 @@ def test_vessel_lists_show_accessible_attachment_indicator_only_when_files_exist
     assert ".vessel-name-with-attachment" in styles_css
     assert ".vessel-attachment-indicator svg" in styles_css
     assert ".vessel-attachment-preview-dialog" in styles_css
-    assert '<script src="app.js?v=1.13.7" defer></script>' in index_html
-    assert '<link rel="stylesheet" href="styles.css?v=1.13.7">' in index_html
+    assert '<script src="app.js?v=1.13.9" defer></script>' in index_html
+    assert '<link rel="stylesheet" href="styles.css?v=1.13.9">' in index_html
 
 
-def test_historical_cumulative_import_explains_sot_incremental_merge():
+def test_historical_cumulative_import_explains_snapshot_and_admin_cleanup():
     index_html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
     app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
 
     assert 'id="activate-historical-revision"' in index_html
-    assert "Database đã xác nhận là Source of Truth" in app_js
+    assert "File lũy tiến đầy đủ" in app_js
+    assert "File bổ sung một phần" in app_js
     assert "sotRetainedCount" in app_js
     assert "newRowCount" in app_js
+    assert "missingActiveIdentityCount" in app_js
+    assert "'REPLACE_CUMULATIVE_SNAPSHOT'" in app_js
     assert "'MERGE_NEW_RECORDS'" in app_js
     assert "phát sinh mới" in app_js
+    assert "function deleteHistoricalImport(" in app_js
+    assert "data-delete-historical-import" in app_js
+    assert "state.currentUser?.role === 'PLATFORM_ADMIN'" in app_js
+    assert "['PREVIEWED', 'REJECTED', 'SUPERSEDED']" in app_js
     assert "'X-Reporting-Period': pl03PeriodValue()" in app_js
 
 
@@ -261,6 +269,10 @@ def test_report_dashboard_makes_source_coverage_and_overlap_explicit():
     assert 'data-source="live" class="active"' in index_html
     assert 'data-source="historical"' in index_html
     assert 'data-source="combined"' in index_html
+    assert 'id="analytics-berth-filter"' in index_html
+    assert "state.analyticsBerth" in app_js
+    assert "params.set('berth', state.analyticsBerth)" in app_js
+    assert ".analytics-berth-control" in styles_css
     assert 'id="analytics-coverage" class="analytics-coverage" aria-live="polite"' in index_html
     assert 'id="analytics-combined-blocked"' in index_html
     assert "const allowedSource = ['PORT_STAFF', 'PLATFORM_ADMIN'].includes" in app_js
@@ -270,6 +282,28 @@ def test_report_dashboard_makes_source_coverage_and_overlap_explicit():
     assert "Chọn rõ nguồn trước khi đọc hoặc xuất tổng" not in index_html
     assert "Thống kê luôn ghi rõ nguồn" not in index_html
     assert "Tính từ TOS đã xác nhận" not in app_js
+
+
+def test_report_exports_use_one_clear_source_selector_for_pl02_and_pl03():
+    index_html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    app_js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+    styles_css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+
+    assert index_html.count('class="segmented report-source-switch"') == 1
+    assert 'aria-label="Nguồn xuất PL.02 và PL.03"' in index_html
+    assert 'data-report-source="live" class="active"' in index_html
+    assert 'data-report-source="historical"' in index_html
+    assert 'data-report-source="combined"' in index_html
+    assert "Nguồn: LIVE cố định" in index_html
+    assert 'id="appendix2-source-label"' in index_html
+    assert 'id="appendix3-source-label"' in index_html
+    assert "reportExportSource: 'live'" in app_js
+    assert "kind === 'appendix1' ? 'live' : state.reportExportSource" in app_js
+    assert "Hệ thống sẽ chặn nếu cùng tháng có cả hai nguồn" in app_js
+    assert "source !== 'live'" in app_js
+    assert "LỐI TẮT TỪ IMPORT" in app_js
+    assert ".report-source-panel" in styles_css
+    assert ".report-card-source.fixed" in styles_css
 
 
 def test_wizard_step_order_customer_friendly():

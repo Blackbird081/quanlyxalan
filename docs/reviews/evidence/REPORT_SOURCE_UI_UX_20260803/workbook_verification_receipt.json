@@ -1,0 +1,52 @@
+{
+  "metadata": {
+    "execution_time": "2026-08-03T09:07:57+07:00",
+    "git_sha": "262bd5fdf5dc8966c3676280d8491bfb246879e2",
+    "worktree_dirty": true,
+    "postgresql_server_version": "16.11",
+    "database": "cangvu_ui_test",
+    "source_sha256": {
+      "backend/reports_api.py": "1837c0da2ab4b5d5c388fe7a0c8114263a055234af4b5dca6268187304608a3c",
+      "backend/historical_api.py": "7a11e803cca4a7474798e51a866ac37d8a762477aed027347b4be9d92eabc09d",
+      "frontend/app.js": "833abb2d937b8f984b3b167276cbe9f1e1779e9cc819bbcbf5a2a703876182c2",
+      "frontend/index.html": "23c8842e13d51e21fc017578960f0d6a4b850fc786ac7617afbc789bdc19be30"
+    }
+  },
+  "PL01_LIVE": {
+    "status": "PASS",
+    "live_export_status": 200,
+    "live_workbook_sha256": "0e20c8109e964ea75b3bab39c97e25c6b9da80efe04145289d6271281b975f85",
+    "invalid_source_refusal_status": 422,
+    "refusal_message": "PL.01 chỉ hỗ trợ nguồn LIVE vì dữ liệu TOS không đủ trường kế hoạch."
+  },
+  "PL02_TOS": {
+    "status": "PASS",
+    "export_status": 200,
+    "workbook_sha256": "051275f71f8010bfa7d6132c461c454842250e82025aaf4627894a42c4b49621",
+    "container_tons": 25,
+    "container_teu": 2,
+    "unsupported_dry_tons_is_blank": true,
+    "unsupported_liquid_tons_is_blank": true
+  },
+  "PL03_TOS": {
+    "status": "PASS",
+    "export_status": 200,
+    "workbook_sha256": "009ef900b41ca1d66e4e136a915af77674f8a4985b822529f0b2b8279c57e7c8",
+    "distinct_salan_voyage_rows": 2,
+    "voyage_1_atb": "10/07/2026 08:00:00",
+    "voyage_2_atb": "22/07/2026 09:00:00",
+    "voyages_not_merged": true
+  },
+  "COMBINED_MODE": {
+    "status": "PASS",
+    "appendix2_non_overlapping_export_status": 200,
+    "appendix2_workbook_sha256": "06f5148529e6fedbd0beef8e8a8ca8098374dc44105aad6aca69e82bbf9311a9",
+    "appendix2_overlapping_refusal_status": 409,
+    "appendix2_conflict_message": "Không thể xuất PL.02 KẾT HỢP vì tháng 2026-07 có cả LIVE và TOS. Hãy chọn một nguồn để tránh cộng trùng.",
+    "appendix3_non_overlapping_export_status": 200,
+    "appendix3_workbook_sha256": "1d9310552bd9243164417fcd5b2a206e31038e9cdbf43bb7d79ba333b89ad354",
+    "appendix3_overlapping_refusal_status": 409,
+    "appendix3_conflict_message": "Không thể xuất PL.03 KẾT HỢP vì tháng 2026-07 có cả LIVE và TOS. Hãy chọn một nguồn để tránh trùng chuyến.",
+    "double_counting_prevented": true
+  }
+}

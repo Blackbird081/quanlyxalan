@@ -1564,6 +1564,11 @@ def test_xlsx_report_appendix1(client, auth_headers):
     assert sheet["A3"].value == "KẾ HOẠCH HOẠT ĐỘNG CỦA PHƯƠNG TIỆN THỦY NỘI ĐỊA"
     assert sheet["B7"].value == "PHƯƠNG TIỆN"
     assert sheet["I7"].value == "HOẠT ĐỘNG"
+    historical = client.get(
+        "/api/reports/appendix1?source=historical", headers=auth_headers,
+    )
+    assert historical.status_code == 422
+    assert "PL.01 chỉ hỗ trợ nguồn LIVE" in historical.text
 
 
 def test_xlsx_report_appendix2(client, auth_headers):
@@ -1588,6 +1593,10 @@ def test_xlsx_report_appendix3(client, auth_headers):
     assert sheet["B5"].value == "Tên PTTND"
     assert sheet["I5"].value == "Hàng hóa"
     assert sheet["AI5"].value == "Đại lý PTND"
+    combined_without_history = client.get(
+        "/api/reports/appendix3?source=combined", headers=auth_headers,
+    )
+    assert combined_without_history.status_code == 200, combined_without_history.text
 
 
 def test_static_only_port_salan_remains_in_pl01_and_pl03_with_blank_activity(
@@ -1746,17 +1755,43 @@ def test_historical_analytics_exposes_coverage_and_blocks_unresolved_combined_ov
         )
         db.add(call)
         db.flush()
-        db.add(HistoricalCargoRow(
-            reporting_unit_id=TEST_REPORTING_UNIT_ID, import_id=cargo_import.id,
-            source_sheet="Detail", source_row=2, port_call_id=call.id,
-            source_call_key_raw="H4B TEST | 2050 | 0001",
-            call_key_normalized="H4B TEST|2050|0001", container_size_code_raw="40HC",
-            teu_factor=2, full_empty_code_raw="E", trade_scope_raw="Hàng nội",
-            movement_method_raw="Hạ bãi", derived_direction="unload",
-            weight_raw="4.00", weight_tonnes=4.0, weight_state="PRESENT",
-            transform_version="test-v1", match_status="MATCHED",
-            validation_status="VALID", created_at=now_iso(),
-        ))
+        second_call = HistoricalPortCall(
+            reporting_unit_id=TEST_REPORTING_UNIT_ID, import_id=berth_import.id,
+            source_sheet="Berth", source_row=3, mapping_version="test-berth-v1",
+            vessel_name_raw="H4B TEST", vessel_name_normalized="H4B TEST",
+            call_year_raw="2050", voyage_number_raw="0002",
+            call_key_normalized="H4B TEST|2050|0002", source_berth_raw="K13",
+            arrival_berth="K13", departure_berth="K13",
+            actual_berthing_at_raw="16/07/2050 08:00", actual_berthing_at="2050-07-16T08:00:00",
+            actual_departure_at_raw="16/07/2050 16:00", actual_departure_at="2050-07-16T16:00:00",
+            reporting_month="2050-07", validation_status="VALID", created_at=now_iso(),
+        )
+        db.add(second_call)
+        db.flush()
+        db.add_all([
+            HistoricalCargoRow(
+                reporting_unit_id=TEST_REPORTING_UNIT_ID, import_id=cargo_import.id,
+                source_sheet="Detail", source_row=2, port_call_id=call.id,
+                source_call_key_raw="H4B TEST | 2050 | 0001",
+                call_key_normalized="H4B TEST|2050|0001", container_size_code_raw="40HC",
+                teu_factor=2, full_empty_code_raw="E", trade_scope_raw="Hàng nội",
+                movement_method_raw="Hạ bãi", derived_direction="unload",
+                weight_raw="4.00", weight_tonnes=4.0, weight_state="PRESENT",
+                transform_version="test-v1", match_status="MATCHED",
+                validation_status="VALID", created_at=now_iso(),
+            ),
+            HistoricalCargoRow(
+                reporting_unit_id=TEST_REPORTING_UNIT_ID, import_id=cargo_import.id,
+                source_sheet="Detail", source_row=3, port_call_id=second_call.id,
+                source_call_key_raw="H4B TEST | 2050 | 0002",
+                call_key_normalized="H4B TEST|2050|0002", container_size_code_raw="20GP",
+                teu_factor=1, full_empty_code_raw="F", trade_scope_raw="Hàng nội",
+                movement_method_raw="Hạ bãi", derived_direction="unload",
+                weight_raw="6.00", weight_tonnes=6.0, weight_state="PRESENT",
+                transform_version="test-v1", match_status="MATCHED",
+                validation_status="VALID", created_at=now_iso(),
+            ),
+        ])
         db.commit()
 
         historical = client.get(
@@ -1767,11 +1802,60 @@ def test_historical_analytics_exposes_coverage_and_blocks_unresolved_combined_ov
         body = historical.json()
         assert body["source"] == "historical"
         assert body["coverage"]["status"] == "COMPLETE"
-        assert body["kpis"]["trips"]["cur"] == 1.0
-        assert body["kpis"]["tons"]["cur"] == 4.0
-        assert body["kpis"]["teu"]["cur"] == 2.0
+        assert body["kpis"]["trips"]["cur"] == 2.0
+        assert body["kpis"]["tons"]["cur"] == 10.0
+        assert body["kpis"]["teu"]["cur"] == 3.0
         assert body["kpis"]["pax"]["cur"] is None
-        assert body["coverage"]["periods"][-1]["historicalCargoRows"] == 1
+        assert body["coverage"]["periods"][-1]["historicalCargoRows"] == 2
+        assert body["filters"]["berths"] == ["K12", "K13"]
+
+        berth_filtered = client.get(
+            "/api/reports/analytics?period=month&as_of=2050-07-15&source=historical&berth=K12",
+            headers=port_staff_headers,
+        )
+        assert berth_filtered.status_code == 200, berth_filtered.text
+        filtered_body = berth_filtered.json()
+        assert filtered_body["filters"]["berth"] == "K12"
+        assert filtered_body["kpis"]["trips"]["cur"] == 1.0
+        assert filtered_body["kpis"]["tons"]["cur"] == 4.0
+        assert filtered_body["kpis"]["teu"]["cur"] == 2.0
+        filtered_export = client.get(
+            "/api/reports/analytics/export?period=month&as_of=2050-07-15&source=historical&berth=K12",
+            headers=port_staff_headers,
+        )
+        assert filtered_export.status_code == 200
+
+        historical_pl02 = client.get(
+            "/api/reports/appendix2?to=2050-07-15&source=historical",
+            headers=port_staff_headers,
+        )
+        assert historical_pl02.status_code == 200, historical_pl02.text
+        pl02_sheet = load_workbook(io.BytesIO(historical_pl02.content)).active
+        assert pl02_sheet.cell(12, 3).value == 10
+        assert pl02_sheet.cell(12, 4).value == 3
+        assert pl02_sheet.cell(12, 5).value == 10
+        assert pl02_sheet.cell(12, 6).value == 3
+        assert pl02_sheet.cell(12, 13).value == 2
+        assert pl02_sheet.cell(12, 14).value == 2
+        assert all(pl02_sheet.cell(12, column).value is None for column in range(7, 13))
+        assert pl02_sheet.cell(12, 15).value is None
+        assert pl02_sheet.cell(12, 16).value is None
+
+        historical_pl03 = client.get(
+            "/api/reports/appendix3?from=2050-07-15&to=2050-07-16&source=historical",
+            headers=port_staff_headers,
+        )
+        assert historical_pl03.status_code == 200, historical_pl03.text
+        pl03_sheet = load_workbook(io.BytesIO(historical_pl03.content)).active
+        historical_rows = [
+            row for row in range(10, pl03_sheet.max_row + 1)
+            if pl03_sheet.cell(row, 2).value == "H4B TEST"
+        ]
+        assert len(historical_rows) == 2
+        assert [pl03_sheet.cell(row, 15).value for row in historical_rows] == [4, 6]
+        assert [pl03_sheet.cell(row, 33).value for row in historical_rows] == [
+            "15/07/2050 08:00", "16/07/2050 08:00",
+        ]
 
         cargo_import.status = "REVIEW"
         cargo_import.review_count = 1
@@ -1792,6 +1876,10 @@ def test_historical_analytics_exposes_coverage_and_blocks_unresolved_combined_ov
             headers=customer_headers,
         )
         assert customer_forbidden.status_code == 403
+        assert client.get(
+            "/api/reports/appendix2?to=2050-07-15&source=historical",
+            headers=customer_headers,
+        ).status_code == 403
 
         combined = client.get(
             "/api/reports/analytics?period=month&as_of=2050-07-15&source=combined",
@@ -1799,13 +1887,17 @@ def test_historical_analytics_exposes_coverage_and_blocks_unresolved_combined_ov
         )
         assert combined.status_code == 200
         assert combined.json()["combinedAllowed"] is True
-        assert combined.json()["kpis"]["tons"]["cur"] == 4.0
+        assert combined.json()["kpis"]["tons"]["cur"] == 10.0
 
         created = client.post(
             "/api/declarations",
             json=_minimal_declaration(
-                declaration_date="2050-07-15", eta="2050-07-15T09:00",
-                etd="2050-07-15T18:00", unload={"tons": 10, "teu": 1},
+                declaration_date="2050-08-15", eta="2050-08-15T09:00",
+                etd="2050-08-15T18:00",
+                unload={
+                    "cargo_type": "Container", "movement_type": "Nội địa đến",
+                    "tons": 10, "cont20_full": 1,
+                },
             ),
             headers=customer_headers,
         )
@@ -1815,6 +1907,37 @@ def test_historical_analytics_exposes_coverage_and_blocks_unresolved_combined_ov
         db.refresh(declaration)
         declaration.workflow_status = "APPROVED"
         declaration.status = "SUBMITTED"
+        db.commit()
+
+        combined_pl02 = client.get(
+            "/api/reports/appendix2?to=2050-08-15&source=combined",
+            headers=port_staff_headers,
+        )
+        assert combined_pl02.status_code == 200, combined_pl02.text
+        combined_pl02_sheet = load_workbook(io.BytesIO(combined_pl02.content)).active
+        assert combined_pl02_sheet.cell(12, 3).value == 10
+        assert combined_pl02_sheet.cell(12, 4).value == 1
+        assert combined_pl02_sheet.cell(12, 5).value == 20
+        assert combined_pl02_sheet.cell(12, 6).value == 4
+        assert combined_pl02_sheet.cell(12, 14).value == 3
+        combined_pl03 = client.get(
+            "/api/reports/appendix3?from=2050-07-01&to=2050-08-31&source=combined",
+            headers=port_staff_headers,
+        )
+        assert combined_pl03.status_code == 200, combined_pl03.text
+        combined_pl03_sheet = load_workbook(io.BytesIO(combined_pl03.content)).active
+        combined_rows = [
+            row for row in range(10, combined_pl03_sheet.max_row + 1)
+            if combined_pl03_sheet.cell(row, 2).value
+        ]
+        assert len(combined_rows) == 3
+        assert [combined_pl03_sheet.cell(row, 33).value for row in combined_rows] == [
+            "15/07/2050 08:00", "16/07/2050 08:00", "2050-08-15T09:00",
+        ]
+
+        declaration.declaration_date = "2050-07-15"
+        declaration.eta = "2050-07-15T09:00"
+        declaration.etd = "2050-07-15T18:00"
         db.commit()
 
         blocked = client.get(
@@ -1831,6 +1954,14 @@ def test_historical_analytics_exposes_coverage_and_blocks_unresolved_combined_ov
             headers=port_staff_headers,
         )
         assert export.status_code == 409
+        assert client.get(
+            "/api/reports/appendix2?to=2050-07-15&source=combined",
+            headers=port_staff_headers,
+        ).status_code == 409
+        assert client.get(
+            "/api/reports/appendix3?from=2050-07-01&to=2050-07-31&source=combined",
+            headers=port_staff_headers,
+        ).status_code == 409
     finally:
         if declaration_id:
             db.query(Declaration).filter(Declaration.id == declaration_id).delete()
@@ -2895,7 +3026,97 @@ def test_historical_batch_order_rechecks_pending_cargo_after_berth_confirmation(
         db.close()
 
 
-def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
+def test_platform_admin_deletes_only_inactive_historical_receipts(
+    client, auth_headers, port_staff_headers,
+):
+    vessel_name = f"DELETE HISTORY {uuid.uuid4().hex[:8]}"
+    vessel_id = _seed_historical_registered_vessel(vessel_name)
+    berth_headers = {2: "Năm", 3: "Chuyến", 5: "Tên tàu", 8: "Mã bến", 20: "ATB", 23: "ATD"}
+    content = _historical_fixture(berth_headers, [{
+        2: "2094", 3: "0001", 5: vessel_name, 8: "K12",
+        20: "18/07/2094 08:30:00", 23: "18/07/2094 13:00:00",
+    }])
+    preview = client.post(
+        "/api/historical-imports/preview", content=content,
+        headers={**auth_headers, "X-Source-Filename": "delete-preview.xlsx"},
+    )
+    assert preview.status_code == 200, preview.text
+    preview_id = preview.json()["id"]
+
+    forbidden = client.delete(
+        f"/api/historical-imports/{preview_id}", headers=port_staff_headers,
+    )
+    assert forbidden.status_code == 403
+    deleted = client.delete(
+        f"/api/historical-imports/{preview_id}", headers=auth_headers,
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["deleted"]["status"] == "PREVIEWED"
+    assert deleted.json()["sourceArchiveRetained"] is True
+    assert client.get(
+        f"/api/historical-imports/{preview_id}", headers=auth_headers,
+    ).status_code == 404
+
+    active_content = _historical_fixture(berth_headers, [{
+        2: "2094", 3: "0002", 5: vessel_name, 8: "K13",
+        20: "19/07/2094 08:30:00", 23: "19/07/2094 13:00:00",
+    }])
+    active_preview = client.post(
+        "/api/historical-imports/preview", content=active_content,
+        headers={**auth_headers, "X-Source-Filename": "active-history.xlsx"},
+    )
+    active_id = active_preview.json()["id"]
+    assert client.post(
+        f"/api/historical-imports/{active_id}/confirm", json={}, headers=auth_headers,
+    ).status_code == 200
+    protected = client.delete(
+        f"/api/historical-imports/{active_id}", headers=auth_headers,
+    )
+    assert protected.status_code == 409
+
+    replacement_content = _historical_fixture(berth_headers, [
+        {
+            2: "2094", 3: "0002", 5: vessel_name, 8: "K13",
+            20: "19/07/2094 08:30:00", 23: "19/07/2094 13:00:00",
+        },
+        {
+            2: "2094", 3: "0003", 5: vessel_name, 8: "K14",
+            20: "20/07/2094 08:30:00", 23: "20/07/2094 13:00:00",
+        },
+    ])
+    replacement_preview = client.post(
+        "/api/historical-imports/preview", content=replacement_content,
+        headers={**auth_headers, "X-Source-Filename": "replacement-history.xlsx"},
+    )
+    assert replacement_preview.status_code == 200, replacement_preview.text
+    replacement_id = replacement_preview.json()["id"]
+    assert replacement_preview.json()["snapshotMode"] == "CUMULATIVE_SNAPSHOT"
+    assert client.post(
+        f"/api/historical-imports/{replacement_id}/confirm",
+        json={"conflict_action": "REPLACE_CUMULATIVE_SNAPSHOT"},
+        headers=auth_headers,
+    ).status_code == 200
+    deleted_old = client.delete(
+        f"/api/historical-imports/{active_id}", headers=auth_headers,
+    )
+    assert deleted_old.status_code == 200, deleted_old.text
+    assert deleted_old.json()["deleted"]["status"] == "SUPERSEDED"
+    assert client.delete(
+        f"/api/historical-imports/{replacement_id}", headers=auth_headers,
+    ).status_code == 409
+
+    db = SessionLocal()
+    try:
+        db.query(HistoricalVesselLink).filter_by(import_id=replacement_id).delete(synchronize_session=False)
+        db.query(HistoricalPortCall).filter_by(import_id=replacement_id).delete(synchronize_session=False)
+        db.query(HistoricalReportImport).filter_by(id=replacement_id).delete(synchronize_session=False)
+        db.query(Vessel).filter_by(id=vessel_id).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_cumulative_historical_files_replace_snapshot_and_keep_each_business_identity(
     client, auth_headers,
 ):
     first_name = f"SOT BARGE A {uuid.uuid4().hex[:8]}"
@@ -2941,15 +3162,16 @@ def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
     cumulative_id = body["id"]
     assert body["sotRetainedCount"] == 1
     assert body["newRowCount"] == 1
-    assert body["accepted"] == 1
+    assert body["snapshotMode"] == "CUMULATIVE_SNAPSHOT"
+    assert body["accepted"] == 2
     assert body["conflictingImportIds"] == [original_id]
     preview_rows = client.get(
         f"/api/historical-imports/{cumulative_id}/rows", headers=auth_headers,
     ).json()["items"]
-    assert [row["vesselName"] for row in preview_rows] == [second_name]
+    assert [row["vesselName"] for row in preview_rows] == [first_name, second_name]
     merged = client.post(
         f"/api/historical-imports/{cumulative_id}/confirm",
-        json={"conflict_action": "MERGE_NEW_RECORDS"},
+        json={"conflict_action": "REPLACE_CUMULATIVE_SNAPSHOT"},
         headers=auth_headers,
     )
     assert merged.status_code == 200, merged.text
@@ -2990,9 +3212,10 @@ def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
     cargo_delta_body = cargo_delta.json()
     assert cargo_delta_body["sotRetainedCount"] == 2
     assert cargo_delta_body["newRowCount"] == 2
+    assert cargo_delta_body["snapshotMode"] == "CUMULATIVE_SNAPSHOT"
     assert client.post(
         f"/api/historical-imports/{cargo_delta_body['id']}/confirm",
-        json={"conflict_action": "MERGE_NEW_RECORDS"},
+        json={"conflict_action": "REPLACE_CUMULATIVE_SNAPSHOT"},
         headers=auth_headers,
     ).status_code == 200
 
@@ -3035,10 +3258,11 @@ def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
     pl03_delta_body = pl03_delta.json()
     assert pl03_delta_body["sotRetainedCount"] == 1
     assert pl03_delta_body["newRowCount"] == 1
+    assert pl03_delta_body["snapshotMode"] == "CUMULATIVE_SNAPSHOT"
     assert pl03_delta_body["conflictingImportIds"] == [pl03_id]
     assert client.post(
         f"/api/historical-imports/{pl03_delta_body['id']}/confirm",
-        json={"conflict_action": "MERGE_NEW_RECORDS"},
+        json={"conflict_action": "REPLACE_CUMULATIVE_SNAPSHOT"},
         headers=auth_headers,
     ).status_code == 200
 
@@ -3047,10 +3271,15 @@ def test_cumulative_historical_files_keep_confirmed_sot_and_stage_only_new_rows(
         original_import = db.get(HistoricalReportImport, original_id)
         original_call = db.query(HistoricalPortCall).filter_by(import_id=original_id).one()
         original_link_record = db.query(HistoricalVesselLink).filter_by(import_id=original_id).one()
-        assert original_import.status == "COMMITTED"
+        assert original_import.status == "SUPERSEDED"
         assert original_call.arrival_berth == "K12"
         assert original_call.vessel_id == first_vessel_id
         assert original_link_record.link_status == "ACCEPTED"
+        replacement_call = db.query(HistoricalPortCall).filter_by(
+            import_id=cumulative_id,
+            call_key_normalized=original_call.call_key_normalized,
+        ).one()
+        assert replacement_call.arrival_berth == "CHANGED-MUST-NOT-WIN"
         active_pl03_rows = db.query(HistoricalReportRow).join(
             HistoricalReportImport,
             HistoricalReportImport.id == HistoricalReportRow.import_id,
@@ -3236,7 +3465,7 @@ def test_historical_corrected_mapping_supersedes_same_source_without_period(
         db.close()
 
 
-def test_pl03_full_revision_supersedes_all_active_incremental_receipts(
+def test_pl03_partial_increment_and_cumulative_snapshot_require_matching_actions(
     client, auth_headers,
 ):
     period = "2093-08"
@@ -3252,7 +3481,7 @@ def test_pl03_full_revision_supersedes_all_active_incremental_receipts(
 
     first = client.post(
         "/api/historical-imports/preview",
-        content=_historical_pl03_fixture([first_row]),
+        content=_historical_pl03_fixture([first_row, second_row]),
         headers=headers,
     )
     assert first.status_code == 200, first.text
@@ -3263,11 +3492,21 @@ def test_pl03_full_revision_supersedes_all_active_incremental_receipts(
 
     incremental = client.post(
         "/api/historical-imports/preview",
-        content=_historical_pl03_fixture([first_row, second_row]),
+        content=_historical_pl03_fixture([second_row, third_row]),
         headers=headers,
     )
     assert incremental.status_code == 200, incremental.text
+    incremental_body = incremental.json()
     incremental_id = incremental.json()["id"]
+    assert incremental_body["snapshotMode"] == "PARTIAL_INCREMENT"
+    assert incremental_body["sotRetainedCount"] == 1
+    assert incremental_body["missingActiveIdentityCount"] == 1
+    assert incremental_body["newRowCount"] == 1
+    assert client.post(
+        f"/api/historical-imports/{incremental_id}/confirm",
+        json={"conflict_action": "REPLACE_CUMULATIVE_SNAPSHOT"},
+        headers=auth_headers,
+    ).status_code == 409
     assert client.post(
         f"/api/historical-imports/{incremental_id}/confirm",
         json={"conflict_action": "MERGE_NEW_RECORDS"},
@@ -3281,13 +3520,19 @@ def test_pl03_full_revision_supersedes_all_active_incremental_receipts(
     )
     assert revision.status_code == 200, revision.text
     revision_id = revision.json()["id"]
+    assert revision.json()["snapshotMode"] == "CUMULATIVE_SNAPSHOT"
     assert set(revision.json()["conflictingImportIds"]) == {first_id, incremental_id}
+    assert client.post(
+        f"/api/historical-imports/{revision_id}/confirm",
+        json={"conflict_action": "MERGE_NEW_RECORDS"},
+        headers=auth_headers,
+    ).status_code == 409
     activated = client.post(
         f"/api/historical-imports/{revision_id}/confirm",
         json={
-            "conflict_action": "ACTIVATE_NEW_REVISION",
+            "conflict_action": "REPLACE_CUMULATIVE_SNAPSHOT",
             "supersedes_import_id": first_id,
-            "reason": "Replace the complete period after correction",
+            "reason": "Replace the complete cumulative snapshot",
         },
         headers=auth_headers,
     )
@@ -3354,8 +3599,12 @@ def test_historical_pl03_export_uses_tos_facts_and_legacy_dimensions(
 
     berth = _historical_fixture(
         {2: "Năm", 3: "Chuyến", 5: "Tên tàu", 8: "Mã bến", 20: "ATB", 23: "ATD"},
-        [{2: "2089", 3: "0001", 5: vessel_name, 8: "K12",
-          20: "18/07/2089 08:30:00", 23: "18/07/2089 13:00:00"}],
+        [
+            {2: "2089", 3: "0001", 5: vessel_name, 8: "K12",
+             20: "18/07/2089 08:30:00", 23: "18/07/2089 13:00:00"},
+            {2: "2089", 3: "0002", 5: vessel_name, 8: "K13",
+             20: "20/07/2089 09:00:00", 23: "20/07/2089 15:00:00"},
+        ],
     )
     berth_preview = client.post(
         "/api/historical-imports/preview", content=berth,
@@ -3375,6 +3624,8 @@ def test_historical_pl03_export_uses_tos_facts_and_legacy_dimensions(
              20: "Hàng nội", 23: "Hạ bãi"},
             {3: "20GP", 5: "F", 17: f"{vessel_name} | 2089 | 0001", 18: "10.5",
              20: "Hàng nội", 23: "Hạ bãi"},
+            {3: "40HC", 5: "E", 17: f"{vessel_name} | 2089 | 0002", 18: "6.0",
+             20: "Hàng nội", 23: "Hạ bãi"},
         ],
     )
     cargo_preview = client.post(
@@ -3383,7 +3634,7 @@ def test_historical_pl03_export_uses_tos_facts_and_legacy_dimensions(
     )
     assert cargo_preview.status_code == 200, cargo_preview.text
     cargo_id = cargo_preview.json()["id"]
-    assert cargo_preview.json()["accepted"] == 2
+    assert cargo_preview.json()["accepted"] == 3
     assert client.post(
         f"/api/historical-imports/{cargo_id}/confirm", json={}, headers=auth_headers,
     ).status_code == 200
@@ -3395,21 +3646,29 @@ def test_historical_pl03_export_uses_tos_facts_and_legacy_dimensions(
     assert exported.status_code == 200, exported.text
     assert exported.headers["content-disposition"] == 'attachment; filename="PL03_TOS_2089-07.xlsx"'
     receipt = json.loads(exported.headers["x-historical-receipt"])
-    assert receipt["callCount"] == 1 and receipt["cargoRowCount"] == 2
+    assert receipt["callCount"] == 2 and receipt["cargoRowCount"] == 3
+    assert receipt["reportRowCount"] == 2
     sheet = load_workbook(io.BytesIO(exported.content), data_only=True).active
     assert sheet["A4"].value == "Đơn vị báo cáo: Test Reporting Unit"
     assert sheet["A2"].value and "tháng 7 năm 2089" in sheet["A2"].value
-    row_number = next(
+    vessel_rows = [
         row for row in range(10, sheet.max_row + 1)
         if sheet.cell(row, 3).value == registration
-    )
-    assert sheet.cell(row_number, 4).value == "Chở container"
-    assert sheet.cell(row_number, 15).value == 14.5  # O: domestic inbound tonnes from TOS
-    assert sheet.cell(row_number, 16).value == 1     # P: full TEU
-    assert sheet.cell(row_number, 17).value == 2     # Q: empty TEU
-    assert sheet.cell(row_number, 29).value == "Container"
-    assert sheet.cell(row_number, 33).value == "18/07/2089 08:30:00"
-    assert sheet.cell(row_number, 34).value == "18/07/2089 13:00:00"
+    ]
+    assert len(vessel_rows) == 2
+    first_row, second_row = vessel_rows
+    assert sheet.cell(first_row, 4).value == "Chở container"
+    assert sheet.cell(first_row, 15).value == 14.5  # O: trip 0001 domestic inbound tonnes
+    assert sheet.cell(first_row, 16).value == 1     # P: trip 0001 full TEU
+    assert sheet.cell(first_row, 17).value == 2     # Q: trip 0001 empty TEU
+    assert sheet.cell(first_row, 29).value == "Container"
+    assert sheet.cell(first_row, 33).value == "18/07/2089 08:30:00"
+    assert sheet.cell(first_row, 34).value == "18/07/2089 13:00:00"
+    assert sheet.cell(second_row, 15).value == 6
+    assert sheet.cell(second_row, 16).value is None
+    assert sheet.cell(second_row, 17).value == 2
+    assert sheet.cell(second_row, 33).value == "20/07/2089 09:00:00"
+    assert sheet.cell(second_row, 34).value == "20/07/2089 15:00:00"
 
     db = SessionLocal()
     try:

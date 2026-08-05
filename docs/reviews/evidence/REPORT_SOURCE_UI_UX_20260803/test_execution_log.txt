@@ -1,0 +1,46 @@
+======================================================================
+REPORT SOURCE EXPORT ENGINE VERIFICATION (PostgreSQL)
+Execution Time: 2026-08-03T09:07:57+07:00
+Git SHA: 262bd5fdf5dc8966c3676280d8491bfb246879e2
+Worktree dirty: true
+Command: python docs/reviews/evidence/REPORT_SOURCE_UI_UX_20260803/verify_reports_engine.py
+Target Database: cangvu_ui_test
+======================================================================
+
+PostgreSQL server_version: 16.11
+
+--- TEST 1: PL.01 (LIVE Only Contract) ---
+1a. GET /api/reports/appendix1?source=live -> Status 200
+    Saved sample: PL01_LIVE_sample.xlsx (6596 bytes)
+1b. GET /api/reports/appendix1?source=historical -> Status 422
+    Refusal detail: PL.01 chỉ hỗ trợ nguồn LIVE vì dữ liệu TOS không đủ trường kế hoạch.
+
+--- TEST 2: PL.02 Historical TOS Export (2026-04) ---
+2a. GET /api/reports/appendix2?source=historical&to=2026-04-30 -> Status 200
+    Saved sample: PL02_TOS_sample.xlsx (6307 bytes)
+    Excel Row 12 Inspection:
+      - Facility Name: '- Cảng Tân Thuận'
+      - Container Tonnes (TOS): 25
+      - Container TEU (TOS): 2
+      - Unsupported Dry Tonnes cell state: None (Must be None/Blank, not 0)
+      - Unsupported Liquid Tonnes cell state: None (Must be None/Blank, not 0)
+
+--- TEST 3: PL.03 Historical TOS Export & Per-Call Per-Voyage Rows (2026-07) ---
+3a. GET /api/reports/appendix3?source=historical&from=2026-07-01&to=2026-07-31 -> Status 200
+    Saved sample: PL03_TOS_sample.xlsx (8401 bytes)
+    Found 2 separate voyage rows for 'SG-9999':
+      - Row 10: Reg='SG-9999', ATB='10/07/2026 08:00:00', ATD='10/07/2026 14:00:00', Tonnes=12
+      - Row 11: Reg='SG-9999', ATB='22/07/2026 09:00:00', ATD='22/07/2026 18:00:00', Tonnes=28
+
+--- TEST 4: COMBINED Mode Export (Non-Overlap Success & Overlap Refusal) ---
+4a. GET /api/reports/appendix2?source=combined&to=2026-05-31 -> Status 200
+    Saved sample: PL02_COMBINED_sample.xlsx (6322 bytes)
+4b. GET /api/reports/appendix2?source=combined&to=2026-07-31 -> Status 409
+4c. GET /api/reports/appendix3?source=combined&from=2026-04-01&to=2026-05-31 -> Status 200
+    Saved sample: PL03_COMBINED_sample.xlsx (8435 bytes)
+4d. GET /api/reports/appendix3?source=combined&from=2026-07-01&to=2026-07-31 -> Status 409
+    PL.03 conflict message: Không thể xuất PL.03 KẾT HỢP vì tháng 2026-07 có cả LIVE và TOS. Hãy chọn một nguồn để tránh trùng chuyến.
+
+======================================================================
+ALL POSTGRESQL 16.11 REPORT ENGINE EXECUTABLE TESTS PASSED SUCCESSFULLY
+======================================================================
